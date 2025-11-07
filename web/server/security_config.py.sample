@@ -64,6 +64,13 @@ def get_safe_db_path() -> str:
     
     return db_path
 
+def get_safe_rules_path() -> str:
+    rules_path = os.getenv("RULES_JSON", "rules.json")
+    if ENVIRONMENT == "production":
+        if not rules_path.startswith(ALLOWED_DIR):
+            rules_path = f"{ALLOWED_DIR}/rules.json"
+    return rules_path
+
 # Security Headers
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",

@@ -1,6 +1,7 @@
+# make sure artifacts are not committed
 runways.csv
 airports.csv
-airports*.db
+airport*.db
 aip.db
 metar_taf.db
 cache

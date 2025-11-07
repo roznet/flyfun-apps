@@ -1,2 +1,6 @@
 # MCP Configuration files
 mcp-*.json
+
+# prevent accidental commit of the database and rules file
+airports.db
+rules.json
