@@ -22,7 +22,7 @@ web/
 │   ├── security_config.py  # Runtime security policy (copy from .sample)
 │   ├── dev.env             # Environment variables (copy from .sample)
 │   └── main.py             # FastAPI entry point
-├── start_server.py         # Convenience launcher (loads env, runs Uvicorn)
+├── start_server.ksh        # Convenience launcher (loads env, runs FastAPI)
 └── README.md               # This file
 ```
 
@@ -68,11 +68,10 @@ pip install -r requirements.txt
 
 ```bash
 cd web
-source server/dev.env
-python start_server.py        # uses dev.env + security_config settings
+./start_server.ksh $(which python3) server/dev.env
 ```
 
-`start_server.py` wraps Uvicorn with sensible defaults. You can also run `uvicorn server.main:app --reload` if preferred.
+`start_server.ksh` sources your env file and runs `server/main.py` with the interpreter you provide. You can also run `uvicorn server.main:app --reload` if preferred.
 
 ### Access the UI
 

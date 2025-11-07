@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
     db_path = get_safe_db_path()
     
     try:
+        logger.info(f"Loading model from database at '{db_path}'")
         db_storage = DatabaseStorage(db_path)
         model = db_storage.load_model()
         logger.info(f"Loaded model with {len(model.airports)} airports")
