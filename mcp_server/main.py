@@ -63,7 +63,7 @@ async def lifespan(app: FastMCP):
     db_storage = DatabaseStorage(db_path)
     _model = db_storage.load_model()
     # Load rules store
-    rules_path = os.environ.get("RULES_JSON", os.path.join(os.path.dirname(__file__), "rules.json"))
+    rules_path = os.environ.get("RULES_JSON", "rules.json")
     logger.info(f"Loading rules from '{rules_path}'")
     try:
         with open(rules_path, "r", encoding="utf-8") as f:
@@ -502,19 +502,19 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--database",
-        default="airports.db",
-        help="Database file (default: airports.db)",
+        default=None,
+        help="Database file (overrides AIRPORTS_DB environment variable)",
     )
     parser.add_argument(
         "--rules",
-        default=os.path.join(os.path.dirname(__file__), "rules.json"),
-        help="Rules JSON file (default: mcp_server/rules.json)",
+        default=None,
+        help="Rules JSON file (overrides RULES_JSON environment variable)",
     )
 
     args = parser.parse_args()
-    if args.database:
+    if args.database is not None:
         os.environ["AIRPORTS_DB"] = args.database
-    if args.rules:
+    if args.rules is not None:
         os.environ["RULES_JSON"] = args.rules
 
     if args.transport == "http":
