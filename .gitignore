@@ -43,3 +43,4 @@ ENV/.swiftpm
 Pods
 xcuserdata
 
+data/airports.db
