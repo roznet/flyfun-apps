@@ -44,3 +44,15 @@ Pods
 xcuserdata
 
 data/airports.db
+
+# Documentation and temporary files
+*_STATUS.md
+*_COMPLETE.md
+*_GUIDE.md
+*_ISSUE.md
+*_SUMMARY.md
+*_COMPARISON.md
+HOW_TO_*.md
+tail_logs.sh
+test_*.sh
+conversation_logs/

@@ -40,15 +40,33 @@ from security_config import (
 
 # Import API routes
 from api import airports, procedures, filters, statistics, chatbot
-# Old chat import (LangChain-based) - keeping for reference
-# from chat import ask as chat_ask
+# LangChain-based chat endpoint (alternative to streaming chatbot)
+from chat import ask as chat_ask
 
 # Import chatbot service
 from chatbot_service import ChatbotService
 
-# Configure logging
-logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
+# Configure logging with both file and console output
+log_dir = Path("/tmp/flyfun-logs")
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "web_server.log"
+
+# Create handlers
+file_handler = logging.FileHandler(log_file)
+console_handler = logging.StreamHandler()
+
+# Set format
+formatter = logging.Formatter(LOG_FORMAT)
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Configure root logger
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    handlers=[file_handler, console_handler]
+)
 logger = logging.getLogger(__name__)
+logger.info(f"Logging to file: {log_file}")
 
 # Global database storage
 db_storage = None
@@ -198,9 +216,9 @@ app.include_router(airports.router, prefix="/api/airports", tags=["airports"])
 app.include_router(procedures.router, prefix="/api/procedures", tags=["procedures"])
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
-app.include_router(chatbot.router, prefix="/api/chat", tags=["chatbot"])
-# Old LangChain-based chat endpoint (commented out)
-# app.include_router(chat_ask.router, tags=["chat"])
+# Chatbot endpoints: both streaming (OpenAI) and LangChain+MCP available
+app.include_router(chatbot.router, prefix="/api/chat", tags=["chatbot"])  # Streaming: /api/chat/stream
+app.include_router(chat_ask.router, tags=["chat"])  # LangChain+MCP: /chat/ask, /chat/health
 
 # Serve static files for client assets
 client_dir = Path(__file__).parent.parent / "client"

@@ -15,6 +15,7 @@ import json
 from fastmcp import FastMCP, Context
 
 from euro_aip.storage.database_storage import DatabaseStorage
+from euro_aip.storage.enrichment_storage import EnrichmentStorage
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.airport import Airport
 import logging
@@ -42,6 +43,7 @@ class AirportNearRoute(TypedDict):
 
 # ---- Global model storage for FastMCP 2.11 --------------------------------
 _model: Optional[EuroAipModel] = None
+_enrichment_storage: Optional[EnrichmentStorage] = None
 _rules: Optional[Dict[str, Any]] = None
 _rules_index: Optional[Dict[str, Any]] = None
 
@@ -51,10 +53,17 @@ def get_model() -> EuroAipModel:
         raise RuntimeError("Model not initialized. Server not started properly.")
     return _model
 
+def get_enrichment_storage() -> EnrichmentStorage:
+    """Get the global enrichment storage instance."""
+    if _enrichment_storage is None:
+        raise RuntimeError("Enrichment storage not initialized. Server not started properly.")
+    return _enrichment_storage
+
 # ---- Server with lifespan to manage resources --------------------------------
 @asynccontextmanager
 async def lifespan(app: FastMCP):
     global _model
+    global _enrichment_storage
     global _rules
     global _rules_index
     db_path = os.environ.get("AIRPORTS_DB", "airports.db")
@@ -62,6 +71,8 @@ async def lifespan(app: FastMCP):
     # Let FastMCP handle logging/levels via FASTMCP_LOG_LEVEL, etc.
     db_storage = DatabaseStorage(db_path)
     _model = db_storage.load_model()
+    _enrichment_storage = EnrichmentStorage(db_path)
+    logger.info("Enrichment storage initialized")
     # Load rules store
     rules_path = os.environ.get("RULES_JSON", "rules.json")
     logger.info(f"Loading rules from '{rules_path}'")
@@ -479,6 +490,238 @@ def get_airport_statistics(country: Optional[str] = None, ctx: Context = None) -
     ]
     return {"stats": stats, "pretty": "\n".join(pretty)}
 
+@mcp.tool(name="get_airport_pricing", description="Get pricing data (landing fees, fuel prices) from airfield.directory")
+def get_airport_pricing(icao_code: str, ctx: Context = None) -> Dict[str, Any]:
+    """
+    Get pricing data for an airport including landing fees by aircraft type and fuel prices.
+
+    Args:
+        icao_code: Airport ICAO code (e.g., EDAZ, LFMD)
+
+    Returns:
+        Dictionary with pricing data or message if not available
+    """
+    storage = get_enrichment_storage()
+    icao = icao_code.strip().upper()
+
+    if not icao:
+        raise ValueError("ICAO code is required")
+
+    pricing = storage.get_pricing_data(icao)
+
+    if not pricing:
+        return {
+            "found": False,
+            "icao_code": icao,
+            "pretty": f"No pricing data available for {icao}. Data may not be in airfield.directory or not yet synced."
+        }
+
+    # Build pretty output
+    pretty = [
+        f"**Pricing for {icao}**",
+        f"Source: {pricing.get('source', 'airfield.directory')}",
+        f"Currency: {pricing.get('currency', 'N/A')}",
+        ""
+    ]
+
+    # Landing fees
+    if any([pricing.get('landing_fee_c172'), pricing.get('landing_fee_da42'),
+            pricing.get('landing_fee_pc12'), pricing.get('landing_fee_sr22')]):
+        pretty.append("**Landing Fees:**")
+        if pricing.get('landing_fee_c172'):
+            pretty.append(f"  C172: {pricing['landing_fee_c172']} {pricing.get('currency', '')}")
+        if pricing.get('landing_fee_da42'):
+            pretty.append(f"  DA42: {pricing['landing_fee_da42']} {pricing.get('currency', '')}")
+        if pricing.get('landing_fee_sr22'):
+            pretty.append(f"  SR22: {pricing['landing_fee_sr22']} {pricing.get('currency', '')}")
+        if pricing.get('landing_fee_pc12'):
+            pretty.append(f"  PC12: {pricing['landing_fee_pc12']} {pricing.get('currency', '')}")
+        pretty.append("")
+
+    # Fuel prices
+    if any([pricing.get('avgas_price'), pricing.get('jeta1_price'), pricing.get('superplus_price')]):
+        pretty.append("**Fuel Prices:**")
+        if pricing.get('avgas_price'):
+            pretty.append(f"  AVGAS: {pricing['avgas_price']} {pricing.get('currency', '')}/L")
+        if pricing.get('jeta1_price'):
+            pretty.append(f"  Jet A1: {pricing['jeta1_price']} {pricing.get('currency', '')}/L")
+        if pricing.get('superplus_price'):
+            pretty.append(f"  SuperPlus: {pricing['superplus_price']} {pricing.get('currency', '')}/L")
+        if pricing.get('fuel_provider'):
+            pretty.append(f"  Provider: {pricing['fuel_provider']}")
+        pretty.append("")
+
+    # Additional info
+    if pricing.get('payment_available'):
+        pretty.append("Payment: Available")
+    if pricing.get('ppr_available'):
+        pretty.append("PPR: Available")
+
+    if pricing.get('last_updated'):
+        pretty.append(f"\nLast updated: {pricing['last_updated']}")
+
+    return {
+        "found": True,
+        "icao_code": icao,
+        "pricing": pricing,
+        "pretty": "\n".join(pretty)
+    }
+
+@mcp.tool(name="get_pilot_reviews", description="Get community pilot reviews (PIREPs) from airfield.directory")
+def get_pilot_reviews(icao_code: str, limit: int = 10, ctx: Context = None) -> Dict[str, Any]:
+    """
+    Get pilot reviews and ratings for an airport.
+
+    Args:
+        icao_code: Airport ICAO code (e.g., EDAZ, LFMD)
+        limit: Maximum number of reviews to return (default: 10)
+
+    Returns:
+        Dictionary with reviews or message if none available
+    """
+    storage = get_enrichment_storage()
+    icao = icao_code.strip().upper()
+
+    if not icao:
+        raise ValueError("ICAO code is required")
+
+    reviews = storage.get_pilot_reviews(icao, limit)
+
+    if not reviews:
+        return {
+            "found": False,
+            "icao_code": icao,
+            "count": 0,
+            "pretty": f"No pilot reviews available for {icao}."
+        }
+
+    # Calculate average rating
+    ratings = [r['rating'] for r in reviews if r.get('rating')]
+    avg_rating = sum(ratings) / len(ratings) if ratings else None
+
+    # Build pretty output
+    pretty = [
+        f"**Pilot Reviews for {icao}**",
+        f"Total reviews: {len(reviews)}",
+        f"Average rating: {avg_rating:.1f}/5.0 ⭐" if avg_rating else "Average rating: N/A",
+        ""
+    ]
+
+    for i, review in enumerate(reviews, 1):
+        rating_stars = "⭐" * review.get('rating', 0)
+        author = review.get('author_name') or "Anonymous"
+        pretty.append(f"**Review {i}** - {rating_stars} ({review.get('rating')}/5) by {author}")
+
+        # Use English comment, or fallback to any available language
+        comment = (review.get('comment_en') or
+                  review.get('comment_de') or
+                  review.get('comment_fr') or
+                  review.get('comment_it') or
+                  review.get('comment_es') or
+                  review.get('comment_nl'))
+
+        if comment:
+            # Truncate long comments
+            comment_display = comment[:200] + "..." if len(comment) > 200 else comment
+            pretty.append(f'  "{comment_display}"')
+
+        if review.get('created_at'):
+            pretty.append(f"  Date: {review['created_at'][:10]}")
+
+        pretty.append("")
+
+    return {
+        "found": True,
+        "icao_code": icao,
+        "count": len(reviews),
+        "average_rating": avg_rating,
+        "reviews": reviews,
+        "pretty": "\n".join(pretty)
+    }
+
+@mcp.tool(name="get_fuel_prices", description="Get fuel availability and prices from airfield.directory")
+def get_fuel_prices(icao_code: str, ctx: Context = None) -> Dict[str, Any]:
+    """
+    Get fuel availability and pricing for an airport.
+
+    Args:
+        icao_code: Airport ICAO code (e.g., EDAZ, LFMD)
+
+    Returns:
+        Dictionary with fuel data including types, prices, and provider
+    """
+    storage = get_enrichment_storage()
+    icao = icao_code.strip().upper()
+
+    if not icao:
+        raise ValueError("ICAO code is required")
+
+    # Get fuel availability
+    fuels = storage.get_fuel_availability(icao)
+
+    # Get pricing data for fuel prices
+    pricing = storage.get_pricing_data(icao)
+
+    if not fuels and not pricing:
+        return {
+            "found": False,
+            "icao_code": icao,
+            "pretty": f"No fuel data available for {icao}."
+        }
+
+    # Build pretty output
+    pretty = [
+        f"**Fuel Information for {icao}**",
+        ""
+    ]
+
+    if fuels:
+        pretty.append("**Available Fuel Types:**")
+        for fuel in fuels:
+            fuel_type = fuel.get('fuel_type', 'Unknown')
+            provider = fuel.get('provider')
+
+            # Try to get price from pricing data
+            price = None
+            if pricing:
+                if 'avgas' in fuel_type.lower():
+                    price = pricing.get('avgas_price')
+                elif 'jeta1' in fuel_type.lower() or 'jet a1' in fuel_type.lower():
+                    price = pricing.get('jeta1_price')
+                elif 'super' in fuel_type.lower():
+                    price = pricing.get('superplus_price')
+
+            fuel_line = f"  ✓ {fuel_type}"
+            if price:
+                currency = pricing.get('currency', 'EUR')
+                fuel_line += f" - {price} {currency}/L"
+            if provider:
+                fuel_line += f" (Provider: {provider})"
+
+            pretty.append(fuel_line)
+        pretty.append("")
+
+    if pricing:
+        if pricing.get('fuel_provider'):
+            pretty.append(f"**Fuel Provider:** {pricing['fuel_provider']}")
+
+        if pricing.get('payment_available'):
+            pretty.append("**Payment:** Available")
+
+        if pricing.get('ppr_available'):
+            pretty.append("**PPR:** Required")
+
+        if pricing.get('last_updated'):
+            pretty.append(f"\n**Last Updated:** {pricing['last_updated']}")
+
+    return {
+        "found": True,
+        "icao_code": icao,
+        "fuel_types": fuels,
+        "pricing": pricing,
+        "pretty": "\n".join(pretty)
+    }
+
 if __name__ == "__main__":
     import argparse
 
@@ -518,6 +761,7 @@ if __name__ == "__main__":
         os.environ["RULES_JSON"] = args.rules
 
     if args.transport == "http":
-        mcp.run(transport="http", host=args.host, port=args.port)
+        # Use "streamable-http" for langchain-mcp-adapters compatibility
+        mcp.run(transport="streamable-http", host=args.host, port=args.port)
     else:
         mcp.run()
