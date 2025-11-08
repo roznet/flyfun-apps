@@ -1,4 +1,4 @@
-#!/bin/ksh
+#!/bin/zsh
 
 # Simple launcher for the Euro AIP MCP server.
 # Usage: start_mcp.ksh /path/to/python /path/to/dev.env

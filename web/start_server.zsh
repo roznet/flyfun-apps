@@ -1,4 +1,4 @@
-#!/bin/ksh
+#!/bin/zsh
 
 # Simple launcher for the Euro AIP web server.
 # Usage: start_server.ksh /path/to/python /path/to/dev.env
