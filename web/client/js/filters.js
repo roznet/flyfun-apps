@@ -367,13 +367,23 @@ class FilterManager {
     async applyFilters() {
         try {
             this.showLoading();
-            
+
             // Update filters from UI
             this.updateFilters();
-            
+
             console.log('applyFilters - currentRoute:', this.currentRoute);
             console.log('applyFilters - currentFilters:', this.currentFilters);
-            
+
+            // Check if we're in filtered mode (chatbot results showing)
+            if (window.chatMapIntegration && window.chatMapIntegration.isFilteredMode) {
+                console.log('applyFilters - Applying filters to chatbot results');
+                // Apply filters to chat airports
+                window.chatMapIntegration.applyFiltersToChatAirports(this.currentFilters);
+                this.hideLoading();
+                this.resetApplyButton();
+                return;
+            }
+
             // Check if we have an active route search AND it's not null
             if (this.currentRoute && this.currentRoute.airports && this.currentRoute.airports.length > 0) {
                 console.log('applyFilters - Reapplying route search with new filters');
@@ -381,24 +391,24 @@ class FilterManager {
                 await this.handleRouteSearch(this.currentRoute.airports, true);
                 return;
             }
-            
+
             // Regular filter application (no active route)
             console.log('applyFilters - Applying regular filters to all airports');
-            
+
             // Load airports with filters
             const airports = await api.getAirports({
                 ...this.currentFilters
             });
-            
+
             // Update map with filtered airports (preserve current view)
             this.updateMapWithAirports(airports, true);
-            
+
             // Update statistics
             this.updateStatistics(airports);
-            
+
             // Show success message
             this.showSuccess(`Applied filters: ${airports.length} airports found (view preserved)`);
-            
+
         } catch (error) {
             console.error('Error applying filters:', error);
             this.showError('Error applying filters: ' + error.message);
@@ -637,11 +647,16 @@ class FilterManager {
         const borderCrossing = airports.filter(a => a.point_of_entry).length;
         const totalProcedures = airports.reduce((sum, a) => sum + a.procedure_count, 0);
 
-        // Update statistics cards
-        document.getElementById('total-airports').textContent = totalAirports.toLocaleString();
-        document.getElementById('airports-with-procedures').textContent = airportsWithProcedures.toLocaleString();
-        document.getElementById('border-crossing').textContent = borderCrossing.toLocaleString();
-        document.getElementById('total-procedures').textContent = totalProcedures.toLocaleString();
+        // Update statistics cards (with null checks)
+        const totalAirportsEl = document.getElementById('total-airports');
+        const airportsWithProceduresEl = document.getElementById('airports-with-procedures');
+        const borderCrossingEl = document.getElementById('border-crossing');
+        const totalProceduresEl = document.getElementById('total-procedures');
+
+        if (totalAirportsEl) totalAirportsEl.textContent = totalAirports.toLocaleString();
+        if (airportsWithProceduresEl) airportsWithProceduresEl.textContent = airportsWithProcedures.toLocaleString();
+        if (borderCrossingEl) borderCrossingEl.textContent = borderCrossing.toLocaleString();
+        if (totalProceduresEl) totalProceduresEl.textContent = totalProcedures.toLocaleString();
     }
 
     showLoading() {
@@ -789,7 +804,7 @@ class FilterManager {
         
         // Add max airports
         const maxAirports = document.getElementById('max-airports-filter').value;
-        if (maxAirports && maxAirports !== '1000') {
+        if (maxAirports && maxAirports !== '10000') {
             params.set('max_airports', maxAirports);
         }
         
@@ -919,14 +934,14 @@ class FilterManager {
     updateLegendMode() {
         const legendMode = document.getElementById('legend-mode-filter').value;
         console.log(`Legend mode changed to: ${legendMode}`);
-        
+
         if (airportMap) {
             airportMap.setLegendMode(legendMode);
             airportMap.updateLegend();
-            
+
             // Store current route information before clearing markers
             const currentRoute = this.currentRoute;
-            
+
             // Update the map markers to reflect the new legend mode
             if (this.airports && this.airports.length > 0) {
                 // Clear and re-add markers to update their appearance
@@ -934,26 +949,31 @@ class FilterManager {
                 this.airports.forEach(airport => {
                     airportMap.addAirport(airport);
                 });
-                
+
                 // If switching to procedure precision mode, load procedure lines in bulk
                 if (legendMode === 'procedure-precision') {
                     console.log('Switching to procedure precision mode, loading procedure lines in bulk...');
                     airportMap.loadBulkProcedureLines(this.airports);
                 }
-                
+
                 // Redraw route if there was an active route
                 if (currentRoute && currentRoute.airports) {
                     console.log('Redrawing route after legend mode change');
                     airportMap.displayRoute(
-                        currentRoute.airports, 
-                        currentRoute.distance_nm, 
+                        currentRoute.airports,
+                        currentRoute.distance_nm,
                         true, // preserve view
                         currentRoute.originalRouteAirports
                     );
                 }
             }
+
+            // Refresh chat markers to reflect the new legend mode
+            if (typeof chatMapIntegration !== 'undefined' && chatMapIntegration) {
+                chatMapIntegration.refreshMarkersForLegendMode();
+            }
         }
-        
+
         // Update URL after legend mode change
         this.updateURL();
     }

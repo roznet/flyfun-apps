@@ -195,7 +195,7 @@ class AirportMap {
         // Determine marker color based on current legend mode
         let color = '#ffc107'; // Default: yellow
         let radius = 6;
-        
+
         if (this.legendMode === 'runway-length') {
             // Runway length legend mode
             console.log(`Airport ${airport.ident}: longest_runway_length_ft = ${airport.longest_runway_length_ft}`);
@@ -214,6 +214,22 @@ class AirportMap {
                 // No runway length data
                 color = '#6c757d'; // Gray for unknown
                 radius = 4; // Smallest for unknown data
+            }
+        } else if (this.legendMode === 'country') {
+            // Country legend mode (based on ICAO prefix)
+            const icao = airport.ident || '';
+            if (icao.startsWith('LF')) {
+                color = '#007bff'; // Blue for France
+                radius = 7;
+            } else if (icao.startsWith('EG')) {
+                color = '#dc3545'; // Red for United Kingdom
+                radius = 7;
+            } else if (icao.startsWith('ED')) {
+                color = '#28a745'; // Green for Germany
+                radius = 7;
+            } else {
+                color = '#ffc107'; // Yellow for other countries
+                radius = 6;
             }
         } else {
             // Default airport type legend mode
@@ -270,7 +286,7 @@ class AirportMap {
         // Determine marker color based on current legend mode
         let color = '#ffc107'; // Default: yellow
         let radius = 6;
-        
+
         if (this.legendMode === 'runway-length') {
             // Runway length legend mode
             if (airport.longest_runway_length_ft) {
@@ -288,6 +304,22 @@ class AirportMap {
                 // No runway length data
                 color = '#6c757d'; // Gray for unknown
                 radius = 4; // Smallest for unknown data
+            }
+        } else if (this.legendMode === 'country') {
+            // Country legend mode (based on ICAO prefix)
+            const icao = airport.ident || '';
+            if (icao.startsWith('LF')) {
+                color = '#007bff'; // Blue for France
+                radius = 7;
+            } else if (icao.startsWith('EG')) {
+                color = '#dc3545'; // Red for United Kingdom
+                radius = 7;
+            } else if (icao.startsWith('ED')) {
+                color = '#28a745'; // Green for Germany
+                radius = 7;
+            } else {
+                color = '#ffc107'; // Yellow for other countries
+                radius = 6;
             }
         } else {
             // Default airport type legend mode
@@ -639,21 +671,19 @@ class AirportMap {
 
     displayAirportDetails(airport, procedures, runways, aipEntries) {
         const infoContainer = document.getElementById('airport-info');
-        const detailsContainer = document.getElementById('airport-details');
-        const aipContainer = document.getElementById('aip-data');
+        const airportContent = document.getElementById('airport-content');
         const noSelectionContainer = document.getElementById('no-selection');
-        const noAipDataContainer = document.getElementById('no-aip-data');
-        
+
         if (!airport) {
-            detailsContainer.style.display = 'none';
-            aipContainer.style.display = 'none';
-            noSelectionContainer.style.display = 'block';
-            noAipDataContainer.style.display = 'block';
+            // Hide tabbed content, show "no selection" message
+            if (airportContent) airportContent.style.display = 'none';
+            if (noSelectionContainer) noSelectionContainer.style.display = 'block';
             return;
         }
-        
-        detailsContainer.style.display = 'block';
-        noSelectionContainer.style.display = 'none';
+
+        // Show tabbed content, hide "no selection" message
+        if (airportContent) airportContent.style.display = 'flex';
+        if (noSelectionContainer) noSelectionContainer.style.display = 'none';
         
         // Display airport details (left panel)
         let html = `
@@ -768,18 +798,14 @@ class AirportMap {
     }
 
     displayAIPData(aipEntries) {
-        const aipContainer = document.getElementById('aip-data');
         const aipContentContainer = document.getElementById('aip-data-content');
-        const noAipDataContainer = document.getElementById('no-aip-data');
-        
+
+        if (!aipContentContainer) return;
+
         if (!aipEntries || aipEntries.length === 0) {
-            aipContainer.style.display = 'none';
-            noAipDataContainer.style.display = 'block';
+            aipContentContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No AIP data available</div>';
             return;
         }
-        
-        aipContainer.style.display = 'block';
-        noAipDataContainer.style.display = 'none';
 
         // Group by standardized field section
         const entriesBySection = {};

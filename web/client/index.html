@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Euro AIP Airport Explorer</title>
-    
+    <title>FlyFun - Aviation Assistant</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈️</text></svg>">
+
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Leaflet CSS -->
@@ -12,11 +13,313 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chatbot CSS -->
-    <link rel="stylesheet" href="css/chatbot.css?v=1.0">
+    <link rel="stylesheet" href="css/chatbot.css?v=6.7">
 
     <style>
+        /* ===== MODE TOGGLE BAR ===== */
+        .mode-toggle-bar {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .mode-toggle-switch {
+            display: inline-flex;
+            background: white;
+            border-radius: 8px;
+            padding: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .mode-toggle-switch input[type="radio"] {
+            display: none;
+        }
+
+        .mode-toggle-switch label {
+            padding: 10px 30px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            color: #6c757d;
+            border: none;
+            background: transparent;
+            margin: 0;
+        }
+
+        .mode-toggle-switch input:checked + label {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+        }
+
+        .mode-shortcuts {
+            font-size: 13px;
+        }
+
+        .mode-shortcuts kbd {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            font-size: 11px;
+        }
+
+        /* ===== MAIN LAYOUT ===== */
+        .main-content-row {
+            display: flex;
+            gap: 15px;
+            min-height: 630px;
+            width: 100%;
+            padding: 0 15px;
+            margin: 0 auto;
+        }
+
+        .left-panel-col,
+        .map-column-col,
+        .right-panel-col {
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .map-column-col {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
         #map {
-            height: 600px;
+            flex: 1;
+            min-height: 630px;
+            height: 100%;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        /* All Modes - Equal width columns with fixed height */
+        .main-content-row .left-panel-col,
+        .main-content-row .map-column-col,
+        .main-content-row .right-panel-col {
+            flex: 1 1 33.33%;
+            max-width: 33.33%;
+            min-width: 250px;
+            height: 630px;
+            max-height: 630px;
+        }
+
+        /* Chatbot Expanded Mode - Fixed for all zoom levels */
+        /* Account for 15px gap between columns: calc(50% - 7.5px) */
+        .main-content-row.chatbot-mode.expanded .left-panel-col {
+            flex: 0 0 calc(50% - 7.5px) !important;
+            max-width: calc(50% - 7.5px) !important;
+            min-width: calc(50% - 7.5px) !important;
+            width: calc(50% - 7.5px) !important;
+            box-sizing: border-box !important;
+        }
+
+        .main-content-row.chatbot-mode.expanded .map-column-col {
+            flex: 0 0 calc(50% - 7.5px) !important;
+            max-width: calc(50% - 7.5px) !important;
+            min-width: calc(50% - 7.5px) !important;
+            width: calc(50% - 7.5px) !important;
+            box-sizing: border-box !important;
+        }
+
+        .main-content-row.chatbot-mode.expanded .right-panel-col {
+            display: none !important;
+            flex: 0 0 0 !important;
+            width: 0 !important;
+            margin: 0 !important;
+        }
+
+        /* ===== LEFT PANEL ===== */
+        .left-panel {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-content {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .panel-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .panel-header h5 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .panel-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-panel-action {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .btn-panel-action:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* ===== CHATBOT PANEL ===== */
+        .quick-actions-new {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            overflow-x: auto;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .quick-actions-new::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .quick-actions-new::-webkit-scrollbar-thumb {
+            background: #dee2e6;
+            border-radius: 4px;
+        }
+
+        .chat-messages-new {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: #ffffff;
+            min-height: 0;
+        }
+
+        .chat-messages-new::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages-new::-webkit-scrollbar-thumb {
+            background: #dee2e6;
+            border-radius: 3px;
+        }
+
+        .chat-input-area-new {
+            padding: 16px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            flex-shrink: 0;
+        }
+
+        .chat-input-container-new {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        #chat-input-new {
+            flex: 1;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-size: 14px;
+            resize: none;
+            min-height: 44px;
+            max-height: 150px;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        #chat-input-new:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-chat-send {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .btn-chat-send:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-chat-send:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* ===== FILTERS PANEL ===== */
+        .filters-content {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .filters-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .filters-content::-webkit-scrollbar-thumb {
+            background: #dee2e6;
+            border-radius: 3px;
+        }
+
+        .filter-group {
+            margin-bottom: 20px;
+        }
+
+        .filter-group label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        /* ===== MAP ===== */
+        #map {
+            height: 630px;
             width: 100%;
             border-radius: 8px;
         }
@@ -56,7 +359,7 @@
             background-color: #f8f9fa;
             border-radius: 8px;
             padding: 15px;
-            height: 600px;
+            height: 630px;
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -80,37 +383,7 @@
             height: 100%;
         }
         
-        /* Remove the conflicting height rule */
-        /* #airport-details .airport-details-panel {
-            height: 100%;
-        } */
-        
-        /* Ensure the column containers have proper height */
-        .col-md-3:has(#airport-details),
-        .col-md-3:has(#aip-data) {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* Fallback for browsers that don't support :has() */
-        .airport-details-container,
-        .aip-data-container {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-        
-        /* Ensure the main content row has proper height */
-        .main-content-row {
-            min-height: 600px;
-        }
-        
-        /* Ensure all columns in the main row have the same height */
-        .main-content-row > .col-md-3,
-        .main-content-row > .col-md-6 {
-            display: flex;
-            flex-direction: column;
-        }
+        /* REMOVED - Using pure flexbox layout now, no Bootstrap grid classes */
         
         .aip-section {
             margin-bottom: 15px;
@@ -177,7 +450,23 @@
         .airport-detail-section .btn i {
             margin-right: 0.25rem;
         }
-        
+
+        /* Statistics Row - Match main content layout */
+        .stats-row {
+            display: flex;
+            gap: 15px;
+            width: 100%;
+            padding: 0 15px;
+            margin: 0 auto;
+        }
+
+        .stats-row .stats-card {
+            flex: 1 1 33.33%;
+            max-width: 33.33%;
+            min-width: 250px;
+            margin-bottom: 0;
+        }
+
         .stats-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -317,76 +606,667 @@
         .aip-preset-btn .icon {
             font-size: 1rem;
         }
+
+        /* ===== RIGHT PANEL ===== */
+        .right-panel {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            transition: all 0.3s ease;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            height: 750px; /* Fixed height */
+            max-height: 750px;
+            overflow: hidden; /* Parent doesn't scroll */
+        }
+
+        /* Airport content container */
+        #airport-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        /* Tab navigation styling */
+        #airport-tabs {
+            flex-shrink: 0;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        #airport-tabs .nav-link {
+            color: #6c757d;
+            border: none;
+            border-bottom: 3px solid transparent;
+            padding: 10px 15px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        #airport-tabs .nav-link:hover {
+            color: #667eea;
+            border-bottom-color: rgba(102, 126, 234, 0.3);
+        }
+
+        #airport-tabs .nav-link.active {
+            color: #667eea;
+            background: transparent;
+            border-bottom-color: #667eea;
+        }
+
+        /* Tab content styling */
+        .tab-content {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .tab-pane {
+            height: 100%;
+        }
+
+        .tab-pane-content {
+            height: 100%;
+            overflow-y: auto;
+            padding: 15px 0;
+        }
+
+        /* Scrollbar for tab panes */
+        .tab-pane-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .tab-pane-content::-webkit-scrollbar-thumb {
+            background: #dee2e6;
+            border-radius: 3px;
+        }
+
+        .tab-pane-content::-webkit-scrollbar-thumb:hover {
+            background: #adb5bd;
+        }
+
+        /* When right panel collapses, it becomes thin */
+        .right-panel-col.collapsed {
+            flex: 0 0 40px !important;
+            max-width: 40px !important;
+            min-width: 40px !important;
+        }
+
+        /* Map expands when right panel is collapsed - Fixed for all zoom levels */
+        /* Total to subtract: 30px (gaps) + 40px (collapsed panel) = 70px */
+        .map-column-col.map-expanded {
+            flex: 0 0 calc(66.67% - 46.67px) !important;
+            max-width: calc(66.67% - 46.67px) !important;
+            min-width: calc(66.67% - 46.67px) !important;
+            width: calc(66.67% - 46.67px) !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Left panel when map is expanded */
+        .left-panel-col.with-expanded-map {
+            flex: 0 0 calc(33.33% - 23.33px) !important;
+            max-width: calc(33.33% - 23.33px) !important;
+            min-width: calc(33.33% - 23.33px) !important;
+            width: calc(33.33% - 23.33px) !important;
+            box-sizing: border-box !important;
+        }
+
+        .right-panel.collapsed > *:not(.collapse-btn) {
+            display: none !important;
+        }
+
+        .collapse-btn {
+            position: absolute;
+            top: 10px;
+            left: 5px;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .collapse-btn:hover {
+            background: #f8f9fa;
+            transform: scale(1.1);
+        }
+
+        .right-panel.collapsed .collapse-btn {
+            left: 5px;
+        }
+
+        .right-panel.collapsed .collapse-btn i {
+            transform: rotate(180deg);
+        }
+
+        .legend-panel {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-top: auto;
+            flex-shrink: 0;
+        }
+
+        /* ===== RESPONSIVE DESIGN: IPAD ===== */
+        @media (max-width: 1024px) and (min-width: 768px) {
+            /* iPad: Reduce heights to fit in viewport */
+            .main-content-row {
+                min-height: 500px !important;
+            }
+
+            .main-content-row .left-panel-col,
+            .main-content-row .map-column-col,
+            .main-content-row .right-panel-col {
+                flex: 1 1 33.33%;
+                max-width: 33.33%;
+                min-width: 0;
+                height: 500px !important;
+                max-height: 500px !important;
+            }
+
+            #map {
+                min-height: 500px !important;
+                height: 500px !important;
+            }
+
+            .right-panel {
+                height: 500px !important;
+                max-height: 500px !important;
+            }
+
+            /* Ensure stats cards stay equal and compact on iPad */
+            .stats-row .stats-card {
+                flex: 1 1 33.33% !important;
+                max-width: 33.33% !important;
+                padding: 10px 12px !important;
+            }
+
+            .stats-card h4 {
+                font-size: 1.3rem !important;
+            }
+
+            .stats-card p {
+                font-size: 0.85rem !important;
+            }
+
+            /* Compact header and spacing on iPad */
+            .mt-2 {
+                margin-top: 0.5rem !important;
+            }
+
+            .mb-2 {
+                margin-bottom: 0.5rem !important;
+            }
+
+            h2 {
+                font-size: 1.5rem !important;
+            }
+
+            .text-muted {
+                font-size: 0.85rem !important;
+                margin-bottom: 0.5rem !important;
+            }
+
+            /* Reduce gap between sections */
+            .main-content-row {
+                gap: 10px !important;
+            }
+
+            .stats-row {
+                gap: 10px !important;
+                margin-bottom: 0.5rem !important;
+            }
+
+            /* Chatbot expanded mode MUST come last to override */
+            /* Account for gap: Use calc(50% - 5px) for 10px gap on iPad */
+            .main-content-row.chatbot-mode.expanded .left-panel-col {
+                flex: 0 0 calc(50% - 5px) !important;
+                max-width: calc(50% - 5px) !important;
+                min-width: calc(50% - 5px) !important;
+                width: calc(50% - 5px) !important;
+                box-sizing: border-box !important;
+            }
+
+            .main-content-row.chatbot-mode.expanded .map-column-col {
+                flex: 0 0 calc(50% - 5px) !important;
+                max-width: calc(50% - 5px) !important;
+                min-width: calc(50% - 5px) !important;
+                width: calc(50% - 5px) !important;
+                box-sizing: border-box !important;
+            }
+
+            .main-content-row.chatbot-mode.expanded .right-panel-col {
+                display: none !important;
+                flex: 0 0 0 !important;
+                width: 0 !important;
+                margin: 0 !important;
+            }
+
+            /* Right panel collapse - Map expands on iPad - Fixed for all zoom levels */
+            .right-panel-col.collapsed {
+                flex: 0 0 40px !important;
+                max-width: 40px !important;
+                min-width: 40px !important;
+            }
+
+            /* iPad has 10px gap, so total: 20px (gaps) + 40px (collapsed) = 60px */
+            .map-column-col.map-expanded {
+                flex: 0 0 calc(66.67% - 40px) !important;
+                max-width: calc(66.67% - 40px) !important;
+                min-width: calc(66.67% - 40px) !important;
+                width: calc(66.67% - 40px) !important;
+                box-sizing: border-box !important;
+            }
+
+            .left-panel-col.with-expanded-map {
+                flex: 0 0 calc(33.33% - 20px) !important;
+                max-width: calc(33.33% - 20px) !important;
+                min-width: calc(33.33% - 20px) !important;
+                width: calc(33.33% - 20px) !important;
+                box-sizing: border-box !important;
+            }
+        }
+
+        /* ===== RESPONSIVE DESIGN: IPHONE & MOBILE ===== */
+        @media (max-width: 767px) {
+            /* iPhone and Mobile */
+            .main-content-row {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .left-panel-col,
+            .map-column-col,
+            .right-panel-col {
+                flex: 1 1 auto !important;
+                width: 100% !important;
+            }
+
+            .main-content-row .left-panel-col {
+                order: 1;
+            }
+
+            .main-content-row .map-column-col {
+                order: 2;
+            }
+
+            .main-content-row .right-panel-col {
+                order: 3;
+            }
+
+            #map {
+                height: 400px;
+            }
+
+            .panel-content {
+                max-height: 500px;
+            }
+
+            .chat-messages-new {
+                max-height: 300px;
+            }
+
+            .filters-content {
+                max-height: 400px;
+            }
+
+            .mode-toggle-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .mode-toggle-switch label {
+                padding: 8px 20px;
+                font-size: 14px;
+            }
+
+            .mode-shortcuts {
+                display: none; /* Hide keyboard shortcuts on mobile */
+            }
+
+            /* Stack stats cards 2x2 on mobile */
+            #stats-row .col-md-3 {
+                flex: 0 0 50%;
+                max-width: 50%;
+            }
+
+            .stats-card h4 {
+                font-size: 1.2rem;
+            }
+
+            .stats-card p {
+                font-size: 0.8rem;
+            }
+
+            /* Right panel always visible on mobile, not collapsible */
+            .right-panel.collapsed {
+                width: 100% !important;
+                flex: 1 1 auto !important;
+            }
+
+            .collapse-btn {
+                display: none;
+            }
+
+            .right-panel.collapsed > * {
+                display: block !important;
+            }
+        }
+
+        /* ===== TOUCH-FRIENDLY ADJUSTMENTS ===== */
+        @media (hover: none) and (pointer: coarse) {
+            /* Touch devices: iPad/iPhone */
+            .btn-panel-action,
+            .btn-chat-send,
+            .collapse-btn {
+                min-width: 44px;
+                min-height: 44px;
+            }
+
+            .mode-toggle-switch label {
+                padding: 12px 25px;
+                min-height: 44px;
+            }
+
+            #chat-input-new {
+                font-size: 16px; /* Prevent zoom on iOS */
+            }
+
+            .form-control,
+            .form-select {
+                font-size: 16px; /* Prevent zoom on iOS */
+            }
+        }
+
+        /* ===== LANDSCAPE MODE: IPHONE ===== */
+        @media (max-width: 896px) and (orientation: landscape) {
+            #map {
+                height: 300px;
+            }
+
+            .panel-content {
+                max-height: 300px;
+            }
+
+            .stats-card {
+                padding: 8px 12px;
+            }
+
+            .stats-card h4 {
+                font-size: 1rem;
+            }
+        }
+
+        /* ===== IPAD PRO 12.9" ===== */
+        @media (min-width: 1024px) and (max-width: 1366px) {
+            /* Keep equal widths to match stats cards */
+            .main-content-row .left-panel-col,
+            .main-content-row .map-column-col,
+            .main-content-row .right-panel-col {
+                flex: 1 1 33.33% !important;
+                max-width: 33.33% !important;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid">
         <!-- Header -->
-        <div class="row mt-2">
+        <div class="row mt-2 align-items-center">
             <div class="col-12">
-                <h2 class="text-center mb-1">
-                    <i class="fas fa-plane"></i> Euro AIP Airport Explorer
-                    <button class="btn btn-outline-primary btn-sm ms-2" id="share-button" title="Copy shareable URL">
-                        <i class="fas fa-share-alt"></i> Share
-                    </button>
-                </h2>
-                <p class="text-center text-muted mb-2">Interactive map of European airports with AIP data and procedures (Border Crossing airports by default)</p>
+                <div class="d-flex justify-content-center align-items-center mb-2 position-relative" style="padding: 0 15px;">
+                    <h2 class="mb-0">
+                        <i class="fas fa-plane"></i> FlyFun
+                        <button class="btn btn-outline-primary btn-sm ms-2" id="share-button" title="Copy shareable URL">
+                            <i class="fas fa-share-alt"></i> Share
+                        </button>
+                    </h2>
+                    <div class="mode-toggle-switch position-absolute" style="right: 15px;">
+                        <input type="radio" name="mode" id="mode-chatbot" value="chatbot" checked>
+                        <label for="mode-chatbot"><i class="fas fa-robot"></i> Chatbot</label>
+                        <input type="radio" name="mode" id="mode-filters" value="filters">
+                        <label for="mode-filters"><i class="fas fa-filter"></i> Filters</label>
+                    </div>
+                </div>
+                <p class="text-center text-muted mb-2">Your intelligent aviation assistant - Interactive map with European airports, AIP data, and flight planning</p>
             </div>
         </div>
 
         <!-- Statistics Cards -->
-        <div class="row mb-2" id="stats-row">
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <h4 id="total-airports">-</h4>
-                    <p>Total Airports</p>
-                </div>
+        <div class="stats-row mb-2" id="stats-row">
+            <div class="stats-card">
+                <h4 id="total-airports">-</h4>
+                <p>Total Airports</p>
             </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <h4 id="airports-with-procedures">-</h4>
-                    <p>With Procedures</p>
-                </div>
+            <div class="stats-card">
+                <h4 id="airports-with-procedures">-</h4>
+                <p>With Procedures</p>
             </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <h4 id="border-crossing">-</h4>
-                    <p>Border Crossing</p>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stats-card">
-                    <h4 id="total-procedures">-</h4>
-                    <p>Total Procedures</p>
-                </div>
+            <div class="stats-card">
+                <h4 id="total-procedures">-</h4>
+                <p>Total Procedures</p>
             </div>
         </div>
 
+
         <!-- Main Content -->
-        <div class="row main-content-row">
-            <!-- Airport Details Panel (Left) -->
-            <div class="col-md-3 airport-details-container">
-                <div id="airport-details" style="display: none;">
-                    <div class="airport-details-panel">
-                        <h5><i class="fas fa-info-circle"></i> Airport Details</h5>
-                        <div class="airport-info" id="airport-info">
-                            <!-- Airport details will be populated here -->
+        <div class="main-content-row chatbot-mode">
+            <!-- Left Panel: Chatbot / Filters -->
+            <div class="left-panel-col">
+                <div id="left-panel" class="left-panel">
+                    <!-- Chatbot Panel -->
+                    <div id="chatbot-panel-new" class="panel-content">
+                        <div class="panel-header">
+                            <h5><i class="fas fa-robot"></i> FlyFun Assistant</h5>
+                            <div class="panel-actions">
+                                <button id="chatbot-expand-btn-new" class="btn-panel-action" title="Expand (Ctrl+E)">
+                                    <i class="fas fa-expand"></i>
+                                </button>
+                                <button id="chatbot-clear-btn-new" class="btn-panel-action" title="Clear conversation">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="quick-actions-new">
+                            <div id="quick-actions-container-new">
+                                <!-- Quick action buttons will be loaded here -->
+                            </div>
+                        </div>
+
+                        <!-- Chat Messages -->
+                        <div id="chat-messages-new" class="chat-messages-new">
+                            <!-- Messages will be added here dynamically -->
+                        </div>
+
+                        <!-- Chat Input -->
+                        <div class="chat-input-area-new">
+                            <div class="chat-input-container-new">
+                                <textarea
+                                    id="chat-input-new"
+                                    placeholder="Ask about airports, routes, or facilities..."
+                                    rows="1"
+                                ></textarea>
+                                <button id="chat-send-btn-new" class="btn-chat-send">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <div id="no-selection">
-                    <div class="text-center text-muted">
-                        <i class="fas fa-map-marker-alt fa-3x mb-3"></i>
-                        <p>Click on an airport marker to view details</p>
+
+                    <!-- Filters Panel -->
+                    <div id="filters-panel-new" class="panel-content" style="display: none;">
+                        <div class="panel-header">
+                            <h5><i class="fas fa-filter"></i> Classic Filters</h5>
+                        </div>
+
+                        <div class="filters-content">
+                            <!-- Search -->
+                            <div class="filter-group">
+                                <label for="search-input" class="form-label">Search Airports</label>
+                                <input type="text" class="form-control" id="search-input" placeholder="ICAO, name, city, or route...">
+                                <small class="form-text text-muted">For routes: space-separated ICAO codes</small>
+                            </div>
+
+                            <!-- Route Distance -->
+                            <div class="filter-group">
+                                <label for="route-distance" class="form-label">Route Distance (nm)</label>
+                                <input type="number" class="form-control" id="route-distance" value="50" min="1" max="500" step="5">
+                            </div>
+
+                            <!-- Country Filter -->
+                            <div class="filter-group">
+                                <label for="country-filter" class="form-label">Country</label>
+                                <select class="form-select" id="country-filter">
+                                    <option value="">All Countries</option>
+                                </select>
+                            </div>
+
+                            <!-- Maximum Airports Filter -->
+                            <div class="filter-group">
+                                <label for="max-airports-filter" class="form-label">Max Airports</label>
+                                <select class="form-select" id="max-airports-filter">
+                                    <option value="500">500</option>
+                                    <option value="1000">1000</option>
+                                    <option value="2000">2000</option>
+                                    <option value="5000">5000</option>
+                                    <option value="10000" selected>10000</option>
+                                </select>
+                            </div>
+
+                            <!-- Checkboxes -->
+                            <div class="filter-group">
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="has-procedures">
+                                            <label class="form-check-label" for="has-procedures">
+                                                Has Procedures
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="has-aip-data">
+                                            <label class="form-check-label" for="has-aip-data">
+                                                Has AIP Data
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mt-2">
+                                    <div class="col-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="has-hard-runway">
+                                            <label class="form-check-label" for="has-hard-runway">
+                                                Has Hard Runway
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="border-crossing-only">
+                                            <label class="form-check-label" for="border-crossing-only">
+                                                <i class="fas fa-passport"></i> Border Crossing Only
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="filter-group">
+                                <button class="btn btn-primary w-100 mb-2" id="apply-filters">
+                                    <i class="fas fa-search"></i> Apply Filters
+                                </button>
+                                <button class="btn btn-outline-secondary w-100" id="reset-zoom">
+                                    <i class="fas fa-expand-arrows-alt"></i> Reset Zoom
+                                </button>
+                            </div>
+
+                            <!-- Advanced AIP Filters Section -->
+                            <div class="filter-section mt-3">
+                                <div class="filter-section-header" data-bs-toggle="collapse" data-bs-target="#advanced-aip-filters" aria-expanded="false">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-cog"></i> Advanced AIP Filters
+                                        <i class="fas fa-chevron-down ms-auto"></i>
+                                    </h6>
+                                </div>
+
+                                <div class="collapse" id="advanced-aip-filters">
+                                    <div class="filter-section-content">
+                                        <!-- Predefined AIP Filter Presets -->
+                                        <div class="mb-3">
+                                            <label class="form-label fw-bold">Quick Filters:</label>
+                                            <div class="aip-preset-buttons" id="aip-preset-buttons">
+                                                <!-- Preset buttons will be loaded dynamically -->
+                                            </div>
+                                        </div>
+
+                                        <!-- Custom AIP Field Filter -->
+                                        <div class="mb-3">
+                                            <label class="form-label fw-bold">Custom Field Filter:</label>
+                                            <div class="row g-2">
+                                                <div class="col-12">
+                                                    <select class="form-select form-select-sm" id="aip-field-select">
+                                                        <option value="">Select AIP Field...</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-6">
+                                                    <select class="form-select form-select-sm" id="aip-operator-select">
+                                                        <option value="contains">Contains</option>
+                                                        <option value="equals">Equals</option>
+                                                        <option value="not_empty">Not Empty</option>
+                                                        <option value="starts_with">Starts With</option>
+                                                        <option value="ends_with">Ends With</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-6">
+                                                    <input type="text" class="form-control form-control-sm" id="aip-value-input" placeholder="Value...">
+                                                </div>
+                                                <div class="col-12">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary w-100" id="clear-aip-filter">
+                                                        <i class="fas fa-times"></i> Clear AIP Filter
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Active AIP Filter Display -->
+                                        <div id="active-aip-filter" class="alert alert-info py-2" style="display: none;">
+                                            <small>
+                                                <i class="fas fa-filter"></i>
+                                                <span id="active-aip-filter-text"></span>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="remove-aip-filter">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Map (Center) -->
-            <div class="col-md-6">
+            <div class="map-column-col">
                 <div id="map"></div>
-                
+
                 <!-- Loading Indicator -->
                 <div class="loading" id="loading">
                     <div class="spinner-border text-primary" role="status">
@@ -396,234 +1276,97 @@
                 </div>
             </div>
 
-            <!-- AIP Data Panel (Right) -->
-            <div class="col-md-3 aip-data-container">
-                <div id="aip-data" style="display: none;">
-                    <div class="aip-data-panel">
-                        <h5><i class="fas fa-file-alt"></i> AIP Data</h5>
-                        
-                        <!-- AIP Filter -->
-                        <div class="aip-filter mb-3">
-                            <div class="input-group">
-                                <input type="text" class="form-control" id="aip-filter-input" 
-                                       placeholder="Filter AIP entries...">
-                                <button class="btn btn-outline-secondary" type="button" id="aip-filter-clear">
-                                    <i class="fas fa-times"></i>
+            <!-- Right Panel: Airport Details + AIP + Legend -->
+            <div class="right-panel-col">
+                <div id="right-panel" class="right-panel">
+                    <button class="collapse-btn" id="right-panel-collapse" title="Collapse panel">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+
+                    <!-- No Selection Message -->
+                    <div id="no-selection">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-map-marker-alt fa-3x mb-3"></i>
+                            <p>Click on an airport marker to view details</p>
+                        </div>
+                    </div>
+
+                    <!-- Tabbed Content (shown when airport selected) -->
+                    <div id="airport-content" style="display: none;">
+                        <!-- Tab Navigation -->
+                        <ul class="nav nav-tabs" id="airport-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="details-tab" data-bs-toggle="tab" data-bs-target="#details-panel" type="button" role="tab">
+                                    <i class="fas fa-info-circle"></i> Details
                                 </button>
-                            </div>
-                        </div>
-                        
-                        <div class="aip-data-content" id="aip-data-content">
-                            <!-- AIP data will be populated here -->
-                        </div>
-                    </div>
-                </div>
-                
-                <div id="no-aip-data">
-                    <div class="text-center text-muted">
-                        <i class="fas fa-file-alt fa-3x mb-3"></i>
-                        <p>Select an airport to view AIP data</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Filters and Legend Row -->
-        <div class="row mt-3">
-            <!-- Filters Panel (Left) -->
-            <div class="col-md-8">
-                <div class="filter-panel-horizontal">
-                    <div class="row">
-                        <!-- Search -->
-                        <div class="col-md-3">
-                            <label for="search-input" class="form-label">Search Airports</label>
-                            <input type="text" class="form-control" id="search-input" placeholder="ICAO, name, city, or route (LFPO LFOB LFST)...">
-                            <small class="form-text text-muted">For routes: enter space-separated ICAO codes</small>
-                        </div>
-
-                        <!-- Route Distance -->
-                        <div class="col-md-2">
-                            <label for="route-distance" class="form-label">Route Distance (nm)</label>
-                            <input type="number" class="form-control" id="route-distance" value="50" min="1" max="500" step="5">
-                            <small class="form-text text-muted">Distance from route for airport search</small>
-                        </div>
-
-                        <!-- Country Filter -->
-                        <div class="col-md-2">
-                            <label for="country-filter" class="form-label">Country</label>
-                            <select class="form-select" id="country-filter">
-                                <option value="">All Countries</option>
-                            </select>
-                        </div>
-
-                        <!-- Maximum Airports Filter -->
-                        <div class="col-md-2">
-                            <label for="max-airports-filter" class="form-label">Max Airports</label>
-                            <select class="form-select" id="max-airports-filter">
-                                <option value="500">500</option>
-                                <option value="1000" selected>1000</option>
-                                <option value="2000">2000</option>
-                                <option value="5000">5000</option>
-                                <option value="10000">10000</option>
-                            </select>
-                        </div>
-
-                        <!-- Action Buttons -->
-                        <div class="col-md-1">
-                            <label class="form-label">&nbsp;</label>
-                            <div class="d-flex flex-column gap-1">
-                                <button class="btn btn-outline-primary btn-sm" id="apply-filters" title="Apply Filters (Auto-applies on change)">
-                                    <i class="fas fa-search"></i> Apply
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="aip-tab" data-bs-toggle="tab" data-bs-target="#aip-panel" type="button" role="tab">
+                                    <i class="fas fa-file-alt"></i> AIP Data
                                 </button>
-                                <button class="btn btn-outline-secondary btn-sm" id="reset-zoom" 
-                                        title="Reset Zoom (Ctrl+R)">
-                                    <i class="fas fa-expand-arrows-alt"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                            </li>
+                        </ul>
 
-                    <!-- Checkboxes Row -->
-                    <div class="row mt-2">
-                        <div class="col-12">
-                            <div class="d-flex gap-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="has-procedures">
-                                    <label class="form-check-label" for="has-procedures">
-                                        Has Procedures
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="has-aip-data">
-                                    <label class="form-check-label" for="has-aip-data">
-                                        Has AIP Data
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="has-hard-runway">
-                                    <label class="form-check-label" for="has-hard-runway">
-                                        Has Hard Runway
-                                    </label>
-                                </div>
-                                <!-- Border Crossing Filter -->
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="border-crossing-only">
-                                    <label class="form-check-label" for="border-crossing-only">
-                                        <i class="fas fa-passport"></i> Border Crossing Only
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Advanced AIP Filters Section -->
-                    <div class="filter-section">
-                        <div class="filter-section-header" data-bs-toggle="collapse" data-bs-target="#advanced-aip-filters" aria-expanded="false">
-                            <h6 class="mb-0">
-                                <i class="fas fa-cog"></i> Advanced AIP Filters
-                                <i class="fas fa-chevron-down ms-auto"></i>
-                            </h6>
-                        </div>
-                        
-                        <div class="collapse" id="advanced-aip-filters">
-                            <div class="filter-section-content">
-                                <!-- Predefined AIP Filter Presets -->
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">Quick Filters:</label>
-                                    <div class="aip-preset-buttons" id="aip-preset-buttons">
-                                        <!-- Preset buttons will be loaded dynamically -->
-                                    </div>
-                                </div>
-
-                                <!-- Custom AIP Field Filter -->
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">Custom Field Filter:</label>
-                                    <div class="row g-2">
-                                        <div class="col-md-4">
-                                            <select class="form-select form-select-sm" id="aip-field-select">
-                                                <option value="">Select AIP Field...</option>
-                                                <!-- AIP fields will be loaded dynamically -->
-                                            </select>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <select class="form-select form-select-sm" id="aip-operator-select">
-                                                <option value="contains">Contains</option>
-                                                <option value="equals">Equals</option>
-                                                <option value="not_empty">Not Empty</option>
-                                                <option value="starts_with">Starts With</option>
-                                                <option value="ends_with">Ends With</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-4">
-                                            <input type="text" class="form-control form-control-sm" id="aip-value-input" placeholder="Value...">
-                                        </div>
-                                        <div class="col-md-1">
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-aip-filter" title="Clear AIP Filter">
-                                                <i class="fas fa-times"></i>
-                                            </button>
+                        <!-- Tab Content -->
+                        <div class="tab-content" id="airport-tabs-content">
+                            <!-- Airport Details Tab -->
+                            <div class="tab-pane fade show active" id="details-panel" role="tabpanel">
+                                <div class="tab-pane-content">
+                                    <div id="airport-details">
+                                        <div class="airport-info" id="airport-info">
+                                            <!-- Airport details will be populated here -->
                                         </div>
                                     </div>
                                 </div>
+                            </div>
 
-                                <!-- Active AIP Filter Display -->
-                                <div id="active-aip-filter" class="alert alert-info py-2" style="display: none;">
-                                    <small>
-                                        <i class="fas fa-filter"></i> 
-                                        <span id="active-aip-filter-text"></span>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="remove-aip-filter">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    </small>
+                            <!-- AIP Data Tab -->
+                            <div class="tab-pane fade" id="aip-panel" role="tabpanel">
+                                <div class="tab-pane-content">
+                                    <div id="aip-data">
+                                        <!-- AIP Filter -->
+                                        <div class="aip-filter mb-3">
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control" id="aip-filter-input"
+                                                       placeholder="Filter AIP entries...">
+                                                <button class="btn btn-outline-secondary" type="button" id="aip-filter-clear">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div class="aip-data-content" id="aip-data-content">
+                                            <!-- AIP data will be populated here -->
+                                        </div>
+                                    </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Legend (Always Visible) -->
+                    <div class="legend-panel">
+                        <div class="legend-horizontal" id="legend">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0"><i class="fas fa-info-circle"></i> Legend</h6>
+                                <select class="form-select form-select-sm" id="legend-mode-filter" style="width: auto;">
+                                    <option value="airport-type" selected>Airport Type</option>
+                                    <option value="procedure-precision">Procedure Precision</option>
+                                    <option value="runway-length">Runway Length</option>
+                                    <option value="country">Country</option>
+                                </select>
+                            </div>
+                            <div id="legend-content">
+                                <!-- Legend content will be dynamically updated -->
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Legend Panel (Right) -->
-            <div class="col-md-4">
-                <div class="legend-horizontal" id="legend">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="mb-0"><i class="fas fa-info-circle"></i> Legend</h6>
-                        <select class="form-select form-select-sm" id="legend-mode-filter" style="width: auto;">
-                            <option value="airport-type" selected>Airport Type</option>
-                            <option value="procedure-precision">Procedure Precision</option>
-                            <option value="runway-length">Runway Length</option>
-                            <option value="country">Country</option>
-                        </select>
-                    </div>
-                    <div id="legend-content">
-                        <!-- Legend content will be dynamically updated -->
-                    </div>
-                </div>
-            </div>
         </div>
 
-        <!-- Charts Row -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h6><i class="fas fa-chart-pie"></i> Procedure Types Distribution</h6>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="procedure-chart" width="400" height="200"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h6><i class="fas fa-chart-bar"></i> Airports by Country</h6>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="country-chart" width="400" height="200"></canvas>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
+
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -631,13 +1374,21 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
+
     <!-- Application Scripts -->
-    <script src="js/api.js?v=4.7"></script>
-    <script src="js/map.js?v=4.7"></script>
-    <script src="js/filters.js?v=4.7"></script>
-    <script src="js/charts.js?v=4.7"></script>
-    <script src="js/chatbot.js?v=1.0"></script>
-    <script src="js/app.js?v=4.7"></script>
+    <script src="js/api.js?v=4.8"></script>
+    <script src="js/map.js?v=5.0"></script>
+    <script src="js/filters.js?v=5.1"></script>
+    <script src="js/charts.js?v=4.8"></script>
+
+    <!-- Chatbot Scripts -->
+    <script src="js/chatbot.js?v=5.4"></script>
+    <script src="js/chat-map-integration.js?v=5.4"></script>
+
+    <!-- Mode Manager (New Layout) -->
+    <script src="js/mode-manager.js?v=1.3"></script>
+
+    <!-- Main App (must be last) -->
+    <script src="js/app.js?v=5.2"></script>
 </body>
 </html> 

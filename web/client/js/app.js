@@ -50,6 +50,10 @@ class AirportExplorerApp {
         
         // Initialize map
         airportMap = new AirportMap('map');
+
+        // Expose to window for popup access
+        window.airportMap = airportMap;
+
         console.log('AirportMap created:', airportMap);
         
         // Initialize the map after creation
@@ -74,7 +78,33 @@ class AirportExplorerApp {
         // Initialize chart manager
         chartManager = new ChartManager();
         console.log('ChartManager created:', chartManager);
-        
+
+        // Initialize chatbot (legacy floating version - keep for backward compatibility)
+        chatbot = initChatbot();
+        console.log('Chatbot created:', chatbot);
+
+        // Initialize chat-map integration
+        if (airportMap && airportMap.map) {
+            chatMapIntegration = initChatMapIntegration(airportMap.map);
+
+            // Expose to window for mode-manager access
+            window.chatMapIntegration = chatMapIntegration;
+
+            // Link chatbot to map integration
+            if (chatbot && chatMapIntegration) {
+                chatbot.mapIntegration = chatMapIntegration;
+            }
+            console.log('Chat-Map integration created:', chatMapIntegration);
+        }
+
+        // Initialize mode manager for new layout
+        if (typeof initModeManager === 'function') {
+            modeManager = initModeManager();
+            console.log('Mode Manager created:', modeManager);
+        } else {
+            console.warn('Mode Manager not available');
+        }
+
         // Initialize charts after creation
         if (chartManager) {
             chartManager.initCharts();
@@ -98,11 +128,12 @@ class AirportExplorerApp {
             
             // Parse and apply URL parameters
             await this.applyURLParameters();
-            
-            // If no URL parameters were applied, set default border crossing filter
+
+            // Load all airports by default if no URL parameters
             if (!this.hasURLParameters()) {
-                filterManager.setDefaultBorderCrossingFilter();
-                console.log('Loaded border crossing airports by default');
+                // Load all airports without any default filter
+                await filterManager.applyFilters();
+                console.log('Loaded all airports by default');
             }
             
         } catch (error) {
@@ -502,6 +533,20 @@ class AirportExplorerApp {
 
 // Global app instance
 let app;
+
+// Global helper for map popup buttons
+window.app = {
+    loadAirportDetails: function(icao) {
+        console.log('loadAirportDetails called with ICAO:', icao);
+        if (window.airportMap && window.airportMap.onAirportClick) {
+            console.log('Calling onAirportClick for:', icao);
+            // Call onAirportClick with airport object containing ident
+            window.airportMap.onAirportClick({ ident: icao });
+        } else {
+            console.error('AirportMap not available. window.airportMap:', window.airportMap);
+        }
+    }
+};
 
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
