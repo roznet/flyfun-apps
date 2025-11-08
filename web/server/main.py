@@ -4,6 +4,16 @@ import sys
 import os
 from pathlib import Path
 
+# Load environment variables from .env file
+env_path = Path(__file__).parent / '.env'
+if env_path.exists():
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ[key.strip()] = value.strip()
+
 # Add the euro_aip package to the path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -29,8 +39,12 @@ from security_config import (
 )
 
 # Import API routes
-from api import airports, procedures, filters, statistics
-from chat import ask as chat_ask
+from api import airports, procedures, filters, statistics, chatbot
+# Old chat import (LangChain-based) - keeping for reference
+# from chat import ask as chat_ask
+
+# Import chatbot service
+from chatbot_service import ChatbotService
 
 # Configure logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
@@ -93,7 +107,13 @@ async def lifespan(app: FastAPI):
         procedures.set_model(model)
         filters.set_model(model)
         statistics.set_model(model)
-        
+
+        # Initialize chatbot service
+        logger.info("Initializing chatbot service...")
+        chatbot_service = ChatbotService()
+        chatbot.set_chatbot_service(chatbot_service)
+        logger.info("Chatbot service initialized")
+
         logger.info("Application startup complete")
         
     except Exception as e:
@@ -178,7 +198,9 @@ app.include_router(airports.router, prefix="/api/airports", tags=["airports"])
 app.include_router(procedures.router, prefix="/api/procedures", tags=["procedures"])
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
-app.include_router(chat_ask.router, tags=["chat"])
+app.include_router(chatbot.router, prefix="/api/chat", tags=["chatbot"])
+# Old LangChain-based chat endpoint (commented out)
+# app.include_router(chat_ask.router, tags=["chat"])
 
 # Serve static files for client assets
 client_dir = Path(__file__).parent.parent / "client"
