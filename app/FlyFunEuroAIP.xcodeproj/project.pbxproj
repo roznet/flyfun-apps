@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		42F7AED42EB7FA2800D2B686 /* RZFlight in Frameworks */ = {isa = PBXBuildFile; productRef = 42F7AED32EB7FA2800D2B686 /* RZFlight */; };
+		42FE37D82EBEF175005C2EB9 /* RZFlight in Frameworks */ = {isa = PBXBuildFile; productRef = 42FE37D72EBEF175005C2EB9 /* RZFlight */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,8 +31,6 @@
 		420ECDFC2EAE0D0A009FE6CE /* FlyFunEuroAIP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlyFunEuroAIP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE092EAE0D0B009FE6CE /* FlyFunEuroAIPTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE132EAE0D0B009FE6CE /* FlyFunEuroAIPUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		42D7D7942EBE483500F5D781 /* rzflight */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = rzflight; path = /Users/brice/Developer/public/rzflight; sourceTree = "<absolute>"; };
-		42F7AF022EB8012700D2B686 /* rzflight */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = rzflight; path = ../rzflight; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,7 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				42F7AED42EB7FA2800D2B686 /* RZFlight in Frameworks */,
+				42FE37D82EBEF175005C2EB9 /* RZFlight in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -82,12 +80,11 @@
 		420ECDF32EAE0D0A009FE6CE = {
 			isa = PBXGroup;
 			children = (
-				42F7AF022EB8012700D2B686 /* rzflight */,
 				420ECDFE2EAE0D0A009FE6CE /* FlyFunEuroAIP */,
 				420ECE0C2EAE0D0B009FE6CE /* FlyFunEuroAIPTests */,
 				420ECE162EAE0D0B009FE6CE /* FlyFunEuroAIPUITests */,
+				42FE37D62EBEF175005C2EB9 /* Frameworks */,
 				420ECDFD2EAE0D0A009FE6CE /* Products */,
-				42D7D7942EBE483500F5D781 /* rzflight */,
 			);
 			sourceTree = "<group>";
 		};
@@ -99,6 +96,13 @@
 				420ECE132EAE0D0B009FE6CE /* FlyFunEuroAIPUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		42FE37D62EBEF175005C2EB9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -121,7 +125,7 @@
 			);
 			name = FlyFunEuroAIP;
 			packageProductDependencies = (
-				42F7AED32EB7FA2800D2B686 /* RZFlight */,
+				42FE37D72EBEF175005C2EB9 /* RZFlight */,
 			);
 			productName = FlyFunEuroAIP;
 			productReference = 420ECDFC2EAE0D0A009FE6CE /* FlyFunEuroAIP.app */;
@@ -206,7 +210,7 @@
 			mainGroup = 420ECDF32EAE0D0A009FE6CE;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				42F7AED22EB7FA2800D2B686 /* XCRemoteSwiftPackageReference "rzflight" */,
+				42CB93C32EBEEF9D00F92050 /* XCRemoteSwiftPackageReference "rzflight" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 420ECDFD2EAE0D0A009FE6CE /* Products */;
@@ -632,20 +636,20 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		42F7AED22EB7FA2800D2B686 /* XCRemoteSwiftPackageReference "rzflight" */ = {
+		42CB93C32EBEEF9D00F92050 /* XCRemoteSwiftPackageReference "rzflight" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/roznet/rzflight";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.4;
+				minimumVersion = 1.1.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		42F7AED32EB7FA2800D2B686 /* RZFlight */ = {
+		42FE37D72EBEF175005C2EB9 /* RZFlight */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 42F7AED22EB7FA2800D2B686 /* XCRemoteSwiftPackageReference "rzflight" */;
+			package = 42CB93C32EBEEF9D00F92050 /* XCRemoteSwiftPackageReference "rzflight" */;
 			productName = RZFlight;
 		};
 /* End XCSwiftPackageProductDependency section */
