@@ -17,17 +17,30 @@ from mcp_client import MCPClient
 logger = logging.getLogger(__name__)
 
 
+def _mask_secret(secret: str, visible: int = 16) -> str:
+    """
+    Return a masked representation of a secret, keeping the first and last
+    `visible` characters (default 4) and replacing the middle with ellipsis.
+    """
+    if not secret:
+        return "(empty)"
+    if len(secret) <= visible * 2:
+        return secret[:1] + "***"
+    return f"{secret[:visible]}...{secret[-visible:]}"
+
+
 class ChatbotService:
     """Main chatbot service that orchestrates LLM and tool calls."""
 
     def __init__(self):
-        # Initialize primary LLM client (yunwu.ai)
-        self.llm_api_base = os.getenv("DEFAULT_LLM_API_BASE", "https://yunwu.ai/v1")
-        self.llm_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-2025-08-07")
+        # Initialize primary LLM client (OpenAI)
+        self.llm_api_base = os.getenv("DEFAULT_LLM_API_BASE", "https://api.openai.com/v1")
+        self.llm_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o")
         self.llm_api_key = os.getenv("DEFAULT_LLM_API_KEY", "")
         self.llm_temperature = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.0"))
         self.llm_max_tokens = int(os.getenv("DEFAULT_LLM_MAX_TOKENS", "-1"))
-
+        logger.info(f"Using API base: {self.llm_api_base}")
+        logger.info(f"Using API key: {_mask_secret(self.llm_api_key)}")
         self.client = OpenAI(
             api_key=self.llm_api_key,
             base_url=self.llm_api_base
@@ -44,7 +57,11 @@ class ChatbotService:
                 api_key=self.fallback_llm_api_key,
                 base_url=self.fallback_llm_api_base
             )
-            logger.info(f"Fallback client initialized: {self.fallback_llm_model}")
+            logger.info(
+                "Fallback client initialized: %s (API key %s)",
+                self.fallback_llm_model,
+                _mask_secret(self.fallback_llm_api_key),
+            )
 
         # Initialize MCP client for tool calls
         self.mcp_client = MCPClient()

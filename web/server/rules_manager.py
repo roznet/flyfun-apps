@@ -7,6 +7,7 @@ Handles loading, indexing, filtering, and comparing country-specific aviation ru
 import json
 import logging
 import os
+import re
 from typing import Dict, Any, List, Optional, Set
 from pathlib import Path
 
@@ -26,6 +27,7 @@ class RulesManager:
         self.rules_json_path = rules_json_path or os.getenv("RULES_JSON", "rules.json")
         self.rules = []
         self.rules_index = {}
+        self.question_map: Dict[str, Dict[str, Any]] = {}
         self.loaded = False
 
     def load_rules(self) -> bool:
@@ -66,44 +68,87 @@ class RulesManager:
             return False
 
     def _build_index(self):
-        """Build indexes for fast rule lookups."""
+        """Build indexes for fast rule lookups based on the consolidated rules schema."""
+
+        def _resolve_links(answer_entry: Dict[str, Any]) -> List[str]:
+            links = answer_entry.get("links")
+            if isinstance(links, list) and links:
+                return links
+            links_json = answer_entry.get("links_json")
+            if isinstance(links_json, list) and links_json:
+                return links_json
+            if isinstance(links_json, str) and links_json:
+                return [links_json]
+            if isinstance(links, str) and links:
+                return [links]
+            return []
+
         self.rules_index = {
             'by_country': {},
-            'by_category': {},
             'by_id': {},
-            'by_tags': {}
+            'categories': {},
+            'tags': {}
         }
+        self.question_map = {}
 
-        for rule in self.rules:
-            country = rule.get('country_code', 'UNKNOWN')
-            category = rule.get('category', 'General')
-            rule_id = rule.get('question_id', '')
-            tags = rule.get('tags', [])
+        for question in self.rules:
+            question_id = question.get('question_id') or question.get('id')
+            if not question_id:
+                continue
 
-            # Index by country
-            if country not in self.rules_index['by_country']:
-                self.rules_index['by_country'][country] = []
-            self.rules_index['by_country'][country].append(rule)
+            question_text = question.get('question_text') or question.get('question') or ""
+            question_raw = question.get('question_raw', "")
+            question_prefix = question.get('question_prefix', "")
+            category = question.get('category') or "General"
+            tags = question.get('tags') or []
+            answers_by_country = question.get('answers_by_country') or {}
 
-            # Index by category
-            if category not in self.rules_index['by_category']:
-                self.rules_index['by_category'][category] = []
-            self.rules_index['by_category'][category].append(rule)
+            question_info = {
+                'question_id': question_id,
+                'question_text': question_text,
+                'question_raw': question_raw,
+                'question_prefix': question_prefix,
+                'category': category,
+                'tags': tags,
+                'answers_by_country': answers_by_country
+            }
 
-            # Index by ID
-            if rule_id:
-                self.rules_index['by_id'][rule_id] = rule
-
-            # Index by tags
+            self.question_map[question_id] = question_info
+            self.rules_index['by_id'][question_id] = question_info
+            self.rules_index['categories'].setdefault(category, set()).add(question_id)
             for tag in tags:
-                if tag not in self.rules_index['by_tags']:
-                    self.rules_index['by_tags'][tag] = []
-                self.rules_index['by_tags'][tag].append(rule)
+                self.rules_index['tags'].setdefault(tag, set()).add(question_id)
 
-        # Log index details
-        country_counts = {c: len(rules) for c, rules in self.rules_index['by_country'].items()}
-        logger.info(f"Built index: {len(self.rules_index['by_country'])} countries, "
-                   f"{len(self.rules_index['by_category'])} categories")
+            for country_code, answer in answers_by_country.items():
+                if not country_code:
+                    continue
+                country_code = country_code.upper()
+                entry = {
+                    'question_id': question_id,
+                    'question_text': question_text,
+                    'question_raw': question_raw,
+                    'question_prefix': question_prefix,
+                    'category': category,
+                    'tags': tags,
+                    'country_code': country_code,
+                    'answer_html': answer.get('answer_html', ''),
+                    'links': _resolve_links(answer),
+                    'last_reviewed': answer.get('last_reviewed'),
+                    'confidence': answer.get('confidence'),
+                }
+                self.rules_index['by_country'].setdefault(country_code, []).append(entry)
+
+        # Sort country entries for deterministic output
+        for entries in self.rules_index['by_country'].values():
+            entries.sort(key=lambda x: x['question_text'].lower())
+
+        country_counts = {c: len(entries) for c, entries in self.rules_index['by_country'].items()}
+        logger.info(
+            "Built rules index: %d questions, %d countries, %d categories",
+            len(self.question_map),
+            len(self.rules_index['by_country']),
+            len(self.rules_index['categories'])
+        )
         logger.info(f"Rules per country: {country_counts}")
 
     def get_rules_for_country(
@@ -127,29 +172,39 @@ class RulesManager:
         """
         if not self.loaded:
             self.load_rules()
+        if not self.loaded:
+            return []
 
         country_code = country_code.upper()
-        rules = self.rules_index['by_country'].get(country_code, [])
-        logger.debug(f"Looking up {country_code} in index, found {len(rules)} rules. Available countries: {list(self.rules_index['by_country'].keys())}")
+        entries = list(self.rules_index.get('by_country', {}).get(country_code, []))
+        logger.debug(
+            "Looking up %s in index, found %d rules. Available countries: %s",
+            country_code,
+            len(entries),
+            list(self.rules_index.get('by_country', {}).keys())
+        )
 
         # Apply category filter
         if category:
-            rules = [r for r in rules if r.get('category') == category]
+            entries = [r for r in entries if r.get('category') == category]
 
         # Apply tags filter
         if tags:
-            rules = [r for r in rules if any(tag in r.get('tags', []) for tag in tags)]
+            entries = [
+                r for r in entries
+                if any(tag in (r.get('tags') or []) for tag in tags)
+            ]
 
         # Apply search term filter
         if search_term:
             search_lower = search_term.lower()
-            rules = [
-                r for r in rules
-                if search_lower in r.get('question', '').lower()
-                or search_lower in r.get('answer_html', '').lower()
+            entries = [
+                r for r in entries
+                if search_lower in (r.get('question_text') or '').lower()
+                or search_lower in (r.get('answer_html') or '').lower()
             ]
 
-        return rules
+        return entries
 
     def compare_rules_between_countries(
         self,
@@ -171,33 +226,47 @@ class RulesManager:
         if not self.loaded:
             logger.warning(f"Rules not loaded in compare, loading now...")
             self.load_rules()
+        if not self.loaded:
+            return {}
 
-        logger.info(f"DEBUG compare: About to get rules for {country1} and {country2}, loaded={self.loaded}, total_rules={len(self.rules)}")
-        rules1 = self.get_rules_for_country(country1, category=category)
-        logger.info(f"DEBUG compare: Got {len(rules1)} rules for {country1}")
-        rules2 = self.get_rules_for_country(country2, category=category)
-        logger.info(f"DEBUG compare: Got {len(rules2)} rules for {country2}")
+        logger.info(
+            "Comparing rules for %s vs %s (category=%s) - total questions=%d",
+            country1, country2, category, len(self.question_map)
+        )
 
-        # Build maps by question_id for comparison
-        rules1_map = {r['question_id']: r for r in rules1 if r.get('question_id')}
-        rules2_map = {r['question_id']: r for r in rules2 if r.get('question_id')}
+        country1 = country1.upper()
+        country2 = country2.upper()
+
+        rules1 = {
+            r['question_id']: r
+            for r in self.get_rules_for_country(country1, category=category)
+            if r.get('question_id')
+        }
+        rules2 = {
+            r['question_id']: r
+            for r in self.get_rules_for_country(country2, category=category)
+            if r.get('question_id')
+        }
+
+        logger.info("Found %d entries for %s and %d entries for %s", len(rules1), country1, len(rules2), country2)
 
         # Find differences
-        common_ids = set(rules1_map.keys()) & set(rules2_map.keys())
-        only_in_1 = set(rules1_map.keys()) - set(rules2_map.keys())
-        only_in_2 = set(rules2_map.keys()) - set(rules1_map.keys())
+        common_ids = set(rules1.keys()) & set(rules2.keys())
+        only_in_1 = set(rules1.keys()) - set(rules2.keys())
+        only_in_2 = set(rules2.keys()) - set(rules1.keys())
 
         differences = []
         for qid in common_ids:
-            r1 = rules1_map[qid]
-            r2 = rules2_map[qid]
+            r1 = rules1[qid]
+            r2 = rules2[qid]
 
             # Compare answers (simplified - just check if different)
-            if r1.get('answer_html') != r2.get('answer_html'):
+            if (r1.get('answer_html') or '').strip() != (r2.get('answer_html') or '').strip():
+                question = self.question_map.get(qid, {})
                 differences.append({
                     'question_id': qid,
-                    'question': r1.get('question'),
-                    'category': r1.get('category'),
+                    'question': question.get('question_text', r1.get('question_text')),
+                    'category': question.get('category', r1.get('category')),
                     country1: {
                         'answer': r1.get('answer_html', ''),
                         'links': r1.get('links', [])
@@ -218,7 +287,7 @@ class RulesManager:
             'only_in_country2': len(only_in_2),
             'differences': differences,
             'summary': self._format_comparison_summary(
-                country1, country2, differences, only_in_1, only_in_2, rules1_map, rules2_map
+                country1, country2, differences, only_in_1, only_in_2, rules1, rules2
             )
         }
 
@@ -250,16 +319,18 @@ class RulesManager:
         if only_in_1:
             lines.append(f"\n**Only in {country1.upper()} ({len(only_in_1)}):**")
             for qid in list(only_in_1)[:3]:
-                rule = rules1_map[qid]
-                lines.append(f"• {rule.get('question', 'Unknown')}")
+                rule = rules1_map.get(qid) or {}
+                question = self.question_map.get(qid, {})
+                lines.append(f"• {question.get('question_text', rule.get('question_text', 'Unknown'))}")
             if len(only_in_1) > 3:
                 lines.append(f"  ... and {len(only_in_1) - 3} more")
 
         if only_in_2:
             lines.append(f"\n**Only in {country2.upper()} ({len(only_in_2)}):**")
             for qid in list(only_in_2)[:3]:
-                rule = rules2_map[qid]
-                lines.append(f"• {rule.get('question', 'Unknown')}")
+                rule = rules2_map.get(qid) or {}
+                question = self.question_map.get(qid, {})
+                lines.append(f"• {question.get('question_text', rule.get('question_text', 'Unknown'))}")
             if len(only_in_2) > 3:
                 lines.append(f"  ... and {len(only_in_2) - 3} more")
 
@@ -296,10 +367,9 @@ class RulesManager:
             for category, cat_rules in sorted(by_category.items()):
                 lines.append(f"\n**{category}** ({len(cat_rules)} rules):")
                 for rule in cat_rules[:10]:  # Limit per category
-                    lines.append(f"\n• **{rule.get('question', 'Unknown')}**")
+                    lines.append(f"\n• **{rule.get('question_text', 'Unknown')}**")
                     answer = rule.get('answer_html', 'No answer available')
                     # Strip HTML tags for display
-                    import re
                     answer_text = re.sub('<[^<]+?>', '', answer)
                     lines.append(f"  {answer_text[:200]}...")
 
@@ -314,9 +384,8 @@ class RulesManager:
             # Simple list
             lines = []
             for rule in rules[:20]:  # Limit total
-                lines.append(f"\n• **{rule.get('question', 'Unknown')}**")
+                lines.append(f"\n• **{rule.get('question_text', 'Unknown')}**")
                 answer = rule.get('answer_html', 'No answer available')
-                import re
                 answer_text = re.sub('<[^<]+?>', '', answer)
                 lines.append(f"  {answer_text[:200]}...")
 
@@ -329,23 +398,29 @@ class RulesManager:
         """Get list of available country codes."""
         if not self.loaded:
             self.load_rules()
-        return sorted(self.rules_index['by_country'].keys())
+        if not self.loaded:
+            return []
+        return sorted(self.rules_index.get('by_country', {}).keys())
 
     def get_available_categories(self) -> List[str]:
         """Get list of available categories."""
         if not self.loaded:
             self.load_rules()
-        return sorted(self.rules_index['by_category'].keys())
+        if not self.loaded:
+            return []
+        return sorted(self.rules_index.get('categories', {}).keys())
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get statistics about loaded rules."""
         if not self.loaded:
             self.load_rules()
+        if not self.loaded:
+            return {}
 
         return {
-            'total_rules': len(self.rules),
-            'countries': len(self.rules_index['by_country']),
-            'categories': len(self.rules_index['by_category']),
+            'total_questions': len(self.question_map),
+            'countries': len(self.rules_index.get('by_country', {})),
+            'categories': len(self.rules_index.get('categories', {})),
             'country_list': self.get_available_countries(),
             'category_list': self.get_available_categories()
         }

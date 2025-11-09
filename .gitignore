@@ -54,3 +54,6 @@ HOW_TO_*.md
 tail_logs.sh
 test_*.sh
 conversation_logs/
+
+# pip'd installed -e 
+src/euro-aip
