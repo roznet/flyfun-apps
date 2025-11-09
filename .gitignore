@@ -43,8 +43,6 @@ ENV/.swiftpm
 Pods
 xcuserdata
 
-data/airports.db
-
 # Documentation and temporary files
 *_STATUS.md
 *_COMPLETE.md
