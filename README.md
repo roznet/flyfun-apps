@@ -60,11 +60,27 @@ Use separate copies (such as `prod.env`) when deploying to other environments.
 
 ## Getting Started
 
-### 1. Clone and install core dependencies
+**Note:** This repository uses Git LFS to store large binary files (`airports.db`). Install Git LFS before cloning or pulling.
+
+### 1. Install Git LFS and clone
 
 ```bash
-git clone https://github.com/<your-org>/flyfun-apps.git
+# Install Git LFS (one-time setup)
+# Ubuntu/Debian:
+sudo apt-get install git-lfs
+# macOS:
+brew install git-lfs
+
+# Initialize Git LFS
+git lfs install
+
+# Clone the repository
+git clone https://github.com/downle/flyfun-apps.git
 cd flyfun-apps
+git checkout feature/chatbot_ui  # or your target branch
+git lfs pull  # Download LFS files (~7.5MB airports.db)
+
+# Set up Python environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

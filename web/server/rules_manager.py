@@ -43,7 +43,16 @@ class RulesManager:
                 return False
 
             with open(rules_path, 'r', encoding='utf-8') as f:
-                self.rules = json.load(f)
+                rules_data = json.load(f)
+
+            # Handle both list format and dict format with "questions" key
+            if isinstance(rules_data, list):
+                self.rules = rules_data
+            elif isinstance(rules_data, dict) and 'questions' in rules_data:
+                self.rules = rules_data['questions']
+            else:
+                self.rules = []
+                logger.warning(f"Unexpected rules format in {self.rules_json_path}")
 
             logger.info(f"Loaded {len(self.rules)} rules from {self.rules_json_path}")
 
