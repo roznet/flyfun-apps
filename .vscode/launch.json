@@ -3,11 +3,21 @@
     "configurations": [
       {
         "name": "Web Server (dev.env)",
-        "type": "python",
+        "type": "debugpy",
         "request": "launch",
         "program": "${workspaceFolder}/web/server/main.py",
         "cwd": "${workspaceFolder}/web/server",
         "envFile": "${workspaceFolder}/web/server/dev.env",
+        "console": "integratedTerminal"
+      },
+      {
+        "name": "MCP Server (dev.env)",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/mcp_server/main.py",
+        "args": ["--transport", "http", "--host", "127.0.0.1", "--port", "8001"],
+        "cwd": "${workspaceFolder}/mcp_server",
+        "envFile": "${workspaceFolder}/mcp_server/dev.env",
         "console": "integratedTerminal"
       }
     ]

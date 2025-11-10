@@ -511,7 +511,9 @@ def compare_rules_between_countries(
     ctx: ToolContext,
     country1: str,
     country2: str,
-    category: Optional[str] = None
+    category: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    search: Optional[str] = None
 ) -> Dict[str, Any]:
     rules_manager = ctx.ensure_rules_manager()
     comparison = rules_manager.compare_rules_between_countries(
