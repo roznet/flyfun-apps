@@ -21,6 +21,7 @@ from euro_aip.utils.field_standardization_service import FieldStandardizationSer
 from euro_aip.utils.airac_date_calculator import AIRACDateCalculator
 from euro_aip.storage import DatabaseStorage
 from euro_aip.parsers import ProcedureParserFactory
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +29,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def _database_path(path: Optional[str]) -> str:
+    if not path:
+        if os.environ.get('AIRPORTS_DB') and os.path.exists(os.environ.get('AIRPORTS_DB')):
+            return os.environ.get('AIRPORTS_DB')
+        if os.path.exists('airports.db'):
+            return 'airports.db'
+        else:
+            raise ValueError("No database file found")
+    return path
 
 class ModelBuilder:
     """Builds EuroAipModel from multiple sources."""
@@ -50,7 +61,7 @@ class ModelBuilder:
         if self.args.worldairports:
             self.sources['worldairports'] = WorldAirportsSource(
                 cache_dir=str(self.cache_dir),
-                database=self.args.worldairports_db or 'airports.db'
+                database=_database_path(self.args.worldairports_db)
             )
         
         if self.args.france_eaip:
@@ -242,8 +253,8 @@ class AIPExporter:
         self.exporters = {}
         
         # Initialize exporters based on output format
-        if self.args.database_storage:
-            self.exporters['database_storage'] = DatabaseStorage(self.args.database_storage)
+        if self.args.database_storage is not None:
+            self.exporters['database_storage'] = DatabaseStorage(_database_path(self.args.database_storage))
         
         if self.args.json:
             self.exporters['json'] = JSONExporter(self.args.json)
@@ -292,7 +303,7 @@ def main():
     
     # Source configuration
     parser.add_argument('--worldairports', help='Enable WorldAirports source', action='store_true')
-    parser.add_argument('--worldairports-db', help='WorldAirports database file', default='airports.db')
+    parser.add_argument('--worldairports-db', help='WorldAirports database file', default=None)
     parser.add_argument('--worldairports-filter', 
                        choices=['required', 'europe', 'all'], 
                        default='required',
@@ -314,7 +325,13 @@ def main():
     parser.add_argument('--pointdepassage-db', help='Point de Passage database file', default='airports.db')
     
     # Output configuration
-    parser.add_argument('--database-storage', help='New unified database storage file with change tracking')
+    parser.add_argument(
+        '--database-storage',
+        nargs='?',
+        const='',
+        default=None,
+        help='New unified database storage file with change tracking (omit value to use default from AIRPORTS_DB or airports.db)'
+    )
     parser.add_argument('--json', help='JSON output file')
     
     # General options
@@ -334,9 +351,7 @@ def main():
         args.uk_eaip, getattr(args, 'uk_web', False), args.autorouter, args.pointdepassage
     ])
     
-    outputs_enabled = any([
-        args.database_storage, args.json
-    ])
+    outputs_enabled = bool(args.json) or args.database_storage is not None
     
     if not sources_enabled:
         logger.error("At least one data source must be enabled")
