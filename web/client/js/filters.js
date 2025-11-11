@@ -403,9 +403,6 @@ class FilterManager {
             // Update map with filtered airports (preserve current view)
             this.updateMapWithAirports(airports, true);
 
-            // Update statistics
-            this.updateStatistics(airports);
-
             // Show success message
             this.showSuccess(`Applied filters: ${airports.length} airports found (view preserved)`);
 
@@ -458,9 +455,6 @@ class FilterManager {
                 
                 // Use the same unified airport handling as route search
                 this.updateMapWithAirports(airports, false);
-                
-                // Update statistics
-                this.updateStatistics(airports);
                 
                 // Show success message
                 this.showSuccess(`Search results: ${airports.length} airports found for "${query}"`);
@@ -575,9 +569,6 @@ class FilterManager {
             // Pass original route airport data to ensure complete route line
             airportMap.displayRoute(routeAirports, distanceNm, skipFilterUpdate, originalRouteAirports);
             
-            // Update statistics
-            this.updateStatistics(airports);
-            
             // Show route search success message with filter info
             let message = `Route search: ${routeResults.airports_found} airports within ${distanceNm}nm of route ${routeAirports.join(' → ')}`;
             if (routeResults.total_nearby > routeResults.airports_found) {
@@ -639,24 +630,6 @@ class FilterManager {
             console.log('In procedure precision mode, loading procedure lines in bulk...');
             airportMap.loadBulkProcedureLines(airports);
         }
-    }
-
-    updateStatistics(airports) {
-        const totalAirports = airports.length;
-        const airportsWithProcedures = airports.filter(a => a.has_procedures).length;
-        const borderCrossing = airports.filter(a => a.point_of_entry).length;
-        const totalProcedures = airports.reduce((sum, a) => sum + a.procedure_count, 0);
-
-        // Update statistics cards (with null checks)
-        const totalAirportsEl = document.getElementById('total-airports');
-        const airportsWithProceduresEl = document.getElementById('airports-with-procedures');
-        const borderCrossingEl = document.getElementById('border-crossing');
-        const totalProceduresEl = document.getElementById('total-procedures');
-
-        if (totalAirportsEl) totalAirportsEl.textContent = totalAirports.toLocaleString();
-        if (airportsWithProceduresEl) airportsWithProceduresEl.textContent = airportsWithProcedures.toLocaleString();
-        if (borderCrossingEl) borderCrossingEl.textContent = borderCrossing.toLocaleString();
-        if (totalProceduresEl) totalProceduresEl.textContent = totalProcedures.toLocaleString();
     }
 
     showLoading() {
@@ -845,9 +818,6 @@ class FilterManager {
             // Update map with filtered airports (fit bounds for initial load)
             this.updateMapWithAirports(airports, false);
             
-            // Update statistics
-            this.updateStatistics(airports);
-            
         } catch (error) {
             console.error('Error applying initial filters:', error);
             this.showError('Error applying initial filters: ' + error.message);
@@ -897,9 +867,6 @@ class FilterManager {
             
             // Update map with all airports
             this.updateMapWithAirports(airports, false);
-            
-            // Update statistics
-            this.updateStatistics(airports);
             
             // Show success message
             this.showSuccess(`Loaded all airports: ${airports.length} airports`);

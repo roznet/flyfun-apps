@@ -480,42 +480,6 @@
             margin-right: 0.25rem;
         }
 
-        /* Statistics Row - Match main content layout */
-        .stats-row {
-            display: flex;
-            gap: 15px;
-            width: 100%;
-            padding: 0 15px;
-            margin: 0 auto;
-        }
-
-        .stats-row .stats-card {
-            flex: 1 1 33.33%;
-            max-width: 33.33%;
-            min-width: 250px;
-            margin-bottom: 0;
-        }
-
-        .stats-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 8px;
-            padding: 12px 15px;
-            margin-bottom: 15px;
-        }
-        
-        .stats-card h4 {
-            margin: 0 0 4px 0;
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-        
-        .stats-card p {
-            margin: 0;
-            font-size: 0.9rem;
-            opacity: 0.9;
-        }
-        
         .loading {
             display: none;
             text-align: center;
@@ -815,21 +779,6 @@
                 max-height: 500px !important;
             }
 
-            /* Ensure stats cards stay equal and compact on iPad */
-            .stats-row .stats-card {
-                flex: 1 1 33.33% !important;
-                max-width: 33.33% !important;
-                padding: 10px 12px !important;
-            }
-
-            .stats-card h4 {
-                font-size: 1.3rem !important;
-            }
-
-            .stats-card p {
-                font-size: 0.85rem !important;
-            }
-
             /* Compact header and spacing on iPad */
             .mt-2 {
                 margin-top: 0.5rem !important;
@@ -851,11 +800,6 @@
             /* Reduce gap between sections */
             .main-content-row {
                 gap: 10px !important;
-            }
-
-            .stats-row {
-                gap: 10px !important;
-                margin-bottom: 0.5rem !important;
             }
 
             /* Chatbot expanded mode MUST come last to override */
@@ -966,19 +910,6 @@
             }
 
             /* Stack stats cards 2x2 on mobile */
-            #stats-row .col-md-3 {
-                flex: 0 0 50%;
-                max-width: 50%;
-            }
-
-            .stats-card h4 {
-                font-size: 1.2rem;
-            }
-
-            .stats-card p {
-                font-size: 0.8rem;
-            }
-
             /* Right panel always visible on mobile, not collapsible */
             .right-panel.collapsed {
                 width: 100% !important;
@@ -1029,13 +960,6 @@
                 max-height: 300px;
             }
 
-            .stats-card {
-                padding: 8px 12px;
-            }
-
-            .stats-card h4 {
-                font-size: 1rem;
-            }
         }
 
         /* ===== IPAD PRO 12.9" ===== */
@@ -1069,7 +993,7 @@
                         <label for="mode-filters"><i class="fas fa-filter"></i> Filters</label>
                     </div>
                 </div>
-                <p class="text-center text-muted mb-2">Your intelligent aviation assistant - Interactive map with European airports, AIP data, and flight planning</p>
+                <p class="text-center text-muted mb-2">Your intelligent aviation assistant - Interactive map with European airports, AIP data, and empirical flying rules</p>
             </div>
         </div>
 
