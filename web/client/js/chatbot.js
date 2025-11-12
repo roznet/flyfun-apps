@@ -377,12 +377,24 @@ Try the quick actions below or ask me anything!`;
 
                             case 'tool_calls':
                                 toolCalls = data;
+                                console.log('[DEBUG] Received tool_calls event:', JSON.stringify(data, null, 2));
+
                                 // Add tool indicator
                                 if (toolCalls && toolCalls.length > 0) {
                                     const toolsDiv = document.createElement('div');
                                     toolsDiv.className = 'message-tools';
                                     toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${toolCalls.map(t => t.name).join(', ')}</small>`;
                                     messageDiv.appendChild(toolsDiv);
+
+                                    // Extract and apply filter profile from tool results
+                                    for (const toolCall of toolCalls) {
+                                        console.log('[DEBUG] Checking toolCall:', toolCall.name, 'has result?', !!toolCall.result, 'has filter_profile?', !!(toolCall.result && toolCall.result.filter_profile));
+                                        if (toolCall.result && toolCall.result.filter_profile) {
+                                            console.log('[DEBUG] Found filter_profile:', toolCall.result.filter_profile);
+                                            this.applyFilterProfile(toolCall.result.filter_profile);
+                                            break; // Use first filter profile found
+                                        }
+                                    }
                                 }
                                 break;
 
@@ -592,6 +604,78 @@ Try the quick actions below or ask me anything!`;
 
         const prompt = `Find airports with fuel along the route from ${fromIcao} to ${toIcao}`;
         this.chatInput.value = prompt;
+    }
+
+    /**
+     * Apply filter profile from chatbot tool results to UI filters
+     * This syncs the chatbot's search criteria with the filter panel
+     */
+    applyFilterProfile(filterProfile) {
+        if (!filterProfile || typeof filterManager === 'undefined') {
+            return;
+        }
+
+        console.log('Applying filter profile from chatbot:', filterProfile);
+
+        // Apply country filter
+        if (filterProfile.country) {
+            const countrySelect = document.getElementById('country-filter');
+            if (countrySelect) {
+                countrySelect.value = filterProfile.country;
+            }
+        }
+
+        // Apply has_procedures filter
+        if (filterProfile.has_procedures) {
+            const hasProcedures = document.getElementById('has-procedures');
+            if (hasProcedures) {
+                hasProcedures.checked = true;
+            }
+        }
+
+        // Apply has_aip_data filter
+        if (filterProfile.has_aip_data) {
+            const hasAipData = document.getElementById('has-aip-data');
+            if (hasAipData) {
+                hasAipData.checked = true;
+            }
+        }
+
+        // Apply has_hard_runway filter
+        if (filterProfile.has_hard_runway) {
+            const hasHardRunway = document.getElementById('has-hard-runway');
+            if (hasHardRunway) {
+                hasHardRunway.checked = true;
+            }
+        }
+
+        // Apply point_of_entry (border crossing) filter
+        if (filterProfile.point_of_entry) {
+            const borderCrossing = document.getElementById('border-crossing-only');
+            if (borderCrossing) {
+                borderCrossing.checked = true;
+            }
+        }
+
+        // Apply route distance filter
+        if (filterProfile.route_distance) {
+            const routeDistance = document.getElementById('route-distance');
+            if (routeDistance) {
+                routeDistance.value = filterProfile.route_distance;
+            }
+        }
+
+        // Apply search query if present
+        if (filterProfile.search_query) {
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) {
+                searchInput.value = filterProfile.search_query;
+            }
+        }
+
+        // Note: We don't automatically apply filters here to avoid interfering with
+        // the chatbot's visualization. The user can manually apply them if they want
+        // to modify the filter criteria.
     }
 }
 
