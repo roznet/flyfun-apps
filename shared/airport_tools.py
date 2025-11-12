@@ -129,6 +129,7 @@ def search_airports(ctx: ToolContext, query: str, max_results: int = 20) -> Dict
         "count": len(matches),
         "airports": matches,
         "pretty": pretty,
+        "filter_profile": {"search_query": query},  # Filter settings for UI sync
         "visualization": {
             "type": "markers",
             "data": matches
@@ -175,10 +176,30 @@ def find_airports_near_route(
         f"No airports within {max_distance_nm}nm of {from_icao.upper()}->{to_icao.upper()}."
     )
 
+    # Limit airports sent to LLM to save tokens (keep all for visualization)
+    # For route planning, top 20 airports sorted by distance is sufficient
+    total_count = len(airports)
+    airports_for_llm = airports[:20] if len(airports) > 20 else airports
+
+    # Generate filter profile for UI synchronization
+    filter_profile = {"route_distance": max_distance_nm}
+    if filters:
+        if filters.get("country"):
+            filter_profile["country"] = filters["country"]
+        if filters.get("has_procedures"):
+            filter_profile["has_procedures"] = True
+        if filters.get("has_aip_data"):
+            filter_profile["has_aip_data"] = True
+        if filters.get("has_hard_runway"):
+            filter_profile["has_hard_runway"] = True
+        if filters.get("point_of_entry"):
+            filter_profile["point_of_entry"] = True
+
     return {
-        "count": len(airports),
-        "airports": airports,
+        "count": total_count,
+        "airports": airports_for_llm,  # Limited for LLM
         "pretty": pretty,
+        "filter_profile": filter_profile,  # Filter settings for UI sync
         "visualization": {
             "type": "route_with_markers",
             "route": {
@@ -193,7 +214,7 @@ def find_airports_near_route(
                     "lon": getattr(to_airport, "longitude_deg", None) if to_airport else None,
                 }
             },
-            "markers": airports
+            "markers": airports_for_llm  # Only show what LLM sees and recommends
         }
     }
 
@@ -295,14 +316,29 @@ def get_border_crossing_airports(ctx: ToolContext, country: Optional[str] = None
             pretty_lines.append(f"- {label}" + (f" ({city})" if city else ""))
         pretty_lines.append("")
 
+    # Limit data sent to LLM: max 10 airports per country, max 5 countries (top 50 total)
+    # Keep full data for visualization on map
+    grouped_for_llm = {}
+    airports_for_llm = []
+    for cc, arr in list(grouped.items())[:5]:  # Max 5 countries
+        limited_arr = arr[:10]  # Max 10 per country
+        grouped_for_llm[cc] = limited_arr
+        airports_for_llm.extend(limited_arr)
+
+    # Generate filter profile for UI synchronization
+    filter_profile = {"point_of_entry": True}  # Border crossing filter
+    if country:
+        filter_profile["country"] = country.upper()
+
     return {
         "count": len(all_airports),
-        "by_country": grouped,
-        "airports": all_airports,
+        "by_country": grouped_for_llm,  # Limited for LLM
+        "airports": airports_for_llm,  # Limited for LLM
         "pretty": "\n".join(pretty_lines),
+        "filter_profile": filter_profile,  # Filter settings for UI sync
         "visualization": {
             "type": "markers",
-            "data": all_airports,
+            "data": airports_for_llm,  # Only show what LLM sees and recommends
             "style": "customs"
         }
     }
