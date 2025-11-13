@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""
+Filter engine for applying multiple filters to airports.
+"""
+import logging
+from typing import Dict, Any, List, Iterable, Optional
+from euro_aip.models.airport import Airport
+from euro_aip.storage.enrichment_storage import EnrichmentStorage
+
+from .filters import (
+    Filter,
+    CountryFilter,
+    HasProceduresFilter,
+    HasAipDataFilter,
+    HasHardRunwayFilter,
+    PointOfEntryFilter,
+    MaxRunwayLengthFilter,
+    MinRunwayLengthFilter,
+    HasAvgasFilter,
+    HasJetAFilter,
+    MaxLandingFeeFilter,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class FilterRegistry:
+    """Registry of all available filters."""
+
+    _filters: Dict[str, Filter] = {}
+
+    @classmethod
+    def register(cls, filter_instance: Filter):
+        """Register a filter by its name."""
+        cls._filters[filter_instance.name] = filter_instance
+        logger.debug(f"Registered filter: {filter_instance.name}")
+
+    @classmethod
+    def get(cls, name: str) -> Optional[Filter]:
+        """Get a filter by name."""
+        return cls._filters.get(name)
+
+    @classmethod
+    def list_all(cls) -> List[str]:
+        """List all registered filter names."""
+        return list(cls._filters.keys())
+
+    @classmethod
+    def get_all(cls) -> Dict[str, Filter]:
+        """Get all registered filters."""
+        return cls._filters.copy()
+
+
+# Auto-register all filters
+FilterRegistry.register(CountryFilter())
+FilterRegistry.register(HasProceduresFilter())
+FilterRegistry.register(HasAipDataFilter())
+FilterRegistry.register(HasHardRunwayFilter())
+FilterRegistry.register(PointOfEntryFilter())
+FilterRegistry.register(MaxRunwayLengthFilter())
+FilterRegistry.register(MinRunwayLengthFilter())
+FilterRegistry.register(HasAvgasFilter())
+FilterRegistry.register(HasJetAFilter())
+FilterRegistry.register(MaxLandingFeeFilter())
+
+logger.info(f"Filter registry initialized with {len(FilterRegistry.list_all())} filters")
+
+
+class FilterEngine:
+    """
+    Engine for applying filters to airports.
+
+    Usage:
+        engine = FilterEngine(enrichment_storage=storage)
+        filtered = engine.apply(airports, {"country": "FR", "has_avgas": True})
+    """
+
+    def __init__(self, enrichment_storage: Optional[EnrichmentStorage] = None):
+        """
+        Initialize filter engine.
+
+        Args:
+            enrichment_storage: Optional enrichment storage for pricing/fuel filters
+        """
+        self.enrichment_storage = enrichment_storage
+
+    def apply(
+        self,
+        airports: Iterable[Airport],
+        filters: Optional[Dict[str, Any]] = None
+    ) -> List[Airport]:
+        """
+        Apply multiple filters to a list of airports.
+
+        Args:
+            airports: Iterable of Airport objects
+            filters: Dict of filter_name -> filter_value
+
+        Returns:
+            Filtered list of airports
+
+        Example:
+            filters = {
+                "country": "FR",
+                "has_hard_runway": True,
+                "max_runway_length_ft": 8000,
+                "has_avgas": True,
+                "max_landing_fee": 50
+            }
+        """
+        if not filters:
+            return list(airports)
+
+        filtered: List[Airport] = []
+        filters_applied = []
+
+        for airport in airports:
+            passes_all_filters = True
+
+            for filter_name, filter_value in filters.items():
+                # Get the filter from registry
+                filter_obj = FilterRegistry.get(filter_name)
+
+                if not filter_obj:
+                    logger.warning(f"Unknown filter: {filter_name}, skipping")
+                    continue
+
+                # Track which filters are being applied (for logging)
+                if filter_name not in filters_applied:
+                    filters_applied.append(filter_name)
+
+                # Apply the filter
+                try:
+                    if not filter_obj.apply(airport, filter_value, self.enrichment_storage):
+                        passes_all_filters = False
+                        break  # Airport failed this filter, no need to check others
+                except Exception as e:
+                    logger.error(f"Error applying filter {filter_name} to {airport.ident}: {e}")
+                    passes_all_filters = False
+                    break
+
+            if passes_all_filters:
+                filtered.append(airport)
+
+        logger.info(f"Filters applied: {filters_applied} | Input: {len(list(airports))} airports → Output: {len(filtered)} airports")
+
+        return filtered
+
+    def get_available_filters(self) -> Dict[str, str]:
+        """Get all available filters with descriptions."""
+        return {
+            name: filter_obj.description
+            for name, filter_obj in FilterRegistry.get_all().items()
+        }

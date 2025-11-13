@@ -13,6 +13,8 @@ from euro_aip.storage.database_storage import DatabaseStorage
 from euro_aip.storage.enrichment_storage import EnrichmentStorage
 
 from .rules_manager import RulesManager
+from .filtering import FilterEngine
+from .prioritization import PriorityEngine
 
 
 @dataclass
@@ -64,47 +66,16 @@ def _airport_summary(a: Airport) -> Dict[str, Any]:
     }
 
 
-def _apply_airport_filters(
-    airports: Iterable[Airport],
+def search_airports(
+    ctx: ToolContext,
+    query: str,
+    max_results: int = 50,
     filters: Optional[Dict[str, Any]] = None,
-) -> List[Airport]:
-    """
-    Apply common airport filters (country, has_procedures, point_of_entry, etc.)
-    to an iterable of Airport objects and return the filtered list preserving order.
-    """
-    if not filters:
-        return list(airports)
-
-    country = filters.get("country")
-    if country:
-        country = country.upper()
-
-    has_procedures = filters.get("has_procedures")
-    has_aip_data = filters.get("has_aip_data")
-    has_hard_runway = filters.get("has_hard_runway")
-    point_of_entry = filters.get("point_of_entry")
-
-    filtered: List[Airport] = []
-    for airport in airports:
-        if country and (airport.iso_country or "").upper() != country:
-            continue
-        if has_procedures is not None and bool(airport.has_procedures) != bool(has_procedures):
-            continue
-        if has_aip_data is not None and bool(len(airport.aip_entries) > 0) != bool(has_aip_data):
-            continue
-        if has_hard_runway is not None and bool(getattr(airport, "has_hard_runway", False)) != bool(has_hard_runway):
-            continue
-        if point_of_entry is not None and bool(getattr(airport, "point_of_entry", False)) != bool(point_of_entry):
-            continue
-        filtered.append(airport)
-
-    return filtered
-
-
-def search_airports(ctx: ToolContext, query: str, max_results: int = 20) -> Dict[str, Any]:
-    """Search for airports by name, ICAO code, IATA code, or city name. Returns matching airports with key information."""
+    priority_strategy: str = "cost_optimized",
+) -> Dict[str, Any]:
+    """Search for airports by name, ICAO code, IATA code, or city name with optional filters (country, procedures, runway, fuel, fees). Returns matching airports sorted by priority."""
     q = query.upper().strip()
-    matches: List[Dict[str, Any]] = []
+    matches: List[Airport] = []
 
     for a in ctx.model.airports.values():
         if (
@@ -113,26 +84,71 @@ def search_airports(ctx: ToolContext, query: str, max_results: int = 20) -> Dict
             or (getattr(a, "iata_code", None) and q in a.iata_code)
             or (a.municipality and q in a.municipality.upper())
         ):
-            matches.append(_airport_summary(a))
-            if len(matches) >= max_results:
+            matches.append(a)
+            if len(matches) >= 200:  # Get more candidates before filtering
                 break
 
-    pretty = "No airports found." if not matches else (
-        f"Found {len(matches)} airports matching '{query}':\n\n" +
+    # Apply filters using FilterEngine
+    if filters:
+        filter_engine = FilterEngine(enrichment_storage=ctx.enrichment_storage)
+        matches = filter_engine.apply(matches, filters)
+
+    # Apply priority sorting using PriorityEngine
+    priority_engine = PriorityEngine(enrichment_storage=ctx.enrichment_storage)
+    sorted_airports = priority_engine.apply(
+        matches,
+        strategy=priority_strategy,
+        context={},
+        max_results=max_results
+    )
+
+    # Convert to summaries
+    airport_summaries = [_airport_summary(a) for a in sorted_airports]
+
+    pretty = "No airports found." if not airport_summaries else (
+        f"Found {len(airport_summaries)} airports matching '{query}':\n\n" +
         "\n\n".join(
             f"**{m['ident']} - {m['name']}**\nLocation: {m['municipality'] or 'Unknown'}, {m['country'] or 'Unknown'}"
-            for m in matches
+            for m in airport_summaries[:20]  # Only show first 20 in text
         )
     )
 
+    # Generate filter profile for UI synchronization
+    filter_profile = {"search_query": query}
+    if filters:
+        if filters.get("country"):
+            filter_profile["country"] = filters["country"]
+        if filters.get("has_procedures"):
+            filter_profile["has_procedures"] = True
+        if filters.get("has_aip_data"):
+            filter_profile["has_aip_data"] = True
+        if filters.get("has_hard_runway"):
+            filter_profile["has_hard_runway"] = True
+        if filters.get("point_of_entry"):
+            filter_profile["point_of_entry"] = True
+        if filters.get("max_runway_length_ft"):
+            filter_profile["max_runway_length_ft"] = filters["max_runway_length_ft"]
+        if filters.get("min_runway_length_ft"):
+            filter_profile["min_runway_length_ft"] = filters["min_runway_length_ft"]
+        if filters.get("has_avgas"):
+            filter_profile["has_avgas"] = True
+        if filters.get("has_jet_a"):
+            filter_profile["has_jet_a"] = True
+        if filters.get("max_landing_fee"):
+            filter_profile["max_landing_fee"] = filters["max_landing_fee"]
+
+    # Limit for LLM to save tokens
+    total_count = len(airport_summaries)
+    airports_for_llm = airport_summaries[:20] if len(airport_summaries) > 20 else airport_summaries
+
     return {
-        "count": len(matches),
-        "airports": matches,
+        "count": total_count,
+        "airports": airports_for_llm,  # Limited for LLM
         "pretty": pretty,
-        "filter_profile": {"search_query": query},  # Filter settings for UI sync
+        "filter_profile": filter_profile,  # Filter settings for UI sync
         "visualization": {
             "type": "markers",
-            "data": matches
+            "data": airport_summaries  # Show ALL matching airports on map
         }
     }
 
@@ -143,6 +159,7 @@ def find_airports_near_route(
     to_icao: str,
     max_distance_nm: float = 50.0,
     filters: Optional[Dict[str, Any]] = None,
+    priority_strategy: str = "cost_optimized",
 ) -> Dict[str, Any]:
     """List airports within a specified distance from a direct route between two airports, with optional airport filters (country, procedures, customs, etc.). Useful for finding fuel stops, alternates, or customs stops."""
     results = ctx.model.find_airports_near_route(
@@ -150,21 +167,29 @@ def find_airports_near_route(
         max_distance_nm
     )
 
-    allowed_idents = None
-    if filters:
-        filtered_airports = _apply_airport_filters(
-            (item["airport"] for item in results),
-            filters,
-        )
-        allowed_idents = {airport.ident for airport in filtered_airports}
+    # Extract airports and build distance map for context
+    airport_objects = [item["airport"] for item in results]
+    route_distances = {item["airport"].ident: float(item["distance_nm"]) for item in results}
 
+    # Apply filters using FilterEngine
+    if filters:
+        filter_engine = FilterEngine(enrichment_storage=ctx.enrichment_storage)
+        airport_objects = filter_engine.apply(airport_objects, filters)
+
+    # Apply priority sorting using PriorityEngine
+    priority_engine = PriorityEngine(enrichment_storage=ctx.enrichment_storage)
+    sorted_airports = priority_engine.apply(
+        airport_objects,
+        strategy=priority_strategy,
+        context={"route_distances": route_distances},
+        max_results=100  # Get more for full list, will limit to 20 for LLM later
+    )
+
+    # Convert to summaries with distance_nm
     airports: List[Dict[str, Any]] = []
-    for item in results:
-        a = item["airport"]
-        if allowed_idents is not None and a.ident not in allowed_idents:
-            continue
-        summary = _airport_summary(a)
-        summary["distance_nm"] = float(item["distance_nm"])
+    for airport in sorted_airports:
+        summary = _airport_summary(airport)
+        summary["distance_nm"] = route_distances.get(airport.ident, 0.0)
         airports.append(summary)
 
     from_airport = ctx.model.get_airport(from_icao.upper())
@@ -177,13 +202,14 @@ def find_airports_near_route(
     )
 
     # Limit airports sent to LLM to save tokens (keep all for visualization)
-    # For route planning, top 20 airports sorted by distance is sufficient
+    # For route planning, top 20 airports sorted by priority is sufficient
     total_count = len(airports)
     airports_for_llm = airports[:20] if len(airports) > 20 else airports
 
     # Generate filter profile for UI synchronization
     filter_profile = {"route_distance": max_distance_nm}
     if filters:
+        # Legacy filters
         if filters.get("country"):
             filter_profile["country"] = filters["country"]
         if filters.get("has_procedures"):
@@ -194,6 +220,17 @@ def find_airports_near_route(
             filter_profile["has_hard_runway"] = True
         if filters.get("point_of_entry"):
             filter_profile["point_of_entry"] = True
+        # New filters
+        if filters.get("max_runway_length_ft"):
+            filter_profile["max_runway_length_ft"] = filters["max_runway_length_ft"]
+        if filters.get("min_runway_length_ft"):
+            filter_profile["min_runway_length_ft"] = filters["min_runway_length_ft"]
+        if filters.get("has_avgas"):
+            filter_profile["has_avgas"] = True
+        if filters.get("has_jet_a"):
+            filter_profile["has_jet_a"] = True
+        if filters.get("max_landing_fee"):
+            filter_profile["max_landing_fee"] = filters["max_landing_fee"]
 
     return {
         "count": total_count,
