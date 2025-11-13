@@ -17,8 +17,7 @@ Usage examples:
 Notes:
   - Expected columns (case-insensitive): Question, Answer, (optional) Links
   - If 'Links' is missing, URLs inside the Answer are auto-extracted.
-  - last_reviewed defaults to today; override with --last-reviewed YYYY-MM-DD
-  - confidence defaults to 'medium'
+  - last_reviewed is preserved from existing rules unless the answer changes (then it is set to today)
 """
 from __future__ import annotations
 
@@ -208,11 +207,13 @@ def load_rules_for_country(country_code: str, xlsx_path: Path, definitions: Dict
             print(f"  <{qid}>", file=sys.stderr)
     return out
 
-def merge_rules_with_definitions(existing: Dict[str, Any],
-                                 definitions: Dict[str, Dict[str, Any]],
-                                 country_results: List[Dict[str, Any]],
-                                 last_reviewed: Optional[str]
-                                 ) -> Dict[str, Any]:
+def merge_rules_with_definitions(
+    existing: Dict[str, Any],
+    definitions: Dict[str, Dict[str, Any]],
+    country_results: List[Dict[str, Any]],
+    review_date: str,
+    history: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Merge parsed country results into the combined structure using definitions.
     Output schema:
@@ -235,7 +236,12 @@ def merge_rules_with_definitions(existing: Dict[str, Any],
         if not isinstance(q, dict) or "question_id" not in q:
             continue
         by_id[q["question_id"]] = q
-    defs =  definitions["definitions"]
+    defs = definitions["definitions"]
+    history_by_id: Dict[str, Dict[str, Any]] = {}
+    if history:
+        for q in history.get("questions", []):
+            if isinstance(q, dict) and q.get("question_id"):
+                history_by_id[q["question_id"]] = q
 
     # Ensure all definitions exist as base questions
     for qid, d in defs.items():
@@ -271,14 +277,40 @@ def merge_rules_with_definitions(existing: Dict[str, Any],
             "answer_html": rec.get("answer_html", ""),
             "links": rec.get("links", []),
         }
-        if last_reviewed:
-            ans["last_reviewed"] = last_reviewed
-
         d = defs.get(qid)
         if d is None:
             inconsistent_qids.add(qid)
             continue
-        by_id[qid]["answers_by_country"][cc] = ans
+
+        existing_answer = by_id[qid]["answers_by_country"].get(cc)
+        if not existing_answer and history_by_id:
+            existing_answer = (
+                history_by_id.get(qid, {})
+                .get("answers_by_country", {})
+                .get(cc)
+            )
+            if existing_answer:
+                existing_answer = dict(existing_answer)
+
+        if existing_answer:
+            existing_links = existing_answer.get("links", [])
+            content_changed = (
+                ans["answer_html"] != existing_answer.get("answer_html", "")
+                or ans["links"] != existing_links
+            )
+            if content_changed:
+                if review_date:
+                    ans["last_reviewed"] = review_date
+                by_id[qid]["answers_by_country"][cc] = ans
+            else:
+                # keep the existing answer (including last_reviewed) untouched
+                if cc not in by_id[qid]["answers_by_country"]:
+                    by_id[qid]["answers_by_country"][cc] = existing_answer
+                continue
+        else:
+            if review_date:
+                ans["last_reviewed"] = review_date
+            by_id[qid]["answers_by_country"][cc] = ans
 
     out = {
         "questions": sorted(by_id.values(), key=lambda x: x.get("question_text", "").lower())
@@ -293,8 +325,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--out", required=True, help="Output rules.json path")
     p.add_argument("--defs", required=True, help="Definitions Excel path (Raw Question, Question, Category, Tags)")
     p.add_argument("--append", action="store_true", help="Append into existing rules.json if present")
-    p.add_argument("--last-reviewed", default=dt.date.today().isoformat(), help="YYYY-MM-DD for last_reviewed (default: today)")
-    p.add_argument("--confidence", default="medium", choices=["low","medium","high"])
     p.add_argument("--add", action="append", nargs=2, metavar=("CC","XLSX"),
                    help="Add Excel file for country code CC (ISO-2), can be repeated")
     args = p.parse_args(argv)
@@ -307,15 +337,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.add:
         p.error("Provide at least one --add CC XLSX")
 
-    combined: Dict[str, Any] = {"questions": []}
-    if args.append and out_path.exists():
+    history_data: Dict[str, Any] = {"questions": []}
+    if out_path.exists():
         try:
-            combined = json.loads(out_path.read_text(encoding="utf-8"))
-            if not isinstance(combined, dict) or "questions" not in combined:
-                combined = {"questions": []}
+            history_data = json.loads(out_path.read_text(encoding="utf-8"))
+            if not isinstance(history_data, dict) or "questions" not in history_data:
+                history_data = {"questions": []}
         except Exception:
-            print(f"Warning: failed to parse existing {out_path}, starting fresh", file=sys.stderr)
-            combined = {"questions": []}
+            print(f"Warning: failed to parse existing {out_path}, ignoring previous data", file=sys.stderr)
+            history_data = {"questions": []}
+
+    combined: Dict[str, Any] = {"questions": []}
+    if args.append and history_data.get("questions"):
+        combined = history_data
 
     definitions = load_definitions(defs_path)
 
@@ -327,11 +361,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         country_results = load_rules_for_country(cc, xlsx, definitions)
         total_answers += len(country_results)
+        review_date = dt.date.today().isoformat()
         combined = merge_rules_with_definitions(
             combined,
             definitions,
             country_results,
-            last_reviewed=args.last_reviewed,
+            review_date=review_date,
+            history=history_data,
         )
         print(f"Loaded {len(country_results)} entries from {cc}:{xlsx.name}")
 
