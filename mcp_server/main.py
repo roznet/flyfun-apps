@@ -131,9 +131,15 @@ mcp = FastMCP(
 
 # ---- Tools -------------------------------------------------------------------
 @mcp.tool(name="search_airports", description=_desc(shared_search_airports))
-def search_airports(query: str, max_results: int = 20, ctx: Context = None) -> Dict[str, Any]:
+def search_airports(
+    query: str,
+    max_results: int = 50,
+    filters: Optional[Dict[str, Any]] = None,
+    priority_strategy: str = "cost_optimized",
+    ctx: Context = None
+) -> Dict[str, Any]:
     context = _require_tool_context()
-    result = shared_search_airports(context, query, max_results)
+    result = shared_search_airports(context, query, max_results, filters, priority_strategy)
     return result
 
 @mcp.tool(name="find_airports_near_route", description=_desc(shared_find_airports_near_route))
@@ -142,6 +148,7 @@ def find_airports_near_route(
     to_icao: str,
     max_distance_nm: float = 50.0,
     filters: Optional[Dict[str, Any]] = None,
+    priority_strategy: str = "cost_optimized",
     ctx: Context = None,
 ) -> Dict[str, Any]:
     context = _require_tool_context()
@@ -151,6 +158,7 @@ def find_airports_near_route(
         to_icao,
         max_distance_nm,
         filters=filters,
+        priority_strategy=priority_strategy,
     )
     return result
 
