@@ -520,8 +520,8 @@ class FilterManager {
             // Extract airport data for unified handling
             const airports = routeResults.airports.map(item => ({
                 ...item.airport,
-                // Add route-specific data as custom properties
-                _routeDistance: item.distance_nm,
+                _routeSegmentDistance: item.segment_distance_nm,
+                _routeEnrouteDistance: item.enroute_distance_nm,
                 _closestSegment: item.closest_segment
             }));
             

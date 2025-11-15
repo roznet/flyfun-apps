@@ -3,13 +3,15 @@
 Priority engine for scoring and sorting airports.
 """
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from euro_aip.models.airport import Airport
-from euro_aip.storage.enrichment_storage import EnrichmentStorage
 
 from .strategies import PriorityStrategy, CostOptimizedStrategy
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from shared.airport_tools import ToolContext
 
 
 class StrategyRegistry:
@@ -49,9 +51,9 @@ class PriorityEngine:
         sorted_airports = engine.apply(airports, strategy="cost_optimized")
     """
 
-    def __init__(self, enrichment_storage: Optional[EnrichmentStorage] = None):
+    def __init__(self, context: Optional["ToolContext"] = None):
         """Initialize priority engine."""
-        self.enrichment_storage = enrichment_storage
+        self.context = context
 
     def apply(
         self,
@@ -84,8 +86,8 @@ class PriorityEngine:
         # Score airports
         scored = strategy_obj.score(
             airports,
-            enrichment_storage=self.enrichment_storage,
-            context=context
+            context=context,
+            tool_context=self.context,
         )
 
         # Log priority distribution

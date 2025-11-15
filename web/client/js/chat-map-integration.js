@@ -191,7 +191,8 @@ class ChatMapIntegration {
                 if (airportData.latitude_deg && airportData.longitude_deg) {
                     const marker = this.createNativeStyledMarkerWithDistance(
                         airportData,
-                        airportData.distance_nm
+                        airportData.segment_distance_nm,
+                        airportData.enroute_distance_nm
                     );
                     marker.addTo(this.chatLayers);
 
@@ -358,14 +359,15 @@ class ChatMapIntegration {
     /**
      * Create a marker with native styling and distance information
      */
-    createNativeStyledMarkerWithDistance(airport, distanceNm) {
+    createNativeStyledMarkerWithDistance(airport, segmentDistanceNm, enrouteDistanceNm) {
         const marker = this.createNativeStyledMarker(airport);
 
         // Add distance to popup if available
-        if (distanceNm !== undefined) {
+        if (segmentDistanceNm !== undefined) {
             const popupContent = this.createPopupContent(airport) +
                 `<hr><div style="font-size: 0.9em; color: #007bff;">
-                    <strong>Route Distance:</strong> ${distanceNm.toFixed(1)}nm
+                    <strong>Route Distance:</strong> ${segmentDistanceNm.toFixed(1)}nm
+                    ${enrouteDistanceNm !== undefined && enrouteDistanceNm !== null ? `<br><strong>Along-track:</strong> ${enrouteDistanceNm.toFixed(1)}nm` : ''}
                 </div>`;
             marker.bindPopup(popupContent, {
                 maxWidth: 300,
@@ -596,7 +598,8 @@ class ChatMapIntegration {
                 if (airportData.latitude_deg && airportData.longitude_deg) {
                     const marker = this.createNativeStyledMarkerWithDistance(
                         airportData,
-                        airportData.distance_nm
+                        airportData.segment_distance_nm,
+                        airportData.enroute_distance_nm
                     );
                     marker.addTo(this.chatLayers);
 

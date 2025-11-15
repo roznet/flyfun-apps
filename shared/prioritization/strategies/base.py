@@ -3,10 +3,12 @@
 Base class for prioritization strategies.
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 from euro_aip.models.airport import Airport
-from euro_aip.storage.enrichment_storage import EnrichmentStorage
+
+if TYPE_CHECKING:
+    from shared.airport_tools import ToolContext
 
 
 @dataclass
@@ -32,16 +34,16 @@ class PriorityStrategy(ABC):
     def score(
         self,
         airports: List[Airport],
-        enrichment_storage: Optional[EnrichmentStorage] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        tool_context: Optional["ToolContext"] = None,
     ) -> List[ScoredAirport]:
         """
         Score airports and assign priority levels.
 
         Args:
             airports: List of airports to score
-            enrichment_storage: Optional enrichment data
-            context: Optional context (e.g., {"route_distances": {...}})
+            context: Optional context (e.g., {"segment_distances": {...}})
+            tool_context: Optional ToolContext with access to model, enrichment, etc.
 
         Returns:
             List of ScoredAirport objects, sorted by priority then score

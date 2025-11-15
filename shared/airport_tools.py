@@ -108,7 +108,7 @@ def search_airports(
         matches = filter_engine.apply(matches, filters)
 
     # Apply priority sorting using PriorityEngine
-    priority_engine = PriorityEngine(enrichment_storage=ctx.enrichment_storage)
+    priority_engine = PriorityEngine(context=ctx)
     sorted_airports = priority_engine.apply(
         matches,
         strategy=priority_strategy,
@@ -183,7 +183,14 @@ def find_airports_near_route(
 
     # Extract airports and build distance map for context
     airport_objects = [item["airport"] for item in results]
-    route_distances = {item["airport"].ident: float(item["distance_nm"]) for item in results}
+    segment_distances = {
+        item["airport"].ident: float(item.get("segment_distance_nm") or 0.0) for item in results
+    }
+    enroute_distances = {
+        item["airport"].ident: item.get("enroute_distance_nm")
+        for item in results
+        if item.get("enroute_distance_nm") is not None
+    }
 
     # Apply filters using FilterEngine
     if filters:
@@ -191,11 +198,11 @@ def find_airports_near_route(
         airport_objects = filter_engine.apply(airport_objects, filters)
 
     # Apply priority sorting using PriorityEngine
-    priority_engine = PriorityEngine(enrichment_storage=ctx.enrichment_storage)
+    priority_engine = PriorityEngine(context=ctx)
     sorted_airports = priority_engine.apply(
         airport_objects,
         strategy=priority_strategy,
-        context={"route_distances": route_distances},
+        context={"segment_distances": segment_distances, "enroute_distances": enroute_distances},
         max_results=100  # Get more for full list, will limit to 20 for LLM later
     )
 
@@ -203,7 +210,9 @@ def find_airports_near_route(
     airports: List[Dict[str, Any]] = []
     for airport in sorted_airports:
         summary = _airport_summary(airport)
-        summary["distance_nm"] = route_distances.get(airport.ident, 0.0)
+        summary["segment_distance_nm"] = segment_distances.get(airport.ident, 0.0)
+        if airport.ident in enroute_distances:
+            summary["enroute_distance_nm"] = enroute_distances[airport.ident]
         airports.append(summary)
 
     from_airport = ctx.model.get_airport(from_icao.upper())

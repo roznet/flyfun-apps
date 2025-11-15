@@ -177,7 +177,7 @@ class AirportMap {
         }
 
         // Check if this is a route airport (has route-specific data)
-        const isRouteAirport = airport._routeDistance !== undefined;
+        const isRouteAirport = airport._routeSegmentDistance !== undefined;
 
         // Add airport marker based on current legend mode
         if (this.legendMode === 'procedure-precision') {
@@ -185,7 +185,12 @@ class AirportMap {
         } else {
             // For route airports, use the distance marker method
             if (isRouteAirport) {
-                this.addAirportMarkerWithDistance(airport, airport._routeDistance, airport._closestSegment);
+                this.addAirportMarkerWithDistance(
+                    airport,
+                    airport._routeSegmentDistance,
+                    airport._closestSegment,
+                    airport._routeEnrouteDistance
+                );
             } else {
                 this.addAirportMarker(airport);
             }
@@ -283,7 +288,7 @@ class AirportMap {
         this.markers.set(airport.ident, marker);
     }
 
-    addAirportMarkerWithDistance(airport, distanceNm, closestSegment) {
+    addAirportMarkerWithDistance(airport, segmentDistanceNm, closestSegment, enrouteDistanceNm) {
         // Determine marker color based on current legend mode
         let color = '#ffc107'; // Default: yellow
         let radius = 6;
@@ -358,10 +363,11 @@ class AirportMap {
 
         // Create enhanced popup content with distance info
         let popupContent = this.createPopupContent(airport);
-        if (distanceNm !== undefined) {
+        if (segmentDistanceNm !== undefined) {
             popupContent += `<hr><div style="font-size: 0.9em; color: #007bff;">
                 <strong>Route Distance:</strong> ${distanceNm}nm<br>
                 ${closestSegment ? `<strong>Closest to:</strong> ${closestSegment[0]} → ${closestSegment[1]}` : ''}
+                ${enrouteDistanceNm !== undefined && enrouteDistanceNm !== null ? `<br><strong>Along-track:</strong> ${enrouteDistanceNm}nm` : ''}
             </div>`;
         }
         
@@ -408,10 +414,11 @@ class AirportMap {
 
         // Create popup content with route distance if available
         let popupContent = this.createPopupContent(airport);
-        if (airport._routeDistance !== undefined) {
+        if (airport._routeSegmentDistance !== undefined) {
             popupContent += `<hr><div style="font-size: 0.9em; color: #007bff;">
-                <strong>Route Distance:</strong> ${airport._routeDistance}nm<br>
+                <strong>Route Distance:</strong> ${airport._routeSegmentDistance}nm<br>
                 ${airport._closestSegment ? `<strong>Closest to:</strong> ${airport._closestSegment[0]} → ${airport._closestSegment[1]}` : ''}
+                ${airport._routeEnrouteDistance !== undefined && airport._routeEnrouteDistance !== null ? `<br><strong>Along-track:</strong> ${airport._routeEnrouteDistance}nm` : ''}
             </div>`;
         }
         

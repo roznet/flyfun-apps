@@ -319,8 +319,10 @@ class ChatbotService:
                 for i, airport in enumerate(avgas_airports[:3]):  # Show top 3
                     response += f"**{airport['ident']}** - {airport.get('name', 'Unknown')}\n"
                     response += f"- Location: {airport.get('municipality', 'N/A')}, {airport.get('country', 'N/A')}\n"
-                    if airport.get('distance_nm'):
-                        response += f"- Distance from route: {airport['distance_nm']:.1f}nm\n"
+                    if airport.get('segment_distance_nm'):
+                        response += f"- Distance from route: {airport['segment_distance_nm']:.1f}nm\n"
+                    if airport.get('enroute_distance_nm') is not None:
+                        response += f"- Along-track distance: {airport['enroute_distance_nm']:.1f}nm\n"
                     if airport.get('longest_runway_length_ft'):
                         response += f"- Longest runway: {airport['longest_runway_length_ft']}ft\n"
                     response += "\n"

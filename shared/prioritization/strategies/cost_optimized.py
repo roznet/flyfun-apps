@@ -9,11 +9,12 @@ Prioritizes airports by:
 
 Within each priority, sorts by landing fee (cheapest first).
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from euro_aip.models.airport import Airport
-from euro_aip.storage.enrichment_storage import EnrichmentStorage
 from .base import PriorityStrategy, ScoredAirport
 
+if TYPE_CHECKING:
+    from shared.airport_tools import ToolContext
 
 class CostOptimizedStrategy(PriorityStrategy):
     """
@@ -32,8 +33,8 @@ class CostOptimizedStrategy(PriorityStrategy):
     def score(
         self,
         airports: List[Airport],
-        enrichment_storage: Optional[EnrichmentStorage] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        tool_context: Optional["ToolContext"] = None,
     ) -> List[ScoredAirport]:
         """Score airports by cost within priority levels."""
         scored: List[ScoredAirport] = []
@@ -52,6 +53,7 @@ class CostOptimizedStrategy(PriorityStrategy):
 
             # Get landing fee for sorting (C172 as default)
             landing_fee = 999999.0  # High default for missing data
+            enrichment_storage = getattr(tool_context, "enrichment_storage", None)
             if enrichment_storage:
                 try:
                     pricing = enrichment_storage.get_pricing_data(airport.ident)
@@ -68,16 +70,16 @@ class CostOptimizedStrategy(PriorityStrategy):
                     pass
 
             # Get distance if available from context
-            distance_nm = None
-            if context and 'route_distances' in context:
-                distance_nm = context['route_distances'].get(airport.ident)
+            segment_distance_nm = None
+            if context and "segment_distances" in context:
+                segment_distance_nm = context["segment_distances"].get(airport.ident)
 
             # Score = landing fee (lower is better)
             # If landing fee is missing, use distance as secondary sort
             if landing_fee < 999999:
                 score = landing_fee
-            elif distance_nm is not None:
-                score = 900000 + distance_nm  # High base + distance
+            elif segment_distance_nm is not None:
+                score = 900000 + segment_distance_nm  # High base + distance
             else:
                 score = 999999.0
 
@@ -89,7 +91,7 @@ class CostOptimizedStrategy(PriorityStrategy):
                     "has_border": has_border,
                     "has_procedures": has_procedures,
                     "landing_fee": landing_fee if landing_fee < 999999 else None,
-                    "distance_nm": distance_nm
+                    "segment_distance_nm": segment_distance_nm,
                 }
             ))
 
