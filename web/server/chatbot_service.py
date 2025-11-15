@@ -12,7 +12,8 @@ from typing import List, Dict, Any, Optional, Generator
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
-from mcp_client import MCPClient
+from web.server.mcp_client import MCPClient
+from web.server.chatbot_core import RunConversationResult, run_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -644,136 +645,43 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
                 - history: Updated conversation history
         """
         try:
-            # Build messages array
             messages = [{"role": "system", "content": self.system_prompt}]
-
-            # Add history
             if history:
                 messages.extend(history)
-
-            # Add current message
             messages.append({"role": "user", "content": message})
 
-            # Track visualization data from tool calls
-            visualizations = []
-            tool_calls_made = []
+            token_budget = None if self.llm_max_tokens == -1 else self.llm_max_tokens
 
-            # Make initial LLM call with fallback
-            response = self._call_llm_with_fallback(
-                model=self.llm_model,
+            def llm_callable(**kwargs):
+                return self._call_llm_with_fallback(**kwargs)
+
+            def tool_executor(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+                result = self.mcp_client._call_tool(name, arguments)
+                if "filter_profile" in result:
+                    logger.info(f"📋 Filter profile generated: {result['filter_profile']}")
+                return result
+
+            conversation = run_conversation(
                 messages=messages,
+                llm_call=llm_callable,
+                tool_executor=tool_executor,
                 tools=self.tools,
-                tool_choice="auto",
-                max_completion_tokens=None if self.llm_max_tokens == -1 else self.llm_max_tokens,
+                llm_model=self.llm_model,
+                max_completion_tokens=token_budget,
+                extract_thinking_and_answer=self._extract_thinking_and_answer,
+                format_tool_response=self._format_tool_response,
             )
 
-            # Debug: Log response type
-            logger.info(f"LLM Response type: {type(response)}")
-            if isinstance(response, str):
-                logger.error(f"LLM returned string instead of ChatCompletion: {response[:200]}")
-                raise ValueError("LLM API returned string instead of proper response object")
+            visualizations = conversation.visualizations
+            final_message = conversation.final_message
+            thinking = conversation.thinking
 
-            assistant_message = response.choices[0].message
-
-            # Check if LLM wants to call tools
-            if assistant_message.tool_calls:
-                logger.info(f"LLM requested {len(assistant_message.tool_calls)} tool calls")
-
-                # Add assistant's tool call request to messages
-                messages.append({
-                    "role": "assistant",
-                    "content": assistant_message.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": tc.type,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
-                            }
-                        }
-                        for tc in assistant_message.tool_calls
-                    ]
-                })
-
-                # Execute each tool call
-                for tool_call in assistant_message.tool_calls:
-                    function_name = tool_call.function.name
-                    function_args = json.loads(tool_call.function.arguments)
-
-                    logger.info(f"Calling tool: {function_name} with args: {function_args}")
-
-                    # Call the tool via MCP client
-                    tool_result = self.mcp_client._call_tool(function_name, function_args)
-
-                    # Log filter profile if present
-                    if "filter_profile" in tool_result:
-                        logger.info(f"📋 Filter profile generated: {tool_result['filter_profile']}")
-
-                    tool_calls_made.append({
-                        "name": function_name,
-                        "arguments": function_args,
-                        "result": tool_result
-                    })
-
-                    # Extract visualization data if present
-                    if "visualization" in tool_result:
-                        visualizations.append(tool_result["visualization"])
-
-                    # Add tool result to messages
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": function_name,
-                        "content": json.dumps(tool_result)
-                    })
-
-                # Make second LLM call with tool results and fallback
-                final_response = self._call_llm_with_fallback(
-                    model=self.llm_model,
-                    messages=messages,
-                    max_completion_tokens=None if self.llm_max_tokens == -1 else self.llm_max_tokens,
-                )
-
-                # Extract thinking and answer from response
-                raw_content = final_response.choices[0].message.content
-                thinking, final_message = self._extract_thinking_and_answer(raw_content)
-
-                # Check if LLM response is problematic (too short, JSON-like, empty)
-                # If so, use our formatted response as fallback
-                if (
-                    not final_message
-                    or len(final_message) < 20
-                    or final_message.strip().startswith('{')
-                    or final_message.strip().startswith('[')
-                    or '"path"' in final_message
-                    or '"query"' in final_message
-                ):
-                    logger.warning(f"LLM produced poor response: '{final_message[:100]}'. Using fallback formatter.")
-                    # Use our fallback formatter with the first tool call
-                    if tool_calls_made:
-                        first_tool = tool_calls_made[0]
-                        final_message = self._format_tool_response(
-                            first_tool["name"],
-                            first_tool["arguments"],
-                            first_tool["result"]
-                        )
-                        # No thinking for fallback responses
-                        thinking = ""
-
-            else:
-                # No tool calls, use direct response
-                raw_content = assistant_message.content
-                thinking, final_message = self._extract_thinking_and_answer(raw_content)
-                messages.append({"role": "assistant", "content": final_message})
-
-            # Prepare response
             return {
                 "message": final_message,
-                "thinking": thinking,  # Add thinking to response
+                "thinking": thinking,
                 "visualization": visualizations[0] if len(visualizations) == 1 else visualizations if visualizations else None,
-                "tool_calls": tool_calls_made,
-                "history": messages[1:],  # Exclude system prompt from returned history
+                "tool_calls": conversation.tool_calls,
+                "history": conversation.messages[1:],  # Exclude system prompt
                 "session_id": session_id
             }
 
