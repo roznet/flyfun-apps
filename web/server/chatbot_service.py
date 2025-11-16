@@ -64,6 +64,23 @@ class ChatbotService:
                 _mask_secret(self.fallback_llm_api_key),
             )
 
+        # Initialize answer generation LLM (GPT-4.1 for final responses)
+        self.answer_llm_model = os.getenv("ANSWER_LLM_MODEL", "gpt-4.1-2025-04-14")
+        self.answer_llm_api_key = os.getenv("ANSWER_LLM_API_KEY", self.fallback_llm_api_key)
+        self.answer_llm_api_base = os.getenv("ANSWER_LLM_API_BASE", self.fallback_llm_api_base)
+
+        self.answer_client = None
+        if self.answer_llm_api_key:
+            self.answer_client = OpenAI(
+                api_key=self.answer_llm_api_key,
+                base_url=self.answer_llm_api_base
+            )
+            logger.info(
+                "Answer generation client initialized: %s (API key %s)",
+                self.answer_llm_model,
+                _mask_secret(self.answer_llm_api_key),
+            )
+
         # Initialize MCP client for tool calls
         self.mcp_client = MCPClient()
 
@@ -650,6 +667,67 @@ Examples:
 
 Remember: You're helping pilots make informed decisions. Provide clear reasoning, specific details, then reference the map visualization."""
 
+    def _generate_filters_from_request(self, user_message: str) -> Dict[str, Any]:
+        """
+        Use LLM to generate filters object based on user's natural language request.
+
+        Args:
+            user_message: User's request
+
+        Returns:
+            Dict with filter parameters (e.g., {'has_avgas': True, 'point_of_entry': True})
+        """
+        filter_prompt = f"""Analyze this user request and extract airport filter requirements as a JSON object.
+
+Available filters:
+- has_avgas: Boolean (user mentions AVGAS or piston fuel)
+- has_jet_a: Boolean (user mentions Jet-A, jet fuel, or turbine fuel)
+- has_hard_runway: Boolean (user mentions paved/hard/asphalt/concrete runway)
+- has_procedures: Boolean (user mentions IFR/instrument procedures/approaches)
+- point_of_entry: Boolean (user mentions customs/border crossing/international entry)
+- country: String ISO-2 code (user mentions specific country)
+- min_runway_length_ft: Number (user specifies minimum runway length)
+- max_runway_length_ft: Number (user specifies maximum runway length)
+- max_landing_fee: Number (user mentions price limit)
+
+ONLY include filters that the user explicitly requests. Return empty object {{}} if no filters needed.
+
+User request: "{user_message}"
+
+Return ONLY a valid JSON object with the filters, nothing else. Examples:
+- "fuel stop with AVGAS" → {{"has_avgas": true}}
+- "customs airport with paved runway" → {{"point_of_entry": true, "has_hard_runway": true}}
+- "airports near Paris" → {{}}
+"""
+
+        try:
+            response = self._call_llm_with_fallback(
+                model=self.llm_model,
+                messages=[{"role": "user", "content": filter_prompt}],
+                max_completion_tokens=500,
+                temperature=0.0
+            )
+
+            filter_text = response.choices[0].message.content.strip()
+            logger.info(f"🔍 Filter generation LLM response: {filter_text}")
+
+            # Parse JSON response
+            import json
+            # Remove markdown code blocks if present
+            if filter_text.startswith("```"):
+                filter_text = filter_text.split("```")[1]
+                if filter_text.startswith("json"):
+                    filter_text = filter_text[4:]
+                filter_text = filter_text.strip()
+
+            filters = json.loads(filter_text)
+            logger.info(f"✅ Generated filters: {filters}")
+            return filters if filters else {}
+
+        except Exception as e:
+            logger.error(f"❌ Error generating filters: {e}")
+            return {}
+
     def chat(
         self,
         message: str,
@@ -747,6 +825,14 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
             prep_time = time.time()
             logger.info(f"⏱️ TIMING: Message prep took {prep_time - start_time:.2f}s")
 
+            # Generate filters from user message using LLM
+            logger.info(f"🔍 TIMING: Starting filter generation...")
+            filter_gen_start = time.time()
+            generated_filters = self._generate_filters_from_request(message)
+            filter_gen_end = time.time()
+            logger.info(f"🔍 TIMING: Filter generation took {filter_gen_end - filter_gen_start:.2f}s")
+            logger.info(f"🎯 Generated filters for user request: {generated_filters}")
+
             # Track state
             visualizations = []
             tool_calls_made = []
@@ -762,6 +848,13 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
 
             # First pass: Check if LLM wants to call tools (non-streaming) with fallback
             logger.info(f"⏱️ TIMING: Starting first LLM call (tool detection)...")
+
+            # DEBUG: Log tool descriptions being sent to LLM
+            for tool in self.tools:
+                if tool['function']['name'] == 'find_airports_near_route':
+                    logger.info(f"🔍 DEBUG: find_airports_near_route tool description: {tool['function']['description']}")
+                    logger.info(f"🔍 DEBUG: find_airports_near_route filters param: {tool['function']['parameters']['properties'].get('filters', {})}")
+
             llm_start = time.time()
             initial_response = self._call_llm_with_fallback(
                 model=self.llm_model,
@@ -789,6 +882,10 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
                 tools_start = time.time()
                 logger.info(f"⏱️ TIMING: LLM requested {len(assistant_message.tool_calls)} tool calls")
 
+                # DEBUG: Log the raw tool call from LLM
+                for tc in assistant_message.tool_calls:
+                    logger.info(f"🔍 DEBUG: Raw tool call from LLM - name={tc.function.name}, arguments={tc.function.arguments}")
+
                 # Add assistant's tool call request
                 messages.append({
                     "role": "assistant",
@@ -810,6 +907,16 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
                 for tool_call in assistant_message.tool_calls:
                     function_name = tool_call.function.name
                     function_args = json.loads(tool_call.function.arguments)
+
+                    # Inject generated filters into tool calls that support them
+                    if generated_filters and function_name in ['find_airports_near_route', 'search_airports']:
+                        if 'filters' not in function_args or not function_args.get('filters'):
+                            function_args['filters'] = generated_filters
+                            logger.info(f"💉 Injected generated filters into {function_name}: {generated_filters}")
+                        else:
+                            # Merge generated filters with existing filters from LLM
+                            function_args['filters'].update(generated_filters)
+                            logger.info(f"💉 Merged generated filters into {function_name}: {function_args['filters']}")
 
                     tool_exec_start = time.time()
                     logger.info(f"🔧 Used: {function_name}")
@@ -843,15 +950,27 @@ Remember: You're helping pilots make informed decisions. Provide clear reasoning
                 tools_end = time.time()
                 logger.info(f"⏱️ TIMING: All tools completed in {tools_end - tools_start:.2f}s")
 
-            # Stream final response with fallback
-            logger.info(f"⏱️ TIMING: Starting second LLM call (streaming response generation)...")
+            # Stream final response with answer generation model (GPT-4.1)
+            logger.info(f"⏱️ TIMING: Starting second LLM call (streaming response generation with {self.answer_llm_model})...")
             stream_start = time.time()
-            stream = self._call_llm_with_fallback(
-                model=self.llm_model,
-                messages=messages,
-                max_completion_tokens=None if self.llm_max_tokens == -1 else self.llm_max_tokens,
-                stream=True
-            )
+
+            # Use answer_client for final response generation (GPT-4.1)
+            if self.answer_client:
+                stream = self.answer_client.chat.completions.create(
+                    model=self.answer_llm_model,
+                    messages=messages,
+                    max_completion_tokens=None if self.llm_max_tokens == -1 else self.llm_max_tokens,
+                    temperature=self.llm_temperature,
+                    stream=True
+                )
+            else:
+                # Fall back to primary client if answer_client not available
+                stream = self._call_llm_with_fallback(
+                    model=self.llm_model,
+                    messages=messages,
+                    max_completion_tokens=None if self.llm_max_tokens == -1 else self.llm_max_tokens,
+                    stream=True
+                )
 
             # Process stream chunks with TRUE immediate streaming (from first token)
             tag_buffer = ""  # Only used when we detect potential tag start

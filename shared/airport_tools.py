@@ -178,7 +178,7 @@ def find_airports_near_route(
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "cost_optimized",
 ) -> Dict[str, Any]:
-    """List airports within a specified distance from a direct route between two airports, with optional airport filters (country, procedures, customs, etc.). Useful for finding fuel stops, alternates, or customs stops."""
+    """List airports within a specified distance from a direct route between two airports, with optional airport filters. IMPORTANT: When user mentions fuel (e.g., AVGAS, Jet-A), customs/border crossing, runway type (paved/hard), IFR procedures, or country, you MUST include the corresponding filter: has_avgas=True for AVGAS, has_jet_a=True for Jet-A, point_of_entry=True for customs, has_hard_runway=True for paved runways, has_procedures=True for IFR, country='XX' for specific country. Useful for finding fuel stops, alternates, or customs stops."""
     results = ctx.model.find_airports_near_route(
         [from_icao.upper(), to_icao.upper()],
         max_distance_nm
@@ -796,7 +796,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                         "filters": {
                             "type": "object",
-                            "description": "Optional airport filters: country, runway, fuel, customs, pricing.",
+                            "description": "IMPORTANT: Use filters object to filter airports by characteristics mentioned in user's request. Examples: {'has_avgas': True} for AVGAS fuel, {'point_of_entry': True} for customs, {'has_hard_runway': True} for paved runways, {'has_procedures': True} for IFR, {'country': 'FR'} for country. ALWAYS include filters when user specifies characteristics.",
                         },
                         "priority_strategy": {
                             "type": "string",
@@ -833,7 +833,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                         "filters": {
                             "type": "object",
-                            "description": "Airport filters (fuel, customs, runway length, etc.).",
+                            "description": "IMPORTANT: Use filters object to filter airports by characteristics mentioned in user's request. Examples: {'has_avgas': True} for AVGAS fuel, {'point_of_entry': True} for customs, {'has_hard_runway': True} for paved runways, {'has_procedures': True} for IFR, {'country': 'FR'} for country. ALWAYS include filters when user specifies characteristics like fuel type, customs, runway type, etc.",
                         },
                         "priority_strategy": {
                             "type": "string",
