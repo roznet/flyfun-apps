@@ -801,6 +801,17 @@ class AirportMap {
         links.push(`<a href="https://airfield.directory/airfield/${airport.ident}" target="_blank" class="btn btn-outline-success btn-sm me-2">
             <i class="fas fa-plane"></i> Airfield Directory
         </a>`);
+        
+        // Add Google Maps "Nearby Restaurants" link when coordinates are available
+        if (airport.latitude_deg !== undefined && airport.longitude_deg !== undefined) {
+            const q = encodeURIComponent('restaurants');
+            const zoom = 14;
+            const lat = airport.latitude_deg;
+            const lon = airport.longitude_deg;
+            links.push(`<a href="https://www.google.com/maps/search/${q}/@${lat},${lon},${zoom}z" target="_blank" rel="noopener noreferrer" class="btn btn-outline-danger btn-sm me-2">
+                <i class="fas fa-utensils"></i> Nearby Restaurants
+            </a>`);
+        }
         if (links.length > 0) {
             html += `
                 <div class="airport-detail-section">
