@@ -764,21 +764,7 @@ class AirportMap {
         if (noSelectionContainer) noSelectionContainer.style.display = 'none';
         
         // Display airport details (left panel)
-        let html = `
-            <div class="airport-detail-section">
-                <h6><i class="fas fa-info-circle"></i> Basic Information</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>ICAO:</strong></td><td>${airport.ident}</td></tr>
-                    <tr><td><strong>Name:</strong></td><td>${airport.name || 'N/A'}</td></tr>
-                    <tr><td><strong>Type:</strong></td><td>${airport.type || 'N/A'}</td></tr>
-                    <tr><td><strong>Country:</strong></td><td>${airport.iso_country || 'N/A'}</td></tr>
-                    <tr><td><strong>Region:</strong></td><td>${airport.iso_region || 'N/A'}</td></tr>
-                    <tr><td><strong>Municipality:</strong></td><td>${airport.municipality || 'N/A'}</td></tr>
-                    <tr><td><strong>Coordinates:</strong></td><td>${airport.latitude_deg?.toFixed(4)}, ${airport.longitude_deg?.toFixed(4)}</td></tr>
-                    <tr><td><strong>Elevation:</strong></td><td>${airport.elevation_ft || 'N/A'} ft</td></tr>
-                </table>
-            </div>
-        `;
+        let html = '';
 
         // Add links section if available
         const links = [];
@@ -801,6 +787,17 @@ class AirportMap {
         links.push(`<a href="https://airfield.directory/airfield/${airport.ident}" target="_blank" class="btn btn-outline-success btn-sm me-2">
             <i class="fas fa-plane"></i> Airfield Directory
         </a>`);
+        
+        // Add Google Maps "Nearby Restaurants" link when coordinates are available
+        if (airport.latitude_deg !== undefined && airport.longitude_deg !== undefined) {
+            const q = encodeURIComponent('restaurants');
+            const zoom = 14;
+            const lat = airport.latitude_deg;
+            const lon = airport.longitude_deg;
+            links.push(`<a href="https://www.google.com/maps/search/${q}/@${lat},${lon},${zoom}z" target="_blank" rel="noopener noreferrer" class="btn btn-outline-danger btn-sm me-2">
+                <i class="fas fa-utensils"></i> Nearby Restaurants
+            </a>`);
+        }
         if (links.length > 0) {
             html += `
                 <div class="airport-detail-section">
@@ -811,6 +808,23 @@ class AirportMap {
                 </div>
             `;
         }
+        
+        // Then add basic information
+        html += `
+            <div class="airport-detail-section">
+                <h6><i class="fas fa-info-circle"></i> Basic Information</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>ICAO:</strong></td><td>${airport.ident}</td></tr>
+                    <tr><td><strong>Name:</strong></td><td>${airport.name || 'N/A'}</td></tr>
+                    <tr><td><strong>Type:</strong></td><td>${airport.type || 'N/A'}</td></tr>
+                    <tr><td><strong>Country:</strong></td><td>${airport.iso_country || 'N/A'}</td></tr>
+                    <tr><td><strong>Region:</strong></td><td>${airport.iso_region || 'N/A'}</td></tr>
+                    <tr><td><strong>Municipality:</strong></td><td>${airport.municipality || 'N/A'}</td></tr>
+                    <tr><td><strong>Coordinates:</strong></td><td>${airport.latitude_deg?.toFixed(4)}, ${airport.longitude_deg?.toFixed(4)}</td></tr>
+                    <tr><td><strong>Elevation:</strong></td><td>${airport.elevation_ft || 'N/A'} ft</td></tr>
+                </table>
+            </div>
+        `;
 
         // Add runways section
         if (runways && runways.length > 0) {
