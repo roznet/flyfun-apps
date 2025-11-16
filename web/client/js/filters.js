@@ -455,6 +455,9 @@ class FilterManager {
             console.log('applyFilters - currentRoute:', this.currentRoute);
             console.log('applyFilters - currentFilters:', this.currentFilters);
 
+            // Clear any chat/locate overlays before running normal pipeline
+            this.clearChatOverlaysIfAny();
+
             // Check if we have an active route search AND it's not null
             if (this.currentRoute && this.currentRoute.airports && this.currentRoute.airports.length > 0) {
                 console.log('applyFilters - Reapplying route search with new filters');
@@ -498,6 +501,9 @@ class FilterManager {
         
         // Trim the query
         query = query.trim();
+
+        // Clear overlays from previous chat/locate visualizations when entering normal search
+        this.clearChatOverlaysIfAny();
         
         // If query is empty, reset to show all airports
         if (!query) {
@@ -569,6 +575,9 @@ class FilterManager {
 
     async handleRouteSearch(routeAirports, skipFilterUpdate = false) {
         try {
+            // Clear overlays from previous chat/locate visualizations when entering route search
+            this.clearChatOverlaysIfAny();
+
             // Get distance from UI or use default
             const distanceInput = document.getElementById('route-distance') || { value: '50' };
             const distanceNm = parseFloat(distanceInput.value) || 50.0;
@@ -689,6 +698,8 @@ class FilterManager {
         if (airportMap && airportMap.map && airportMap.airportLayer && !airportMap.map.hasLayer(airportMap.airportLayer)) {
             airportMap.airportLayer.addTo(airportMap.map);
         }
+        // Clear any chat overlays to avoid mixing lists
+        this.clearChatOverlaysIfAny();
         // Clear existing markers
         airportMap.clearMarkers();
         
@@ -1042,6 +1053,17 @@ class FilterManager {
             airports: this.airports.length,
             timestamp: new Date().toISOString()
         };
+    }
+
+    // Helper: clear chat/locate overlays if present
+    clearChatOverlaysIfAny() {
+        try {
+            if (typeof chatMapIntegration !== 'undefined' && chatMapIntegration && chatMapIntegration.chatLayers) {
+                chatMapIntegration.clearChatVisualizations();
+            }
+        } catch (e) {
+            console.warn('Could not clear chat overlays:', e);
+        }
     }
 }
 
