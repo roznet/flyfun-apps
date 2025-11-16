@@ -1,5 +1,55 @@
 #!/usr/bin/env python3
 
+"""
+AIP Data Export Tool using EuroAipModel
+======================================
+
+Description
+-----------
+Builds a unified EuroAipModel by combining one or more data sources (e.g. WorldAirports,
+France/UK eAIP, Autorouter, Border Crossing) and exports to a database with change
+tracking and/or JSON. Optionally starts from an existing database as the base model.
+
+Key behavior
+------------
+- Base model: If --database is provided, the base model is loaded from that DB (or from
+  AIRPORTS_DB / airports.db if no path is given), then other sources update/augment it.
+- WorldAirports filtering: --worldairports-filter can be one of:
+  required (default) | europe | all
+- Border crossing: Enable with --pointdepassage. If --pointdepassage-journal is given,
+  it will be used as input; otherwise, the source falls back to its defaults.
+- Saving fields: By default, only standardized fields are saved to DB storage.
+  Use --save-all-fields to save all fields.
+
+Usage
+-----
+python tools/aipexport.py [AIRPORTS ...]
+  [--database[=PATH]]
+  [--worldairports --worldairports-db PATH --worldairports-filter {required,europe,all}]
+  [--france-eaip DIR | --france-web [--eaip-date YYYY-MM-DD]]
+  [--uk-eaip DIR | --uk-web]
+  [--autorouter --autorouter-username USER --autorouter-password PASS]
+  [--pointdepassage [--pointdepassage-journal FILE]]
+  [--database-storage[=PATH]] [--json FILE] [--save-all-fields]
+  [-c CACHE_DIR] [--force-refresh | --never-refresh] [-v]
+
+Examples
+--------
+# Start from existing DB, enrich with border crossing, save only std fields to new DB:
+python tools/aipexport.py \
+  --database \
+  --pointdepassage \
+  --database-storage
+
+# WorldAirports (EU only) + France/UK web, export JSON and DB with all fields:
+python tools/aipexport.py \
+  --worldairports --worldairports-filter europe \
+  --france-web --uk-web --airac-date 2025-11-13 \
+  --json /tmp/model.json \
+  --database-storage /tmp/airports.db \
+  --save-all-fields
+"""
+
 import sys
 import argparse
 import logging
@@ -51,6 +101,12 @@ class ModelBuilder:
         
         # Initialize field standardization service
         self.field_service = FieldStandardizationService()
+        
+        # Optional base model from database
+        self.base_model: Optional[EuroAipModel] = None
+        if getattr(self.args, 'database', None) is not None:
+            storage = DatabaseStorage(_database_path(self.args.database))
+            self.base_model = storage.load_model()
         
         # Initialize sources
         self.sources = {}
@@ -119,7 +175,7 @@ class ModelBuilder:
 
     def build_model(self, airports: Optional[List[str]] = None) -> EuroAipModel:
         """Build EuroAipModel from all configured sources."""
-        model = EuroAipModel()
+        model = self.base_model if self.base_model is not None else EuroAipModel()
         
         # Prepare ordered sources: worldairports always last
         sources_items = list(self.sources.items())
@@ -215,6 +271,10 @@ class ModelBuilder:
                 logger.debug(f"Source {source_name} does not support find_available_airports")
         
         if not all_airports:
+            if self.base_model is not None and getattr(self.base_model, 'airports', None):
+                base_airports = list(self.base_model.airports.keys())
+                logger.info(f"Using {len(base_airports)} airports from base model")
+                return base_airports
             logger.warning("No airports found from any source that supports find_available_airports")
             return []
         
@@ -254,7 +314,10 @@ class AIPExporter:
         
         # Initialize exporters based on output format
         if self.args.database_storage is not None:
-            self.exporters['database_storage'] = DatabaseStorage(_database_path(self.args.database_storage))
+            self.exporters['database_storage'] = DatabaseStorage(
+                _database_path(self.args.database_storage),
+                save_only_std_fields=not getattr(self.args, 'save_all_fields', False)
+            )
         
         if self.args.json:
             self.exporters['json'] = JSONExporter(self.args.json)
@@ -302,6 +365,13 @@ def main():
     parser.add_argument('airports', help='List of ICAO airport codes to export (or all if empty)', nargs='*')
     
     # Source configuration
+    parser.add_argument(
+        '--database',
+        nargs='?',
+        const='',
+        default=None,
+        help='Load base model from existing database file (omit value to use default from AIRPORTS_DB or airports.db)'
+    )
     parser.add_argument('--worldairports', help='Enable WorldAirports source', action='store_true')
     parser.add_argument('--worldairports-db', help='WorldAirports database file', default=None)
     parser.add_argument('--worldairports-filter', 
@@ -332,6 +402,7 @@ def main():
         default=None,
         help='New unified database storage file with change tracking (omit value to use default from AIRPORTS_DB or airports.db)'
     )
+    parser.add_argument('--save-all-fields', help='Save all AIP fields (default saves only standardized fields)', action='store_true')
     parser.add_argument('--json', help='JSON output file')
     
     # General options
@@ -347,7 +418,7 @@ def main():
     
     # Validate that at least one source and one output format are specified
     sources_enabled = any([
-        args.worldairports, args.france_eaip, getattr(args, 'france_web', False), 
+        args.database is not None, args.worldairports, args.france_eaip, getattr(args, 'france_web', False), 
         args.uk_eaip, getattr(args, 'uk_web', False), args.autorouter, args.pointdepassage
     ])
     
