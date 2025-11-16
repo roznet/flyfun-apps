@@ -127,6 +127,12 @@ class FilterManager {
                             radiusNm: radius
                         };
                     }
+                    // Update main map view with located airports (fit bounds)
+                    if (Array.isArray(res?.airports)) {
+                        this.updateMapWithAirports(res.airports, false);
+                    }
+                    // Update URL to reflect state
+                    this.updateURL();
                     this.showSuccess(res?.pretty || `Located airports within ${radius}nm of "${query}"`);
                 } catch (err) {
                     console.error('Locate failed:', err);
@@ -187,10 +193,16 @@ class FilterManager {
                     window.chatbot.applyFilterProfile(res.filter_profile);
                 } catch (e) {}
             }
+            // Refresh main map with updated located airports (preserve view only if explicitly desired)
+            if (Array.isArray(res?.airports)) {
+                this.updateMapWithAirports(res.airports, false);
+            }
             // Keep state fresh (radius may have changed)
             if (res?.center) {
                 this.locateState.radiusNm = radius;
             }
+            // Keep URL in sync with current view/config
+            this.updateURL();
             this.showSuccess(res?.pretty || `Updated results within ${radius}nm of "${this.locateState.query}"`);
         } catch (error) {
             console.error('Error reapplying locate:', error);
