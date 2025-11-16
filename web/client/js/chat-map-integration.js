@@ -22,27 +22,77 @@ class ChatMapIntegration {
     visualizeData(visualization) {
         if (!visualization) return;
 
-        // Clear previous chat visualizations (overlay-only)
-        this.clearChatVisualizations();
+        // Prefer using existing UI pipelines via FilterManager for consistency:
+        // - route_with_markers → trigger route search with from/to
+        // - marker_with_details → trigger search by ident
+        // Fallback to overlay rendering for other types or if FilterManager is unavailable.
 
-        this.currentVisualization = visualization;
-
-        // Do not hide base airports; draw as overlay to keep a single rendering pipeline
-
-        // Handle array of visualizations (multi-leg routes)
-        if (Array.isArray(visualization)) {
-            console.log('Processing multiple visualizations:', visualization.length);
-            visualization.forEach((viz, index) => {
-                // Don't clear on subsequent visualizations
-                if (index > 0) {
-                    this.currentVisualization = viz;
+        // Helper to use route flow through FilterManager
+        const handleRouteViaFilters = (routeObj) => {
+            const fromIcao = routeObj?.from?.icao;
+            const toIcao = routeObj?.to?.icao;
+            if (fromIcao && toIcao && typeof filterManager !== 'undefined' && filterManager?.handleRouteSearch) {
+                // Let the unified route pipeline render markers/route and apply filters
+                try {
+                    // Do not rely on search-input parsing; call the route handler directly
+                    filterManager.handleRouteSearch([fromIcao, toIcao]);
+                    return true;
+                } catch (e) {
+                    console.warn('Route handoff to FilterManager failed, falling back to overlay:', e);
                 }
-                this.visualizeSingle(viz);
-            });
+            }
+            return false;
+        };
+
+        // Helper to use search flow through FilterManager
+        const handleIdentViaSearch = (ident) => {
+            if (ident && typeof filterManager !== 'undefined' && filterManager?.handleSearch) {
+                try {
+                    // Update search box for UX coherence
+                    const searchInput = document.getElementById('search-input');
+                    if (searchInput) searchInput.value = ident;
+                    filterManager.handleSearch(ident);
+                    return true;
+                } catch (e) {
+                    console.warn('Ident handoff to FilterManager failed, falling back to overlay:', e);
+                }
+            }
+            return false;
+        };
+
+        // Array visualizations: prefer the first route or marker-with-details item
+        if (Array.isArray(visualization)) {
+            // Try to find a route visualization first
+            const firstRoute = visualization.find(v => v && v.type === 'route_with_markers');
+            if (firstRoute && handleRouteViaFilters(firstRoute.route)) {
+                return;
+            }
+            // Then try single-marker detail visualization
+            const firstDetail = visualization.find(v => v && v.type === 'marker_with_details');
+            if (firstDetail && handleIdentViaSearch(firstDetail.marker?.ident)) {
+                return;
+            }
+            // Otherwise, fall back to overlay rendering for all
+            this.clearChatVisualizations();
+            this.currentVisualization = null;
+            visualization.forEach(viz => this.visualizeSingle(viz));
             return;
         }
 
-        // Single visualization
+        // Single visualization routing
+        if (visualization && visualization.type === 'route_with_markers') {
+            if (handleRouteViaFilters(visualization.route)) {
+                return;
+            }
+        } else if (visualization && visualization.type === 'marker_with_details') {
+            if (handleIdentViaSearch(visualization.marker?.ident)) {
+                return;
+            }
+        }
+
+        // Fallback: overlay rendering (legacy behavior)
+        this.clearChatVisualizations();
+        this.currentVisualization = visualization;
         this.visualizeSingle(visualization);
     }
 

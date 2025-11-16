@@ -279,7 +279,6 @@ def find_airports_near_route(
                     "lon": getattr(to_airport, "longitude_deg", None) if to_airport else None,
                 }
             },
-            "markers": airports_for_llm  # Only show what LLM sees and recommends
         }
     }
 
