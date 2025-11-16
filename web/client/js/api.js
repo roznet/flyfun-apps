@@ -111,7 +111,13 @@ class APIClient {
         const airportsParam = routeAirports.join(',');
         const params = new URLSearchParams();
         params.append('airports', airportsParam);
-        params.append('distance_nm', distanceNm.toString());
+        // Send as segment distance for consistency
+        params.append('segment_distance_nm', distanceNm.toString());
+        
+        // Optional enroute (trip) max distance from first route airport
+        if (filters && typeof filters.enroute_distance_max_nm === 'number' && isFinite(filters.enroute_distance_max_nm)) {
+            params.append('enroute_distance_max_nm', filters.enroute_distance_max_nm.toString());
+        }
         
         // Add filter parameters
         if (filters.country) params.append('country', filters.country);

@@ -364,10 +364,14 @@ class AirportMap {
         // Create enhanced popup content with distance info
         let popupContent = this.createPopupContent(airport);
         if (segmentDistanceNm !== undefined) {
+            const segText = typeof segmentDistanceNm === 'number' ? segmentDistanceNm.toFixed(1) : segmentDistanceNm;
+            const enrouteText = (enrouteDistanceNm !== undefined && enrouteDistanceNm !== null)
+                ? (typeof enrouteDistanceNm === 'number' ? enrouteDistanceNm.toFixed(1) : enrouteDistanceNm)
+                : null;
             popupContent += `<hr><div style="font-size: 0.9em; color: #007bff;">
-                <strong>Route Distance:</strong> ${distanceNm}nm<br>
-                ${closestSegment ? `<strong>Closest to:</strong> ${closestSegment[0]} → ${closestSegment[1]}` : ''}
-                ${enrouteDistanceNm !== undefined && enrouteDistanceNm !== null ? `<br><strong>Along-track:</strong> ${enrouteDistanceNm}nm` : ''}
+                <strong>Route Distance:</strong> ${segText}nm
+                ${closestSegment ? `<br><strong>Closest to:</strong> ${closestSegment[0]} → ${closestSegment[1]}` : ''}
+                ${enrouteText !== null ? `<br><strong>Along-track:</strong> ${enrouteText}nm` : ''}
             </div>`;
         }
         

@@ -29,6 +29,7 @@ class FilterManager {
             'has-hard-runway',
             'border-crossing-only',
             'route-distance',
+            'enroute-distance',
             'max-airports-filter'
         ];
 
@@ -501,12 +502,21 @@ class FilterManager {
             // Get distance from UI or use default
             const distanceInput = document.getElementById('route-distance') || { value: '50' };
             const distanceNm = parseFloat(distanceInput.value) || 50.0;
+            // Optional: Max enroute distance from first route airport
+            const enrouteInput = document.getElementById('enroute-distance');
+            const enrouteMaxNm = enrouteInput ? parseFloat(enrouteInput.value) : undefined;
             
             // Get current filter settings (unless already updated)
             if (!skipFilterUpdate) {
                 this.updateFilters();
             }
             const currentFilters = this.currentFilters;
+            // Attach enroute distance if provided
+            if (!isNaN(enrouteMaxNm) && isFinite(enrouteMaxNm)) {
+                currentFilters.enroute_distance_max_nm = enrouteMaxNm;
+            } else {
+                delete currentFilters.enroute_distance_max_nm;
+            }
             
             console.log('handleRouteSearch - Current filters:', currentFilters);
             console.log('handleRouteSearch - Route airports:', routeAirports);
@@ -773,6 +783,12 @@ class FilterManager {
         const routeDistance = document.getElementById('route-distance').value;
         if (routeDistance && routeDistance !== '50') {
             params.set('route_distance', routeDistance);
+        }
+        
+        // Add enroute max distance
+        const enrouteDistance = document.getElementById('enroute-distance')?.value;
+        if (enrouteDistance && enrouteDistance !== '') {
+            params.set('enroute_max', enrouteDistance);
         }
         
         // Add max airports

@@ -348,6 +348,16 @@ class AirportExplorerApp {
                 }
             }
             
+            // Apply enroute max distance
+            if (urlParams.has('enroute_max')) {
+                const enroute = urlParams.get('enroute_max');
+                const enrouteElement = document.getElementById('enroute-distance');
+                if (enrouteElement) {
+                    enrouteElement.value = enroute;
+                    hasAppliedParams = true;
+                }
+            }
+            
             // Apply max airports
             if (urlParams.has('max_airports')) {
                 const maxAirports = urlParams.get('max_airports');

@@ -135,7 +135,13 @@ async def get_airports(
 async def get_airports_near_route(
     request: Request,
     airports: str = Query(..., description="Comma-separated list of ICAO airport codes defining the route", max_length=200),
-    distance_nm: float = Query(50.0, description="Distance in nautical miles from the route", ge=0.1, le=500.0),
+    segment_distance_nm: float = Query(50.0, description="Max perpendicular distance from route (NM)", ge=0.1, le=500.0),
+    # Backward compatibility: accept legacy distance_nm if provided
+    legacy_distance_nm: Optional[float] = Query(None, alias="distance_nm", description="Deprecated: use segment_distance_nm"),
+    # Optional enroute distance filter (distance from first route airport)
+    enroute_distance_max_nm: Optional[float] = Query(
+        None,
+        description="Max great-circle distance from the first route airport (NM)"),
     country: Optional[str] = Query(None, description="Filter by ISO country code", max_length=3),
     has_procedures: Optional[bool] = Query(None, description="Filter airports with procedures"),
     has_aip_data: Optional[bool] = Query(None, description="Filter airports with AIP data"),
@@ -166,13 +172,28 @@ async def get_airports_near_route(
         if not model.get_airport(icao):
             raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
+    # Resolve effective segment distance (support legacy query param)
+    effective_segment_distance_nm = legacy_distance_nm if legacy_distance_nm is not None else segment_distance_nm
+    
     # Find airports near the route
-    nearby_airports = model.find_airports_near_route(route_airports, distance_nm)
+    nearby_airports = model.find_airports_near_route(route_airports, effective_segment_distance_nm)
    
     # Apply additional filters
     filtered_airports = []
+    # Prepare enroute distance context if needed
+    from_airport = model.get_airport(route_airports[0]) if enroute_distance_max_nm is not None else None
     for item in nearby_airports:
         airport = item['airport']
+        
+        # Apply enroute (trip) distance max filter from first route airport
+        if from_airport is not None:
+            try:
+                _, gc_distance_nm = from_airport.navpoint.haversine_distance(airport.navpoint)
+                if gc_distance_nm > float(enroute_distance_max_nm):
+                    continue
+            except Exception:
+                # If distance can't be computed, conservatively include
+                pass
         
         # Apply country filter
         if country and airport.iso_country != country:
@@ -222,10 +243,11 @@ async def get_airports_near_route(
     
     return {
         'route_airports': route_airports,
-        'distance_nm': distance_nm,
+        'segment_distance_nm': effective_segment_distance_nm,
         'airports_found': len(result),
         'total_nearby': len(nearby_airports),
         'filters_applied': {
+            'enroute_distance_max_nm': enroute_distance_max_nm,
             'country': country,
             'has_procedures': has_procedures,
             'has_aip_data': has_aip_data,
