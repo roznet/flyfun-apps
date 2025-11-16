@@ -133,6 +133,18 @@ class APIClient {
         return this.request(`/api/airports/route-search?${params.toString()}`);
     }
 
+    async locateAirports(query, radiusNm = 50.0, filters = {}) {
+        const params = new URLSearchParams();
+        params.append('q', query);
+        params.append('radius_nm', radiusNm.toString());
+        if (filters.country) params.append('country', filters.country);
+        if (filters.has_procedures === true) params.append('has_procedures', 'true');
+        if (filters.has_aip_data === true) params.append('has_aip_data', 'true');
+        if (filters.has_hard_runway === true) params.append('has_hard_runway', 'true');
+        if (filters.point_of_entry === true) params.append('point_of_entry', 'true');
+        return this.request(`/api/airports/locate?${params.toString()}`);
+    }
+
     // Filter endpoints
     async getAvailableCountries() {
         return this.request('/api/filters/countries');

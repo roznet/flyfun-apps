@@ -91,6 +91,9 @@ class ChatMapIntegration {
             case 'marker_with_details':
                 this.visualizeMarkerWithDetails(visualization.marker);
                 break;
+            case 'point_with_markers':
+                this.visualizePointWithMarkers(visualization.point, visualization.markers);
+                break;
             default:
                 console.warn('Unknown visualization type:', visualization.type);
         }
@@ -220,6 +223,52 @@ class ChatMapIntegration {
         this.map.fitBounds(bounds, { padding: [50, 50] });
 
         this.showVisualizationInfo(`Route from ${route.from.icao} to ${route.to.icao} with ${markers ? markers.length : 0} stop(s)`);
+    }
+
+    /**
+     * Visualize a center point with surrounding airport markers
+     */
+    visualizePointWithMarkers(point, markers) {
+        if (!point || !point.lat || !point.lon) return;
+
+        // Store airports for filtering
+        this.chatAirports = markers || [];
+
+        // Center marker
+        const centerMarker = L.marker([point.lat, point.lon], {
+            title: point.label || 'Search Center',
+            icon: L.divIcon({
+                className: 'center-pin',
+                html: '<div style="font-size:22px;">📍</div>',
+                iconSize: [24, 24],
+                iconAnchor: [12, 24],
+            })
+        }).addTo(this.chatLayers);
+        this.chatMarkers.push(centerMarker);
+
+        const bounds = [[point.lat, point.lon]];
+
+        // Airport markers with distance (if present)
+        (markers || []).forEach(airportData => {
+            if (airportData.latitude_deg && airportData.longitude_deg) {
+                const marker = this.createNativeStyledMarkerWithDistance(
+                    airportData,
+                    airportData.distance_nm,
+                    null
+                );
+                marker.addTo(this.chatLayers);
+                marker.on('click', () => {
+                    if (window.app && window.app.loadAirportDetails) {
+                        window.app.loadAirportDetails(airportData.ident);
+                    }
+                });
+                this.chatMarkers.push(marker);
+                bounds.push([airportData.latitude_deg, airportData.longitude_deg]);
+            }
+        });
+
+        this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
+        this.showVisualizationInfo(`Location: ${point.label || 'Selected'} — ${markers?.length || 0} airport(s)`);
     }
 
     /**

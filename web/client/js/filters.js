@@ -91,6 +91,39 @@ class FilterManager {
             this.applyFilters();
         });
 
+        // Locate button
+        const locateButton = document.getElementById('locate-button');
+        if (locateButton) {
+            locateButton.addEventListener('click', async () => {
+                try {
+                    const qInput = document.getElementById('search-input');
+                    const radiusInput = document.getElementById('route-distance');
+                    const query = (qInput?.value || '').trim();
+                    const radius = parseFloat(radiusInput?.value || '50') || 50.0;
+                    if (!query) {
+                        this.showError('Enter a place in the search box to locate near.');
+                        return;
+                    }
+                    const res = await api.locateAirports(query, radius, this.getCurrentFilters());
+                    if (res?.visualization && window.chatMapIntegration) {
+                        window.chatMapIntegration.visualizeData(res.visualization);
+                    }
+                    if (res?.filter_profile && window.chatbot) {
+                        // Reuse chatbot's filter profile sync if available
+                        try {
+                            window.chatbot.applyFilterProfile(res.filter_profile);
+                        } catch (e) {
+                            // Non-fatal if chatbot not initialized
+                        }
+                    }
+                    this.showSuccess(res?.pretty || `Located airports within ${radius}nm of "${query}"`);
+                } catch (err) {
+                    console.error('Locate failed:', err);
+                    this.showError('Locate failed. Please try again.');
+                }
+            });
+        }
+
         // Reset zoom button
         const resetZoomButton = document.getElementById('reset-zoom');
         resetZoomButton.addEventListener('click', () => {

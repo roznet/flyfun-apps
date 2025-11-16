@@ -7,6 +7,7 @@ import logging
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.airport import Airport
 from .models import AirportSummary, AirportDetail, AIPEntryResponse
+from shared.airport_tools import ToolContext, find_airports_near_location
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,54 @@ async def get_airports_near_route(
             'aip_operator': aip_operator
         },
         'airports': result
+    }
+
+@router.get("/locate")
+async def locate_airports(
+    request: Request,
+    q: str = Query(..., description="Free-text location to search around", max_length=200),
+    radius_nm: float = Query(50.0, description="Max distance from location (NM)", ge=0.1, le=500.0),
+    country: Optional[str] = Query(None, description="Filter by ISO country code", max_length=3),
+    has_procedures: Optional[bool] = Query(None, description="Filter airports with procedures"),
+    has_aip_data: Optional[bool] = Query(None, description="Filter airports with AIP data"),
+    has_hard_runway: Optional[bool] = Query(None, description="Filter airports with hard runways"),
+    point_of_entry: Optional[bool] = Query(None, description="Filter border crossing airports")
+):
+    """
+    Locate airports near a free-text location, leveraging Geoapify geocoding via shared tool.
+    """
+    if not model:
+        raise HTTPException(status_code=500, detail="Model not loaded")
+    filters: Dict[str, Any] = {}
+    if country:
+        filters["country"] = country
+    if has_procedures is not None:
+        filters["has_procedures"] = has_procedures
+    if has_aip_data is not None:
+        filters["has_aip_data"] = has_aip_data
+    if has_hard_runway is not None:
+        filters["has_hard_runway"] = has_hard_runway
+    if point_of_entry is not None:
+        filters["point_of_entry"] = point_of_entry
+
+    # Build a lightweight tool context with the existing in-memory model
+    ctx = ToolContext(model=model)
+    result = find_airports_near_location(
+        ctx,
+        location_query=q,
+        max_distance_nm=radius_nm,
+        filters=filters or None
+    )
+
+    # Pass through relevant fields for client
+    return {
+        "count": result.get("count", 0),
+        "center": result.get("center"),
+        "airports": result.get("airports") or [],
+        "pretty": result.get("pretty"),
+        "filter_profile": result.get("filter_profile"),
+        "visualization": result.get("visualization"),
+        "found": result.get("found", False)
     }
 
 @router.get("/aip-filter-presets")
