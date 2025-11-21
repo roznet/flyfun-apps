@@ -126,15 +126,16 @@ tests/aviation_agent/
    - Validates chat requests (messages, MCP auth, feature flags).
    - Instantiates the shared `McpClient` (or re-uses `web/server/mcp_client.py` helpers).
    - Calls `shared.aviation_agent.adapters.langgraph_runner.run_aviation_agent(...)`.
-   - Returns the `ChatResponse` schema (see §8) so UI consumers only read `answer`, `planner_meta`,
+   - Returns the `ChatResponse` schema (see §9) so UI consumers only read `answer`, `planner_meta`,
      and `ui_payload`.
 2. **Server entry point** – import the router in `web/server/chatbot_service.py` or `web/server/main.py`
    and include it: `app.include_router(aviation_agent_chat.router, prefix="/aviation-agent")`.
 3. **Logging & metrics** – leverage existing `conversation_logs/` pipeline by emitting structured
    events before/after agent calls (shared adapter emits instrumentation hooks so the API layer can
    attach request IDs).
-4. **Configuration** – `shared/aviation_agent/config.py` reads environment variables supplied by
-   `web/server/dev.env` / `prod.env` so deployments stay centralized.
+4. **Configuration & flagging** – `shared/aviation_agent/config.py` reads environment variables supplied
+   by `web/server/dev.env` / `prod.env`, including an `AVIATION_AGENT_ENABLED` feature flag. The server
+   should only `include_router(...)` when this flag is true so rollouts can be staged safely.
 
 ---
 
@@ -152,7 +153,19 @@ tests/aviation_agent/
 
 ---
 
-## 5. `state.py` — Agent State With A3 UI Payload
+## 5. Planner Schema & Tool Naming
+
+- `AviationPlan.selected_tool` uses the literal MCP tool names defined in
+  `shared/airport_tools.get_shared_tool_specs()` (e.g., `search_airports`,
+  `find_airports_near_route`, `get_airport_details`, `list_rules_for_country`, …).
+- Add a validation helper inside `shared/aviation_agent/planning.py` that raises if a plan references
+  a tool that does not exist in the manifest; this keeps planner schema and MCP registration aligned.
+- `_build_ui_payload()` maps these literal tool names to the three UI `kind` buckets. Whenever the
+  MCP manifest grows, update only the mapping table (not the schema) to reflect the new tool’s kind.
+
+---
+
+## 6. `state.py` — Agent State With A3 UI Payload
 
 ```python
 class AgentState(TypedDict):
@@ -167,7 +180,7 @@ class AgentState(TypedDict):
 
 ---
 
-## 6. `_build_ui_payload()` — The A3 Specification
+## 7. `_build_ui_payload()` — The A3 Specification
 
 A3’s rule:
 
@@ -179,7 +192,7 @@ def _build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | No
     if tool_result is None:
         return None
 
-    if plan.selected_tool == "get_route_options":
+    if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
         return {
             "kind": "route",
             "departure": plan.arguments.get("departure"),
@@ -188,14 +201,27 @@ def _build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | No
             "mcp_raw": tool_result,    # the authoritative data
         }
 
-    if plan.selected_tool == "get_airport_info":
+    if plan.selected_tool in {
+        "get_airport_details",
+        "get_border_crossing_airports",
+        "get_airport_statistics",
+        "get_airport_pricing",
+        "get_pilot_reviews",
+        "get_fuel_prices",
+    }:
         return {
             "kind": "airport",
             "icao": plan.arguments.get("icao"),
             "mcp_raw": tool_result,
         }
 
-    if plan.selected_tool == "get_flying_rules":
+    if plan.selected_tool in {
+        "list_rules_for_country",
+        "compare_rules_between_countries",
+        "get_answers_for_questions",
+        "list_rule_categories_and_tags",
+        "list_rule_countries",
+    }:
         return {
             "kind": "rules",
             "region": plan.arguments.get("region"),
@@ -214,7 +240,7 @@ def _build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | No
 
 ---
 
-## 7. Formatter Node — Now Returns `final_answer` + `ui_payload`
+## 8. Formatter Node — Now Returns `final_answer` + `ui_payload`
 
 Final code:
 
@@ -230,7 +256,7 @@ return {
 
 ---
 
-## 8. FastAPI Endpoint — Clean Stable Output
+## 9. FastAPI Endpoint — Clean Stable Output
 
 ```python
 class ChatResponse(BaseModel):
@@ -260,7 +286,7 @@ def chat(request: ChatRequest):
 
 ---
 
-## 9. Tests Updated for A3 Payload
+## 10. Tests Updated for A3 Payload
 
 Example:
 
@@ -277,7 +303,7 @@ def test_end_to_end_route_query_builds_route_ui_payload():
 
 ---
 
-## 10. MCP Tool & Payload Catalog
+## 11. MCP Tool & Payload Catalog
 
 The shared code already centralizes every MCP tool signature in `shared/airport_tools.py`; the agent
 should treat that file as the single source of truth and let `get_shared_tool_specs()` drive planner
@@ -326,7 +352,7 @@ developers, FastAPI engineers, and UI implementers can all read the same contrac
 
 ---
 
-## 11. Summary of A3 Benefits
+## 12. Summary of A3 Benefits
 
 ### ✔ Stable for the UI  
 Only `kind`, `departure`, `icao`, etc. matter.
