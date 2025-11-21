@@ -19,7 +19,11 @@ class AgentState(TypedDict, total=False):
 
     messages: Annotated[List[BaseMessage], operator.add]
     plan: Optional[AviationPlan]
+    planning_reasoning: Optional[str]  # Planner's reasoning (why this tool/approach)
     tool_result: Optional[Any]
+    formatting_reasoning: Optional[str]  # Formatter's reasoning (how to present results)
     final_answer: Optional[str]
+    thinking: Optional[str]  # Combined reasoning for UI (planning + formatting)
     ui_payload: Optional[dict]
+    error: Optional[str]  # Error message if execution fails
 

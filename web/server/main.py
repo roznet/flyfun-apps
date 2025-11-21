@@ -285,7 +285,6 @@ async def health_check():
 
 if __name__ == "__main__":
     # show environment variables
-    logger.info(f"Environment variables: {os.environ}")
     uvicorn.run(
         "main:app",
         host=os.getenv("HOST", "0.0.0.0"),

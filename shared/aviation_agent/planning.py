@@ -50,6 +50,12 @@ def build_planner_runnable(
                 (
                     "You are AviationPlan, a planning agent that selects exactly one aviation tool.\n"
                     "Tools:\n{tool_catalog}\n\n"
+                    "**Filter Extraction:**\n"
+                    "If the user mentions specific requirements (AVGAS, customs, runway length, country, etc.),\n"
+                    "extract them as a 'filters' object in the 'arguments' field. Only include filters the user explicitly requests.\n"
+                    "Available filters: has_avgas, has_jet_a, has_hard_runway, has_procedures, point_of_entry,\n"
+                    "country (ISO-2 code), min_runway_length_ft, max_runway_length_ft, max_landing_fee.\n\n"
+                    "Example: If user says 'fuel stop with AVGAS', set arguments.filters = {{'has_avgas': true}}\n\n"
                     "Always return JSON that matches this schema:\n{schema}\n"
                     "Pick the tool that can produce the most authoritative answer for the pilot."
                 ),

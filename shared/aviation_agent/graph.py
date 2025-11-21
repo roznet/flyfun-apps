@@ -17,25 +17,72 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter):
     graph = StateGraph(AgentState)
 
     def planner_node(state: AgentState) -> Dict[str, Any]:
-        plan: AviationPlan = planner.invoke({"messages": state.get("messages") or []})
-        return {"plan": plan}
+        try:
+            plan: AviationPlan = planner.invoke({"messages": state.get("messages") or []})
+            # Generate simple reasoning from plan
+            reasoning_parts = [f"Selected tool: {plan.selected_tool}"]
+            if plan.arguments.get("filters"):
+                filter_str = ", ".join(f"{k}={v}" for k, v in plan.arguments["filters"].items())
+                reasoning_parts.append(f"with filters: {filter_str}")
+            if plan.arguments:
+                other_args = {k: v for k, v in plan.arguments.items() if k != "filters"}
+                if other_args:
+                    arg_str = ", ".join(f"{k}={v}" for k, v in other_args.items())
+                    reasoning_parts.append(f"with arguments: {arg_str}")
+            
+            reasoning = ". ".join(reasoning_parts) + "."
+            return {"plan": plan, "planning_reasoning": reasoning}
+        except Exception as e:
+            return {"error": str(e)}
 
     def tool_node(state: AgentState) -> Dict[str, Any]:
+        if state.get("error"):
+            return {}  # Skip if planner failed
         plan = state.get("plan")
         if not plan:
-            return {}
-        result = tool_runner.run(plan)
-        return {"tool_result": result}
+            return {"error": "No plan available"}
+        try:
+            result = tool_runner.run(plan)
+            return {"tool_result": result}
+        except Exception as e:
+            return {"error": str(e)}
 
     def formatter_node(state: AgentState) -> Dict[str, Any]:
-        formatted = formatter.invoke(
-            {
-                "messages": state.get("messages") or [],
-                "plan": state.get("plan"),
-                "tool_result": state.get("tool_result"),
+        # Handle errors gracefully
+        if state.get("error"):
+            return {
+                "final_answer": f"I encountered an error: {state['error']}. Please try again.",
+                "error": state["error"],
+                "thinking": state.get("planning_reasoning", ""),
             }
-        )
-        return formatted
+        
+        try:
+            formatted = formatter.invoke(
+                {
+                    "messages": state.get("messages") or [],
+                    "plan": state.get("plan"),
+                    "tool_result": state.get("tool_result"),
+                }
+            )
+            
+            # Combine planning and formatting reasoning
+            thinking_parts = []
+            if state.get("planning_reasoning"):
+                thinking_parts.append(state["planning_reasoning"])
+            if formatted.get("formatting_reasoning"):
+                thinking_parts.append(formatted["formatting_reasoning"])
+            
+            return {
+                "final_answer": formatted.get("final_answer", ""),
+                "thinking": "\n\n".join(thinking_parts) if thinking_parts else None,
+                "ui_payload": formatted.get("ui_payload"),
+            }
+        except Exception as e:
+            return {
+                "final_answer": f"Error formatting response: {str(e)}",
+                "error": str(e),
+                "thinking": state.get("planning_reasoning", ""),
+            }
 
     graph.add_node("planner", planner_node)
     graph.add_node("tool", tool_node)
