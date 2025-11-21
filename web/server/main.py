@@ -40,7 +40,7 @@ from security_config import (
 )
 
 # Import API routes
-from api import airports, procedures, filters, statistics, chatbot, rules
+from api import airports, procedures, filters, statistics, chatbot, rules, aviation_agent_chat
 # LangChain-based chat endpoint (alternative to streaming chatbot)
 from chat import ask as chat_ask
 
@@ -231,6 +231,16 @@ app.include_router(rules.router, prefix="/api/rules", tags=["rules"])
 # Chatbot endpoints: both streaming (OpenAI) and LangChain+MCP available
 app.include_router(chatbot.router, prefix="/api/chat", tags=["chatbot"])  # Streaming: /api/chat/stream
 app.include_router(chat_ask.router, tags=["chat"])  # LangChain+MCP: /chat/ask, /chat/health
+
+if aviation_agent_chat.feature_enabled():
+    logger.info("Aviation agent router enabled at /api/aviation-agent")
+    app.include_router(
+        aviation_agent_chat.router,
+        prefix="/api/aviation-agent",
+        tags=["aviation-agent"],
+    )
+else:
+    logger.info("Aviation agent router disabled (AVIATION_AGENT_ENABLED is false)")
 
 # Serve static files for client assets
 client_dir = Path(__file__).parent.parent / "client"
