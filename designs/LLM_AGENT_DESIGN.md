@@ -1,38 +1,38 @@
-# Aviation Agent – Design & Implementation Guide (A3 UI Payload Version)
+# Aviation Agent – Design & Architecture Guide
 
-This document describes the full architecture, components, testing strategy, and UI-integration
-design for an aviation-focused LangChain/LangGraph agent that uses your custom **aviation MCP database**
-(routes, airports, rules) and exposes **structured outputs** suitable for a modern chat UI
-(including side panels such as maps, airport cards, or rules checklists).
+This document describes the architecture, components, and design principles for the aviation-focused LangGraph agent that uses the custom **aviation MCP database** (routes, airports, rules) and exposes **structured outputs** suitable for a modern chat UI (including side panels such as maps, airport cards, or rules checklists).
 
-This version implements **UI payload Plan A3**:
+## UI Payload Design (Hybrid Approach)
+
+The agent implements a **hybrid UI payload design**:
 
 - The UI receives a **stable, curated JSON payload (`ui_payload`)**
 - It contains:
   - `kind`: `"route"`, `"airport"`, or `"rules"`
   - A small set of stable **top-level fields** (e.g. `departure`, `icao`, `region`)
+  - **Flattened commonly-used fields** for convenience (`filters`, `visualization`, `airports`)
   - A **full MCP tool output** stored under the key:  
     ```
     "mcp_raw": { ... }
     ```
 
-- Internally, the agent’s planner (`AviationPlan`) is **decoupled** from the UI.
-- Only the `_build_ui_payload(plan, tool_result)` function must be updated if planner output evolves.
+- Internally, the agent's planner (`AviationPlan`) is **decoupled** from the UI.
+- Only the `build_ui_payload(plan, tool_result)` function must be updated if planner output evolves.
 
-This design strongly isolates UI from internal LLM schema changes while still enabling rich UI behavior.
+This design strongly isolates UI from internal LLM schema changes while still enabling rich UI behavior and convenient access to common fields.
 
 ---
 
 ## 1. High-Level Architecture
 
-### Core design:
+### Core Design
 
 The agent operates in **three steps via LangGraph**:
 
 1. **Planner Node**
    - LLM with structured output (`AviationPlan`).
    - Selects one aviation tool.
-   - Extracts the best possible arguments.
+   - Extracts the best possible arguments (including filters).
    - Specifies answer style.
 
 2. **Tool Runner Node**
@@ -42,16 +42,19 @@ The agent operates in **three steps via LangGraph**:
 3. **Formatter Node**
    - Produces:
      - The final answer text.
-     - A **UI payload** (`ui_payload`) matching A3:
-       ```
+     - A **UI payload** (`ui_payload`) with hybrid structure:
+       ```json
        {
          "kind": "...",
          ... stable high-level fields ...,
+         "filters": {...},  // Flattened from mcp_raw.filter_profile
+         "visualization": {...},  // Flattened from mcp_raw.visualization
+         "airports": [...],  // Flattened from mcp_raw.airports
          "mcp_raw": { ... full MCP response ... }
        }
        ```
 
-### Agent state flow
+### Agent State Flow
 
 ```
 ┌────────┐     ┌─────────────┐     ┌───────────────┐
@@ -59,149 +62,197 @@ The agent operates in **three steps via LangGraph**:
 └────────┘     └─────────────┘     └───────────────┘
 ```
 
-The UI receives:
+The UI receives (via SSE streaming):
 
-- `answer` (markdown)
-- `ui_payload` (stable JSON)
-- `planner_meta` (full plan for debugging)
-- `tool_result` is not needed but can also be exposed.
+- `answer` (markdown, streamed character-by-character)
+- `ui_payload` (stable JSON with hybrid structure)
+- `thinking` (combined planning + formatting reasoning)
+- `plan` (full plan for debugging)
+- Token usage statistics
 
 ---
 
-## 2. Repository Integration Plan
+## 2. Repository Structure
 
-FlyFun already separates shared Python libraries (`shared/`), FastAPI server code (`web/server/`),
-and pytest suites (`tests/`). The LangChain/LangGraph agent should follow that pattern so the same
-package can be imported by the web server, CLI tools, or future jobs without duplication.
+The agent follows FlyFun's pattern of separating shared Python libraries (`shared/`), FastAPI server code (`web/server/`), and pytest suites (`tests/`).
 
 ```
 shared/aviation_agent/
   __init__.py
   config.py
   state.py
-  mcp_client.py
-  tools.py
   planning.py
   execution.py
   formatting.py
   graph.py
   adapters/
     __init__.py
-    langgraph_runner.py      # orchestration helpers (e.g., run_aviation_agent)
-    fastapi_io.py            # translate HTTP payloads ↔ agent inputs
+    streaming.py          # SSE streaming adapter
+    logging.py            # Conversation logging
+    langgraph_runner.py   # Orchestration helpers
 ```
 
 ```
 web/server/api/
-  aviation_agent_chat.py     # FastAPI router that imports shared.aviation_agent adapters
-  ...
+  aviation_agent_chat.py  # FastAPI router with streaming endpoint
 ```
 
 ```
 tests/aviation_agent/
   __init__.py
-  conftest.py                # shared fixtures + MCP doubles
-  fixtures.py
-  test_planner.py
+  conftest.py             # Shared fixtures + MCP doubles
+  test_planning.py
   test_execution.py
-  test_formatter.py
+  test_formatting.py
   test_graph_e2e.py
+  test_streaming.py
+  test_integration.py
 ```
 
-### Placement notes
+### Placement Notes
 
-- `shared/aviation_agent/` keeps the LangGraph stack versioned once and importable from both
-  `web/server/chatbot_service.py` and any offline scripts.
-- The new FastAPI router in `web/server/api/aviation_agent_chat.py` can be mounted by
-  `web/server/main.py` (or `chatbot_service.py`) alongside existing routes, so deployment and env
-  configuration stay in one place.
-- Tests live under `tests/aviation_agent/` so they follow the repo’s pytest discovery pattern and can
-  re-use existing `tests/tools` helpers.
+- `shared/aviation_agent/` keeps the LangGraph stack versioned once and importable from both the web server and any offline scripts.
+- The FastAPI router in `web/server/api/aviation_agent_chat.py` is mounted by `web/server/main.py` with feature flag support (`AVIATION_AGENT_ENABLED`).
+- Tests live under `tests/aviation_agent/` and follow the repo's pytest discovery pattern.
 
 ---
 
-## 3. Web/API Wiring Inside `web/server`
+## 3. Web/API Integration
 
-1. **Router** – create `web/server/api/aviation_agent_chat.py` with a `router = APIRouter()` that:
-   - Validates chat requests (messages, MCP auth, feature flags).
-   - Instantiates the shared `McpClient` (or re-uses `web/server/mcp_client.py` helpers).
-   - Calls `shared.aviation_agent.adapters.langgraph_runner.run_aviation_agent(...)`.
-   - Returns the `ChatResponse` schema (see §9) so UI consumers only read `answer`, `planner_meta`,
-     and `ui_payload`.
-2. **Server entry point** – import the router in `web/server/chatbot_service.py` or `web/server/main.py`
-   and include it: `app.include_router(aviation_agent_chat.router, prefix="/aviation-agent")`.
-3. **Logging & metrics** – leverage existing `conversation_logs/` pipeline by emitting structured
-   events before/after agent calls (shared adapter emits instrumentation hooks so the API layer can
-   attach request IDs).
-4. **Configuration & flagging** – `shared/aviation_agent/config.py` reads environment variables supplied
-   by `web/server/dev.env` / `prod.env`, including an `AVIATION_AGENT_ENABLED` feature flag. The server
-   should only `include_router(...)` when this flag is true so rollouts can be staged safely.
+### Router (`web/server/api/aviation_agent_chat.py`)
+
+The FastAPI router:
+- Validates chat requests (messages, session IDs).
+- Instantiates the agent graph via `build_agent()`.
+- Provides streaming endpoint (`/chat/stream`) using SSE.
+- Provides non-streaming endpoint (`/chat`) for simple requests.
+- Handles conversation logging after execution.
+- Returns structured responses with `answer`, `ui_payload`, and metadata.
+
+### Server Integration
+
+The router is included in `web/server/main.py`:
+
+```python
+if aviation_agent_chat.feature_enabled():
+    app.include_router(
+        aviation_agent_chat.router,
+        prefix="/api/aviation-agent",
+        tags=["aviation-agent"],
+    )
+```
+
+### Configuration
+
+- `shared/aviation_agent/config.py` reads environment variables from `web/server/dev.env` / `prod.env`.
+- `AVIATION_AGENT_ENABLED` feature flag controls router inclusion.
+- LLM model configuration via `AVIATION_AGENT_PLANNER_MODEL` and `AVIATION_AGENT_FORMATTER_MODEL`.
 
 ---
 
-## 4. Tests & Fixtures Under `tests/aviation_agent`
+## 4. Testing Strategy
 
-- Mirror the directories enumerated above so every LangGraph component has a direct pytest file.
-- Re-use or extend `tests/tools` fixtures for MCP responses; the existing repo already keeps recorded
-  payloads under `tests/chatbot/fixtures`, so the new `fixtures.py` can point to that data to avoid
-  duplication.
-- Integration tests (`test_graph_e2e.py`) import the FastAPI router via `TestClient`, proving that the
-  wiring inside `web/server/api/aviation_agent_chat.py` marshals request/response data exactly as the
-  UI expects.
-- Add contract tests that assert the `ui_payload` schema whenever new planner/tool combinations are
-  added; this guards the A3 payload stability requirement.
+### Unit Tests
+
+- `test_planning.py` - Planner filter extraction, tool selection
+- `test_execution.py` - Tool runner execution
+- `test_formatting.py` - UI payload building, visualization enhancement
+- `test_state_and_thinking.py` - State management, thinking combination
+
+### Integration Tests
+
+- `test_graph_e2e.py` - Full graph execution
+- `test_streaming.py` - SSE event streaming
+- `test_integration.py` - FastAPI router integration via TestClient
+
+### Test Fixtures
+
+- Re-use `tests/tools` fixtures for MCP responses
+- MCP doubles for isolated testing
+- Contract tests that assert `ui_payload` schema stability
 
 ---
 
 ## 5. Planner Schema & Tool Naming
 
-- `AviationPlan.selected_tool` uses the literal MCP tool names defined in
-  `shared/airport_tools.get_shared_tool_specs()` (e.g., `search_airports`,
-  `find_airports_near_route`, `get_airport_details`, `list_rules_for_country`, …).
-- Add a validation helper inside `shared/aviation_agent/planning.py` that raises if a plan references
-  a tool that does not exist in the manifest; this keeps planner schema and MCP registration aligned.
-- `_build_ui_payload()` maps these literal tool names to the three UI `kind` buckets. Whenever the
-  MCP manifest grows, update only the mapping table (not the schema) to reflect the new tool’s kind.
+### Tool Selection
+
+- `AviationPlan.selected_tool` uses the literal MCP tool names defined in `shared/airport_tools.get_shared_tool_specs()` (e.g., `search_airports`, `find_airports_near_route`, `get_airport_details`, `list_rules_for_country`, …).
+- Validation in `shared/aviation_agent/planning.py` ensures planner references only tools that exist in the manifest.
+- `build_ui_payload()` maps these literal tool names to the three UI `kind` buckets (`route`, `airport`, `rules`).
+
+### Filter Extraction
+
+- Planner extracts user requirements (AVGAS, customs, runway length, country, etc.) into `plan.arguments.filters`.
+- Filters are part of tool arguments, not a separate field.
+- Tools return `filter_profile` in results, which UI can use for filter synchronization.
 
 ---
 
-## 6. `state.py` — Agent State With A3 UI Payload
+## 6. Agent State
 
 ```python
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     messages: Annotated[List[BaseMessage], operator.add]
     plan: Optional[AviationPlan]
+    planning_reasoning: Optional[str]  # Planner's reasoning
     tool_result: Optional[Any]
+    formatting_reasoning: Optional[str]  # Formatter's reasoning
     final_answer: Optional[str]
-
-    # A3: stable UI payload
-    ui_payload: Optional[dict]
+    thinking: Optional[str]  # Combined reasoning for UI
+    ui_payload: Optional[dict]  # Stable UI structure (hybrid approach)
+    error: Optional[str]  # Error message if execution fails
 ```
+
+### State Fields
+
+- **`messages`**: Conversation history (uses `operator.add` reducer for automatic accumulation)
+- **`plan`**: Structured plan from planner node
+- **`planning_reasoning`**: Why the planner selected this tool/approach
+- **`tool_result`**: Raw result from tool execution
+- **`formatting_reasoning`**: How the formatter presents results
+- **`final_answer`**: User-facing response text
+- **`thinking`**: Combined reasoning (planning + formatting) for UI display
+- **`ui_payload`**: Structured payload for UI integration
+- **`error`**: Error message if execution fails
 
 ---
 
-## 7. `_build_ui_payload()` — The A3 Specification
+## 7. UI Payload Building (`build_ui_payload()`)
 
-A3’s rule:
+### Hybrid Approach
 
-> **Stable top-level keys** + **raw MCP result under `mcp_raw`**  
-> UI must not depend on full planner or full tool_result.
+The UI payload uses a **hybrid design**:
+- **Stable top-level keys** (`kind`, `departure`, `icao`, etc.)
+- **Flattened commonly-used fields** (`filters`, `visualization`, `airports`) for convenience
+- **Full MCP result** under `mcp_raw` as authoritative source
+
+### Implementation
 
 ```python
-def _build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | None:
+def build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | None:
     if tool_result is None:
         return None
 
-    if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
-        return {
-            "kind": "route",
-            "departure": plan.arguments.get("departure"),
-            "destination": plan.arguments.get("destination"),
-            "ifr": plan.arguments.get("ifr"),
-            "mcp_raw": tool_result,    # the authoritative data
-        }
+    # Determine kind based on tool
+    kind = _determine_kind(plan.selected_tool)
+    if not kind:
+        return None
 
-    if plan.selected_tool in {
+    # Base payload with kind and mcp_raw (authoritative source)
+    base_payload = {
+        "kind": kind,
+        "mcp_raw": tool_result,
+    }
+
+    # Add kind-specific metadata
+    if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
+        base_payload["departure"] = plan.arguments.get("from_icao") or plan.arguments.get("departure")
+        base_payload["destination"] = plan.arguments.get("to_icao") or plan.arguments.get("destination")
+        if plan.arguments.get("ifr") is not None:
+            base_payload["ifr"] = plan.arguments.get("ifr")
+
+    elif plan.selected_tool in {
         "get_airport_details",
         "get_border_crossing_airports",
         "get_airport_statistics",
@@ -209,179 +260,230 @@ def _build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | No
         "get_pilot_reviews",
         "get_fuel_prices",
     }:
-        return {
-            "kind": "airport",
-            "icao": plan.arguments.get("icao"),
-            "mcp_raw": tool_result,
-        }
+        base_payload["icao"] = plan.arguments.get("icao") or plan.arguments.get("icao_code")
 
-    if plan.selected_tool in {
+    elif plan.selected_tool in {
         "list_rules_for_country",
         "compare_rules_between_countries",
         "get_answers_for_questions",
         "list_rule_categories_and_tags",
         "list_rule_countries",
     }:
-        return {
-            "kind": "rules",
-            "region": plan.arguments.get("region"),
-            "topic": plan.arguments.get("topic"),
-            "mcp_raw": tool_result,
+        base_payload["region"] = plan.arguments.get("region") or plan.arguments.get("country_code")
+        base_payload["topic"] = plan.arguments.get("topic") or plan.arguments.get("category")
+
+    # Flatten commonly-used fields for convenience (hybrid approach)
+    if "filter_profile" in tool_result:
+        base_payload["filters"] = tool_result["filter_profile"]
+    if "visualization" in tool_result:
+        base_payload["visualization"] = tool_result["visualization"]
+    if "airports" in tool_result:
+        base_payload["airports"] = tool_result["airports"]
+
+    return base_payload
+```
+
+### Why This Design?
+
+- **Highly stable**: UI structure rarely changes (only `kind` and a few metadata fields at top level)
+- **Convenient access**: Common fields (`filters`, `visualization`, `airports`) are flattened for easy UI access
+- **Fully future-proof**: Planner can evolve without breaking UI (new fields automatically in `mcp_raw`)
+- **Authoritative source**: `mcp_raw` contains complete tool result
+- **No breaking changes**: UI can use either flattened fields or `mcp_raw`
+
+---
+
+## 8. Formatter Node
+
+The formatter node produces both the final answer and the UI payload:
+
+```python
+def formatter_node(state: AgentState) -> Dict[str, Any]:
+    # Format answer using LLM
+    answer = formatter_llm.invoke({
+        "messages": state.get("messages") or [],
+        "answer_style": plan.answer_style,
+        "tool_result_json": json.dumps(tool_result, indent=2),
+        "pretty_text": tool_result.get("pretty", ""),
+    })
+    
+    # Build UI payload
+    ui_payload = build_ui_payload(plan, tool_result)
+    
+    # Optional: Enhance visualization with ICAOs from answer
+    if ui_payload and ui_payload.get("kind") in ["route", "airport"]:
+        mentioned_icaos = _extract_icao_codes(answer)
+        if mentioned_icaos:
+            ui_payload = _enhance_visualization(ui_payload, mentioned_icaos, tool_result)
+    
+    # Generate formatting reasoning
+    formatting_reasoning = f"Formatted answer using {plan.answer_style} style."
+    
+    # Combine planning and formatting reasoning
+    thinking_parts = []
+    if state.get("planning_reasoning"):
+        thinking_parts.append(state["planning_reasoning"])
+    thinking_parts.append(formatting_reasoning)
+    
+    return {
+        "final_answer": answer.strip(),
+        "thinking": "\n\n".join(thinking_parts) if thinking_parts else None,
+        "ui_payload": ui_payload,
+    }
+```
+
+---
+
+## 9. FastAPI Endpoint
+
+### Streaming Endpoint
+
+```python
+@router.post("/chat/stream")
+async def aviation_agent_chat_stream(
+    request: ChatRequest,
+    settings: AviationAgentSettings = Depends(get_settings),
+    session_id: Optional[str] = None,
+) -> StreamingResponse:
+    graph = build_agent(settings=settings)
+    
+    async def event_generator():
+        async for event in stream_aviation_agent(
+            request.to_langchain(),
+            graph,
+            session_id=session_id
+        ):
+            yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+        
+        # After streaming, log conversation
+        final_state = graph.invoke({"messages": request.to_langchain()})
+        log_conversation_from_state(...)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
         }
-
-    return None
-```
-
-### Why this design?
-
-- **Highly stable**: UI structure rarely changes.
-- **Fully future-proof**: Planner can evolve without breaking UI.
-- **Powerful**: UI still gets everything via `mcp_raw`.
-
----
-
-## 8. Formatter Node — Now Returns `final_answer` + `ui_payload`
-
-Final code:
-
-```python
-resp = formatter_llm.invoke(llm_input)
-ui_payload = _build_ui_payload(plan, tool_result)
-
-return {
-    "final_answer": resp.content,
-    "ui_payload": ui_payload,
-}
-```
-
----
-
-## 9. FastAPI Endpoint — Clean Stable Output
-
-```python
-class ChatResponse(BaseModel):
-    answer: str
-    planner_meta: dict | None = None
-    ui_payload: dict | None = None
-
-@app.post("/chat")
-def chat(request: ChatRequest):
-    ...
-    state = run_aviation_agent(messages, mcp_client)
-    plan_dict = state["plan"].model_dump() if state["plan"] else None
-
-    return ChatResponse(
-        answer=state["final_answer"],
-        planner_meta=plan_dict,
-        ui_payload=state.get("ui_payload"),
     )
 ```
 
-### UI only needs `ui_payload`:
+### Response Schema
 
-- `"kind": "route"` → show a route map  
-- `"kind": "airport"` → show airport info card  
-- `"kind": "rules"` → show rules panel  
-- `"mcp_raw"` provides all underlying details for drawing polylines, etc.
+**SSE Events:**
+- `plan` - Planner output (selected tool, arguments)
+- `thinking` - Planning reasoning
+- `tool_call_start` - Tool execution started
+- `tool_call_end` - Tool execution completed
+- `message` - Character-by-character answer stream
+- `ui_payload` - Visualization data
+- `done` - Request complete (session_id, token counts)
+- `error` - Error occurred
 
----
+### UI Integration
 
-## 10. Tests Updated for A3 Payload
+The UI uses `ui_payload` to determine visualization:
 
-Example:
-
-```python
-def test_end_to_end_route_query_builds_route_ui_payload():
-    state = run_aviation_agent([HumanMessage(content="IFR EGTF to LSGS")], mcp)
-
-    ui = state["ui_payload"]
-    assert ui["kind"] == "route"
-    assert ui["departure"] == "EGTF"
-    assert "mcp_raw" in ui
-    assert "suggested_route" in ui["mcp_raw"]
-```
+- `"kind": "route"` → show route map with markers
+- `"kind": "airport"` → show airport info card
+- `"kind": "rules"` → show rules panel
+- `mcp_raw` provides all underlying details for drawing polylines, markers, etc.
+- Flattened fields (`filters`, `visualization`, `airports`) provide convenient access
 
 ---
 
-## 11. MCP Tool & Payload Catalog
+## 10. MCP Tool & Payload Catalog
 
-The shared code already centralizes every MCP tool signature in `shared/airport_tools.py`; the agent
-should treat that file as the single source of truth and let `get_shared_tool_specs()` drive planner
-validation. For documentation, keep a concise catalog (below) that mirrors the manifest, so LangGraph
-developers, FastAPI engineers, and UI implementers can all read the same contract.
+The shared code centralizes every MCP tool signature in `shared/airport_tools.py`. The agent treats that file as the single source of truth and uses `get_shared_tool_specs()` for planner validation.
 
-### How to read this table
+### Tool Catalog
 
-- **Shared fn**: callable exported from `shared/airport_tools`.
-- **MCP name**: identifier registered in `mcp_server/main.py` (always matches the shared fn).
-- **Required / optional args**: only list the surface needed by the planner; deeper parameter rules
-  still live in the code docstrings.
-- **Default `ui_payload.kind`**: what `_build_ui_payload()` should emit for the associated planner
-  tool. When multiple tools map to the same kind (e.g., several airport-search tools → `route`), we
-  note it explicitly.
-- **Notable `mcp_raw` keys**: fields the UI cares about. Everything else is still available through
-  `mcp_raw` but does not need bespoke documentation.
+| Tool | Required args | Optional args | Default `ui_payload.kind` | Notable `mcp_raw` keys |
+| --- | --- | --- | --- | --- |
+| `search_airports` | `query` | `max_results`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='markers'` |
+| `find_airports_near_location` | `location_query` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `center`, `airports`, `filter_profile`, `visualization.type='point_with_markers'` |
+| `find_airports_near_route` | `from_icao`, `to_icao` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='route_with_markers'` |
+| `get_airport_details` | `icao_code` | – | `airport` | `airport`, `runways`, `visualization.type='marker_with_details'` |
+| `get_border_crossing_airports` | – | `country` | `airport` | `airports`, `by_country`, `filter_profile`, `visualization.style='customs'` |
+| `get_airport_statistics` | – | `country` | `airport` | `stats` |
+| `get_airport_pricing` | `icao_code` | – | `airport` | `pricing`, `pretty` |
+| `get_pilot_reviews` | `icao_code` | `limit` | `airport` | `reviews`, `average_rating` |
+| `get_fuel_prices` | `icao_code` | – | `airport` | `fuels`, `pricing` |
+| `list_rules_for_country` | `country_code` | `category`, `tags` | `rules` | `rules`, `formatted_text`, `categories` |
+| `compare_rules_between_countries` | `country1`, `country2` | `category` | `rules` | `comparison`, `formatted_summary`, `total_differences` |
+| `get_answers_for_questions` | `question_ids` | – | `rules` | `items`, `pretty` |
+| `list_rule_categories_and_tags` | – | – | `rules` | `categories`, `tags`, `counts` |
+| `list_rule_countries` | – | – | `rules` | `items`, `count` |
 
-| Tool | Shared fn | Required args | Optional args | Default `ui_payload.kind` | Notable `mcp_raw` keys |
-| --- | --- | --- | --- | --- | --- |
-| `search_airports` | `search_airports` | `query` | `max_results`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='markers'` |
-| `find_airports_near_location` | `find_airports_near_location` | `location_query` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `center`, `airports`, `filter_profile`, `visualization.type='point_with_markers'` |
-| `find_airports_near_route` | `find_airports_near_route` | `from_icao`, `to_icao` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='route_with_markers'` |
-| `get_airport_details` | `get_airport_details` | `icao_code` | – | `airport` | `airport`, `runways`, `visualization.type='marker_with_details'` |
-| `get_border_crossing_airports` | `get_border_crossing_airports` | – | `country` | `airport` | `airports`, `by_country`, `filter_profile`, `visualization.style='customs'` |
-| `get_airport_statistics` | `get_airport_statistics` | – | `country` | `airport` | `stats` |
-| `get_airport_pricing` | `get_airport_pricing` | `icao_code` | – | `airport` | `pricing`, `pretty` |
-| `get_pilot_reviews` | `get_pilot_reviews` | `icao_code` | `limit` | `airport` | `reviews`, `average_rating` |
-| `get_fuel_prices` | `get_fuel_prices` | `icao_code` | – | `airport` | `fuels`, `pricing` |
-| `list_rules_for_country` | `list_rules_for_country` | `country_code` | `category`, `tags` | `rules` | `rules`, `formatted_text`, `categories` |
-| `compare_rules_between_countries` | `_compare_rules_between_countries_tool` | `country1`, `country2` | `category` | `rules` | `comparison`, `formatted_summary`, `total_differences` |
-| `get_answers_for_questions` | `get_answers_for_questions` | `question_ids` | – | `rules` | `items`, `pretty` |
-| `list_rule_categories_and_tags` | `list_rule_categories_and_tags` | – | – | `rules` | `categories`, `tags`, `counts` |
-| `list_rule_countries` | `list_rule_countries` | – | – | `rules` | `items`, `count` |
+### Documentation Workflow
 
-### Documentation workflow
+1. **Tool manifest** - Tools are defined in `shared/airport_tools.py` as the single source of truth.
+2. **Planner alignment** - `AviationPlan.selected_tool` uses literal tool names from the manifest.
+3. **UI payload mapping** - `build_ui_payload()` maps tool names to `kind` buckets.
+4. **Payload stability** - The `Notable mcp_raw keys` column serves as a contract with the UI.
 
-1. **Scriptable manifest** – If new tools are added to `shared/airport_tools.py`, run a helper
-   (e.g., `python -m shared.aviation_agent.adapters.dump_tool_manifest`) that prints this table so the
-   doc stays synchronized.
-2. **Planner alignment** – Update `AviationPlan.selected_tool` enums whenever the MCP manifest changes.
-   The `_build_ui_payload()` function only needs to know which `kind` to emit for each planner tool,
-   not every raw field.
-3. **Payload stability** – Treat the `Notable mcp_raw keys` column as a contract with the UI; when
-   changing those keys, update the design doc and UI renderer in tandem.
+See `designs/TOOL_VISUALIZATION_MAPPING.md` for complete tool-to-visualization mapping.
 
 ---
 
-## 12. Summary of A3 Benefits
+## 11. Design Benefits
 
-### ✔ Stable for the UI  
-Only `kind`, `departure`, `icao`, etc. matter.
+### ✔ Stable for the UI
+Only `kind`, `departure`, `icao`, etc. matter at the top level. UI structure rarely changes.
 
-### ✔ Internal evolution is painless  
-Planner and tool schemas can change freely.
+### ✔ Convenient Access
+Commonly-used fields (`filters`, `visualization`, `airports`) are flattened for easy access.
 
-### ✔ Full richness preserved  
-`mcp_raw` always contains everything.
+### ✔ Internal Evolution is Painless
+Planner and tool schemas can change freely. New fields automatically appear in `mcp_raw`.
 
-### ✔ Clean, simple UI dispatch  
-```ts
+### ✔ Full Richness Preserved
+`mcp_raw` always contains everything from the tool result.
+
+### ✔ Clean, Simple UI Dispatch
+```typescript
 switch(ui_payload.kind) {
-  case "route": renderRoute(ui_payload.mcp_raw); break;
-  case "airport": renderAirport(ui_payload.mcp_raw); break;
-  case "rules": renderRules(ui_payload.mcp_raw); break;
+  case "route": 
+    renderRoute(ui_payload.visualization || ui_payload.mcp_raw.visualization); 
+    break;
+  case "airport": 
+    renderAirport(ui_payload.mcp_raw); 
+    break;
+  case "rules": 
+    renderRules(ui_payload.mcp_raw); 
+    break;
 }
 ```
 
 ---
 
-## Final Notes
+## 12. Key Design Principles
 
-This README is now ready for:
+### State-Based Thinking
+- Reasoning stored in state fields (`planning_reasoning`, `formatting_reasoning`)
+- Combined into `thinking` for UI display
+- No tag parsing from LLM output
 
-- Cursor
-- Claude Code
-- ChatGPT code interpreter
-- Direct handoff to developers
+### Filters as Arguments
+- Filters are part of `plan.arguments.filters`
+- Tools return `filter_profile` (what was actually applied)
+- UI gets filters from flattened `ui_payload.filters` or `ui_payload.mcp_raw.filter_profile`
 
-Everything needed to implement the agent end‑to‑end is included.
+### Error Handling in State
+- Errors stored in state (`error` field)
+- Formatter can produce error message even on failure
+- Errors emitted as SSE events
 
+### LangGraph-Native Patterns
+- Uses `astream_events()` for streaming
+- Uses state reducers (`operator.add` for messages)
+- Errors propagate through state, not exceptions
+
+---
+
+## Related Documents
+
+- `designs/CHATBOT_WEBUI_DESIGN.md` - WebUI integration and streaming details
+- `designs/TOOL_VISUALIZATION_MAPPING.md` - Complete tool-to-visualization mapping

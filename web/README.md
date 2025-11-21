@@ -8,7 +8,6 @@ FastAPI + vanilla JavaScript application for browsing the FlyFun Euro AIP datase
 - Rich filtering across country, procedure type, approach type, runway characteristics, and standardized AIP fields.
 - Detailed airport panels with procedures, runways, AIP entries, and provenance information.
 - Statistics dashboard summarizing airport coverage, procedures, and data quality metrics.
-- Optional chat endpoint (`/chat/ask`) that powers the MCP integration.
 - Aviation agent chat endpoint (`/api/aviation-agent/chat/stream`) with LangGraph-based streaming responses.
 - Hardened backend configuration: rate limiting, security headers, CORS/trusted hosts, and optional HTTPS enforcement.
 
@@ -18,8 +17,7 @@ FastAPI + vanilla JavaScript application for browsing the FlyFun Euro AIP datase
 web/
 ├── client/                 # Static assets (index.html, JS modules, inline styles)
 ├── server/
-│   ├── api/                # FastAPI routers (airports, procedures, filters, statistics)
-│   ├── chat/ask.py         # Chat-style helper endpoint backed by the Euro AIP model
+│   ├── api/                # FastAPI routers (airports, procedures, filters, statistics, aviation_agent_chat)
 │   ├── security_config.py  # Runtime security policy (copy from .sample)
 │   ├── dev.env             # Environment variables (copy from .sample)
 │   └── main.py             # FastAPI entry point
@@ -99,10 +97,6 @@ Browse to `http://127.0.0.1:8000/` and the static frontend will load from the sa
 ### Statistics (`/api/statistics`)
 
 - Overview counts, per-country breakdowns, procedure distribution, runway stats, and data-quality metrics.
-
-### Chat (`/chat/ask`)
-
-- Lightweight question/answer endpoint that leverages the shared `EuroAipModel` to assist LLM integrations (mirrors the MCP tool behavior).
 
 ### Aviation Agent (`/api/aviation-agent/chat/stream`)
 

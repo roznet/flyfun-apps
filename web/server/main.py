@@ -41,8 +41,6 @@ from security_config import (
 
 # Import API routes
 from api import airports, procedures, filters, statistics, rules, aviation_agent_chat
-# LangChain-based chat endpoint (alternative to streaming chatbot)
-from chat import ask as chat_ask
 
 from shared.rules_manager import RulesManager
 
@@ -220,8 +218,6 @@ app.include_router(procedures.router, prefix="/api/procedures", tags=["procedure
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
 app.include_router(rules.router, prefix="/api/rules", tags=["rules"])
-# LangChain-based chat endpoint (legacy, may be deprecated)
-app.include_router(chat_ask.router, tags=["chat"])  # LangChain+MCP: /chat/ask, /chat/health
 
 if aviation_agent_chat.feature_enabled():
     logger.info("Aviation agent router enabled at /api/aviation-agent")
