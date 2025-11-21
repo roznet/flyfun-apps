@@ -1,0 +1,71 @@
+[
+  {
+    "question": "Find airports along the route from EGTF to LFMD that have customs facilities",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_icao": "EGTF",
+      "to_icao": "LFMD",
+      "filters": {
+        "point_of_entry": true
+      }
+    },
+    "description": "Route with customs requirement should use find_airports_near_route with point_of_entry filter"
+  },
+  {
+    "question": "Find airports near Paris with AVGAS fuel",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Paris",
+      "filters": {
+        "has_avgas": true
+      }
+    },
+    "description": "Location search with fuel filter"
+  },
+  {
+    "question": "What are the details for airport LFPG?",
+    "expected_tool": "get_airport_details",
+    "expected_arguments": {
+      "icao_code": "LFPG"
+    },
+    "description": "Direct airport details query"
+  },
+  {
+    "question": "Show me customs airports in France",
+    "expected_tool": "get_border_crossing_airports",
+    "expected_arguments": {
+      "country": "FR"
+    },
+    "description": "Border crossing query by country"
+  },
+  {
+    "question": "What are the aviation rules for France?",
+    "expected_tool": "list_rules_for_country",
+    "expected_arguments": {
+      "country_code": "FR"
+    },
+    "description": "Rules query for a country"
+  },
+  {
+    "question": "Compare customs rules between France and UK",
+    "expected_tool": "compare_rules_between_countries",
+    "expected_arguments": {
+      "country1": "FR",
+      "country2": "GB",
+      "category": "Customs"
+    },
+    "description": "Rules comparison query"
+  },
+  {
+    "question": "Search for airports in Germany",
+    "expected_tool": "search_airports",
+    "expected_arguments": {
+      "query": "Germany",
+      "filters": {
+        "country": "DE"
+      }
+    },
+    "description": "Country-based airport search"
+  }
+]
+
