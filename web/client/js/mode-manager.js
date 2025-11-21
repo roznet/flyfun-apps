@@ -208,16 +208,19 @@ class ModeManager {
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
         try {
-            const response = await fetch('/api/chat/stream', {
+            // Use new aviation agent endpoint
+            const response = await fetch('/api/aviation-agent/chat/stream', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Session-ID': this.sessionId || undefined
                 },
                 credentials: 'include',
                 body: JSON.stringify({
-                    message: message,
-                    session_id: this.sessionId || null,
-                    history: []
+                    messages: [{
+                        role: 'user',
+                        content: message
+                    }]
                 })
             });
 
@@ -308,17 +311,30 @@ class ModeManager {
                                 chatMessages.scrollTop = chatMessages.scrollHeight;
                                 break;
 
-                            case 'visualization':
-                                // Handle map visualization
-                                if (window.chatMapIntegration && data) {
-                                    console.log('Visualizing data on map:', data);
-                                    window.chatMapIntegration.visualizeData(data);
-                                }
+                            case 'plan':
+                                // New event: plan shows what tool will be used
+                                console.log('Plan:', data);
                                 break;
 
-                            case 'tool_calls':
-                                // Tool calls info (optional: could display in UI)
-                                console.log('Tools used:', data);
+                            case 'tool_call_start':
+                                // New event: tool execution started
+                                console.log('Tool call started:', data.name);
+                                break;
+
+                            case 'tool_call_end':
+                                // New event: tool execution completed
+                                console.log('Tool call completed:', data.name);
+                                break;
+
+                            case 'ui_payload':
+                                // New event: UI payload contains visualization, filters, airports
+                                console.log('UI payload:', data);
+                                
+                                // Handle map visualization
+                                if (window.chatMapIntegration && data.visualization) {
+                                    console.log('Visualizing data on map:', data.visualization);
+                                    window.chatMapIntegration.visualizeData(data.visualization);
+                                }
                                 break;
 
                             case 'done':

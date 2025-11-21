@@ -231,17 +231,32 @@ Try the quick actions below or ask me anything!`;
 
     async sendMessageStreaming(message, loadingId) {
         try {
-            // Call streaming API
-            const response = await fetch('/api/chat/stream', {
+            // Convert history to messages format for new endpoint
+            const messages = [];
+            if (this.history && this.history.length > 0) {
+                for (const msg of this.history) {
+                    messages.push({
+                        role: msg.role || 'user',
+                        content: msg.content || msg.message || ''
+                    });
+                }
+            }
+            // Add current message
+            messages.push({
+                role: 'user',
+                content: message
+            });
+
+            // Call new aviation agent streaming API
+            const response = await fetch('/api/aviation-agent/chat/stream', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Session-ID': this.sessionId || undefined
                 },
                 credentials: 'include',  // Include session cookie
                 body: JSON.stringify({
-                    message: message,
-                    session_id: this.sessionId,
-                    history: this.history
+                    messages: messages
                 })
             });
 
@@ -366,45 +381,80 @@ Try the quick actions below or ask me anything!`;
                                 this.scrollToBottom();
                                 break;
 
-                            case 'tool_calls':
-                                toolCalls = data;
-                                console.log('[DEBUG] Received tool_calls event:', JSON.stringify(data, null, 2));
+                            case 'plan':
+                                // New event: plan shows what tool will be used
+                                console.log('[DEBUG] Received plan event:', JSON.stringify(data, null, 2));
+                                break;
+
+                            case 'tool_call_start':
+                                // New event: tool execution started
+                                console.log('[DEBUG] Tool call started:', data.name);
+                                break;
+
+                            case 'tool_call_end':
+                                // New event: tool execution completed
+                                toolCalls = toolCalls || [];
+                                toolCalls.push({
+                                    name: data.name,
+                                    arguments: data.arguments,
+                                    result: data.result
+                                });
+                                console.log('[DEBUG] Received tool_call_end event:', JSON.stringify(data, null, 2));
 
                                 // Add tool indicator
-                                if (toolCalls && toolCalls.length > 0) {
-                                    const toolsDiv = document.createElement('div');
-                                    toolsDiv.className = 'message-tools';
-                                    toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${toolCalls.map(t => t.name).join(', ')}</small>`;
-                                    messageDiv.appendChild(toolsDiv);
+                                const toolsDiv = document.createElement('div');
+                                toolsDiv.className = 'message-tools';
+                                toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${data.name}</small>`;
+                                messageDiv.appendChild(toolsDiv);
 
-                                    // Extract and apply filter profile from tool results
-                                    for (const toolCall of toolCalls) {
-                                        console.log('[DEBUG] Checking toolCall:', toolCall.name, 'has result?', !!toolCall.result, 'has filter_profile?', !!(toolCall.result && toolCall.result.filter_profile));
-                                        if (toolCall.result && toolCall.result.filter_profile) {
-                                            console.log('[DEBUG] Found filter_profile:', toolCall.result.filter_profile);
-                                            this.applyFilterProfile(toolCall.result.filter_profile);
-                                            break; // Use first filter profile found
-                                        }
-                                    }
+                                // Extract and apply filter profile from tool result
+                                if (data.result && data.result.filter_profile) {
+                                    console.log('[DEBUG] Found filter_profile:', data.result.filter_profile);
+                                    this.applyFilterProfile(data.result.filter_profile);
                                 }
                                 break;
 
-                            case 'visualization':
-                                visualization = data;
-                                // Add visualization indicator
-                                const vizDiv = document.createElement('div');
-                                vizDiv.className = 'message-visualization-indicator';
-                                vizDiv.innerHTML = '<small><i class="fas fa-map-marked-alt"></i> Results shown on map</small>';
-                                messageDiv.appendChild(vizDiv);
+                            case 'ui_payload':
+                                // New event: UI payload contains visualization, filters, airports
+                                console.log('[DEBUG] Received ui_payload event:', JSON.stringify(data, null, 2));
+                                
+                                // Extract visualization from ui_payload
+                                if (data.visualization) {
+                                    visualization = data.visualization;
+                                    // Add visualization indicator
+                                    const vizDiv = document.createElement('div');
+                                    vizDiv.className = 'message-visualization-indicator';
+                                    vizDiv.innerHTML = '<small><i class="fas fa-map-marked-alt"></i> Results shown on map</small>';
+                                    messageDiv.appendChild(vizDiv);
 
-                                // Handle map visualization
-                                if (this.mapIntegration) {
-                                    this.mapIntegration.visualizeData(visualization);
+                                    // Handle map visualization
+                                    if (this.mapIntegration) {
+                                        this.mapIntegration.visualizeData(visualization);
+                                    }
+                                }
+
+                                // Apply filters if present
+                                if (data.filters && this.applyFilterProfile) {
+                                    this.applyFilterProfile(data.filters);
                                 }
                                 break;
 
                             case 'done':
                                 this.sessionId = data.session_id;
+                                
+                                // Update history with user message and assistant response
+                                if (message) {
+                                    this.history.push({
+                                        role: 'user',
+                                        content: message
+                                    });
+                                }
+                                if (messageContent.trim()) {
+                                    this.history.push({
+                                        role: 'assistant',
+                                        content: messageContent.trim()
+                                    });
+                                }
                                 break;
 
                             case 'error':
