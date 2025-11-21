@@ -39,12 +39,15 @@ async def stream_aviation_agent(
     try:
         # Use LangGraph's astream_events for fine-grained streaming
         # This is the standard LangGraph pattern for streaming + token tracking
+        # Note: We don't filter by include_names for LLM events - they come from inside chains
+        # Don't filter by names - we want to capture all events including LLM streaming
+        # The LLM events might not have the node name in their name field
         async for event in graph.astream_events(
             {"messages": messages},
             version="v2",
-            include_names=["planner", "tool", "formatter"],
         ):
             kind = event.get("event")
+            name = event.get("name", "")
             
             if kind == "on_chain_start" and event.get("name") == "planner":
                 # Planner started
@@ -100,20 +103,73 @@ async def stream_aviation_agent(
                     }
             
             # Track token usage from LLM calls (LangGraph standard pattern)
-            elif kind == "on_llm_end":
+            elif kind == "on_llm_end" or kind == "on_chat_model_end":
                 # Extract token usage from LLM response
-                usage = event.get("data", {}).get("output", {}).get("response_metadata", {}).get("token_usage")
+                # Output might be an AIMessage object, not a dict
+                output = event.get("data", {}).get("output")
+                
+                # Try different paths for token usage
+                usage = None
+                if hasattr(output, "response_metadata"):
+                    # AIMessage object
+                    usage = output.response_metadata.get("token_usage") if output.response_metadata else None
+                elif isinstance(output, dict):
+                    # Dict output
+                    usage = (
+                        output.get("response_metadata", {}).get("token_usage") or
+                        output.get("token_usage")
+                    )
+                
+                # Also check event data directly
+                if not usage:
+                    usage = event.get("data", {}).get("token_usage")
+                
                 if usage:
-                    total_input_tokens += usage.get("prompt_tokens", 0)
-                    total_output_tokens += usage.get("completion_tokens", 0)
+                    if isinstance(usage, dict):
+                        total_input_tokens += usage.get("prompt_tokens", 0)
+                        total_output_tokens += usage.get("completion_tokens", 0)
+                    elif hasattr(usage, "prompt_tokens"):
+                        # TokenUsage object
+                        total_input_tokens += usage.prompt_tokens or 0
+                        total_output_tokens += usage.completion_tokens or 0
             
-            elif kind == "on_llm_stream":
-                # Stream LLM output (from formatter node)
-                # Note: We capture all LLM stream events - in our graph, only formatter uses LLM streaming
+            # Capture LLM streaming - LangGraph uses on_chat_model_stream for ChatOpenAI
+            # This is emitted when the LLM streams chunks inside a chain.invoke() call
+            # We want to capture this from the formatter's LLM, not the planner's
+            elif kind == "on_chat_model_stream":
+                # Only capture if it's from the formatter (not planner)
+                # The name will be the LLM instance name, but we can check the parent chain
+                # For now, capture all chat_model_stream events (planner doesn't stream)
                 chunk = event.get("data", {}).get("chunk")
                 if chunk:
-                    # Handle different chunk types
-                    if hasattr(chunk, "content") and chunk.content:
+                    # Handle AIMessageChunk - has .content attribute
+                    content = None
+                    if hasattr(chunk, "content"):
+                        content = chunk.content
+                    elif isinstance(chunk, dict):
+                        content = chunk.get("content") or chunk.get("text") or chunk.get("delta", {}).get("content", "")
+                    elif isinstance(chunk, str):
+                        content = chunk
+                    
+                    if content:
+                        yield {
+                            "event": "message",
+                            "data": {"content": content}
+                        }
+            
+            # Also capture streaming from StrOutputParser (which streams strings)
+            # This is important - StrOutputParser streams string chunks after LLM
+            # Capture all chain_stream events (they'll be from formatter's StrOutputParser)
+            elif kind == "on_chain_stream":
+                # StrOutputParser outputs strings directly
+                chunk = event.get("data", {}).get("chunk")
+                if chunk:
+                    if isinstance(chunk, str) and chunk.strip():
+                        yield {
+                            "event": "message",
+                            "data": {"content": chunk}
+                        }
+                    elif hasattr(chunk, "content") and not isinstance(chunk, str):
                         yield {
                             "event": "message",
                             "data": {"content": chunk.content}
@@ -123,38 +179,42 @@ async def stream_aviation_agent(
                             "event": "message",
                             "data": {"content": chunk["content"]}
                         }
-                    elif isinstance(chunk, str):
-                        yield {
-                            "event": "message",
-                            "data": {"content": chunk}
-                        }
             
             elif kind == "on_chain_end" and event.get("name") == "formatter":
                 # Formatter completed - emit final results
-                output = event.get("data", {}).get("output", {})
+                # Output should be a dict from the formatter node
+                output = event.get("data", {}).get("output")
                 
-                if isinstance(output, dict):
-                    # Emit thinking if available (combined from planning + formatting)
-                    if output.get("thinking"):
-                        # Thinking was already streamed from planner, just mark as done
-                        yield {
-                            "event": "thinking_done",
-                            "data": {}
-                        }
-                    
-                    # Emit error if present
-                    if output.get("error"):
-                        yield {
-                            "event": "error",
-                            "data": {"message": output["error"]}
-                        }
-                    
-                    # Emit UI payload
-                    if output.get("ui_payload"):
-                        yield {
-                            "event": "ui_payload",
-                            "data": output.get("ui_payload")
-                        }
+                # Handle case where output might not be a dict
+                if output is None:
+                    output = {}
+                elif not isinstance(output, dict):
+                    # If output is not a dict, try to extract from it
+                    # This shouldn't happen, but handle gracefully
+                    logger.warning(f"Formatter output is not a dict: {type(output)}")
+                    output = {}
+                
+                # Emit thinking if available (combined from planning + formatting)
+                if output.get("thinking"):
+                    # Thinking was already streamed from planner, just mark as done
+                    yield {
+                        "event": "thinking_done",
+                        "data": {}
+                    }
+                
+                # Emit error if present
+                if output.get("error"):
+                    yield {
+                        "event": "error",
+                        "data": {"message": output["error"]}
+                    }
+                
+                # Emit UI payload
+                if output.get("ui_payload"):
+                    yield {
+                        "event": "ui_payload",
+                        "data": output.get("ui_payload")
+                    }
                     
                     # Emit done event
                     yield {

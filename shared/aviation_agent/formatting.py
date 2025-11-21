@@ -12,16 +12,13 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from .planning import AviationPlan
 
 
-def build_formatter_runnable(llm: Runnable, stream: bool = False) -> Runnable:
+def build_formatter_chain(llm: Runnable) -> Runnable:
     """
-    Return a runnable that converts planner/tool output into the final answer + UI payload.
+    Return the LLM chain for formatting answers.
     
-    If stream=True, returns a streaming runnable that yields chunks.
-    
-    Note: Thinking is handled via state (planning_reasoning + formatting_reasoning),
-    not extracted from LLM output tags.
+    This chain will be used directly in the formatter node so LangGraph can capture streaming.
+    The node will handle state transformation and UI payload building.
     """
-
     prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -45,83 +42,32 @@ def build_formatter_runnable(llm: Runnable, stream: bool = False) -> Runnable:
         ]
     )
 
-    if stream:
-        # Streaming version - SIMPLIFIED: No tag parsing, thinking comes from state
-        chain = prompt | llm | StrOutputParser()
-        
-        async def _astream(payload: Dict[str, Any]) -> AsyncIterator[Dict[str, Any]]:
-            plan: AviationPlan = payload["plan"]
-            tool_result = payload.get("tool_result") or {}
-            
-            full_response = ""
-            
-            # Stream LLM output directly - simple and fast
-            async for chunk in chain.astream({
-                "messages": payload["messages"],
-                "answer_style": plan.answer_style,
-                "tool_result_json": json.dumps(tool_result, indent=2, ensure_ascii=False),
-                "pretty_text": tool_result.get("pretty", ""),
-            }):
-                full_response += chunk
-                # Stream directly as message - no tag parsing needed!
-                yield {"type": "message", "content": chunk}
-            
-            # Finalize
-            answer = full_response.strip()
-            ui_payload = build_ui_payload(plan, tool_result)
-            
-            # Optional: Enhance visualization with ICAOs from answer
-            mentioned_icaos = []
-            if ui_payload and ui_payload.get("kind") in ["route", "airport"]:
-                mentioned_icaos = _extract_icao_codes(answer)
-                if mentioned_icaos:
-                    ui_payload = _enhance_visualization(ui_payload, mentioned_icaos, tool_result)
-            
-            # Generate simple formatting reasoning (not from LLM, from our logic)
-            formatting_reasoning = f"Formatted answer using {plan.answer_style} style."
-            if mentioned_icaos:
-                formatting_reasoning += f" Mentioned {len(mentioned_icaos)} airports."
-            
-            yield {"type": "done", "answer": answer, "formatting_reasoning": formatting_reasoning, "ui_payload": ui_payload}
-        
-        return RunnableLambda(_astream)
-    else:
-        # Non-streaming version
-        chain = prompt | llm | StrOutputParser()
+    # Build chain - Use directly in node so LangGraph can capture streaming
+    return prompt | llm | StrOutputParser()
 
-        def _invoke(payload: Dict[str, Any]) -> Dict[str, Any]:
-            plan: AviationPlan = payload["plan"]
-            tool_result = payload.get("tool_result") or {}
-            final_answer = chain.invoke(
-                {
-                    "messages": payload["messages"],
-                    "answer_style": plan.answer_style,
-                    "tool_result_json": json.dumps(tool_result, indent=2, ensure_ascii=False),
-                    "pretty_text": tool_result.get("pretty", ""),
-                }
-            )
-            answer = final_answer.strip()
-            ui_payload = build_ui_payload(plan, tool_result)
-            
-            # Optional: Enhance visualization with ICAOs from answer
-            mentioned_icaos = []
-            if ui_payload and ui_payload.get("kind") in ["route", "airport"]:
-                mentioned_icaos = _extract_icao_codes(answer)
-                if mentioned_icaos:
-                    ui_payload = _enhance_visualization(ui_payload, mentioned_icaos, tool_result)
-            
-            # Generate simple formatting reasoning
-            formatting_reasoning = f"Formatted answer using {plan.answer_style} style."
-            if mentioned_icaos:
-                formatting_reasoning += f" Mentioned {len(mentioned_icaos)} airports."
-            
-            return {
-                "final_answer": answer,
-                "formatting_reasoning": formatting_reasoning,
-                "ui_payload": ui_payload,
-            }
 
-        return RunnableLambda(_invoke)
+def build_formatter_runnable(llm: Runnable) -> Runnable:
+    """
+    Legacy wrapper for backward compatibility.
+    Returns a runnable that transforms state to chain inputs.
+    """
+    chain = build_formatter_chain(llm)
+    
+    def _transform_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform AgentState to chain inputs."""
+        plan: AviationPlan = payload["plan"]
+        tool_result = payload.get("tool_result") or {}
+        
+        return {
+            "messages": payload["messages"],
+            "answer_style": plan.answer_style,
+            "tool_result_json": json.dumps(tool_result, indent=2, ensure_ascii=False),
+            "pretty_text": tool_result.get("pretty", ""),
+        }
+    
+    # Return a chain that transforms state, then runs the LLM chain
+    # This allows LangGraph to capture streaming from the LLM chain
+    return RunnableLambda(_transform_state) | chain
 
 
 def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> Dict[str, Any] | None:
@@ -131,6 +77,10 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
     - Keep mcp_raw for everything else and as authoritative source
     """
     if not tool_result:
+        return None
+    
+    # Ensure tool_result is a dict (defensive check)
+    if not isinstance(tool_result, dict):
         return None
 
     # Determine kind based on tool
@@ -145,7 +95,11 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
     }
 
     # Add kind-specific metadata
+    # BREAKPOINT 1: Check if plan.arguments is a dict
     if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
+        # Add breakpoint here to inspect plan.arguments
+        if not isinstance(plan.arguments, dict):
+            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["departure"] = plan.arguments.get("from_icao") or plan.arguments.get("departure")
         base_payload["destination"] = plan.arguments.get("to_icao") or plan.arguments.get("destination")
         if plan.arguments.get("ifr") is not None:
@@ -159,6 +113,9 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
         "get_pilot_reviews",
         "get_fuel_prices",
     }:
+        # BREAKPOINT 2: Check if plan.arguments is a dict
+        if not isinstance(plan.arguments, dict):
+            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["icao"] = plan.arguments.get("icao") or plan.arguments.get("icao_code")
         # For search_airports, also extract icao from first airport if available
         if plan.selected_tool == "search_airports" and tool_result.get("airports"):
@@ -173,6 +130,9 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
         "list_rule_categories_and_tags",
         "list_rule_countries",
     }:
+        # BREAKPOINT 3: Check if plan.arguments is a dict
+        if not isinstance(plan.arguments, dict):
+            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["region"] = plan.arguments.get("region") or plan.arguments.get("country_code")
         base_payload["topic"] = plan.arguments.get("topic") or plan.arguments.get("category")
 

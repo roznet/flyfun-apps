@@ -7,7 +7,7 @@ from langchain_core.runnables import Runnable
 
 from ..config import AviationAgentSettings, get_settings
 from ..execution import ToolRunner
-from ..formatting import build_formatter_runnable
+from ..formatting import build_formatter_chain
 from ..graph import build_agent_graph
 from ..planning import build_planner_runnable
 from ..state import AgentState
@@ -30,8 +30,7 @@ def build_agent(
     tool_client = AviationToolClient(settings.build_tool_context())
     tool_runner = ToolRunner(tool_client)
     planner = build_planner_runnable(planner_llm, tuple(tool_client.tools.values()))
-    formatter = build_formatter_runnable(formatter_llm)
-    graph = build_agent_graph(planner, tool_runner, formatter)
+    graph = build_agent_graph(planner, tool_runner, formatter_llm)
     return graph
 
 
@@ -66,5 +65,7 @@ def _resolve_llm(llm: Optional[Runnable], model_name: Optional[str], role: str) 
             f"Cannot auto-create {role} LLM. Install langchain-openai or inject a custom Runnable."
         ) from exc
 
-    return ChatOpenAI(model=model_name, temperature=0)
+    # Enable streaming for formatter LLM so LangGraph can capture streaming events
+    streaming = role == "formatter"
+    return ChatOpenAI(model=model_name, temperature=0, streaming=streaming)
 

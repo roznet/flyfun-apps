@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, Dict
 
 from langgraph.graph import END, StateGraph
 
 from .execution import ToolRunner
+from .formatting import build_formatter_chain
 from .planning import AviationPlan
 from .state import AgentState
 
+logger = logging.getLogger(__name__)
 
-def build_agent_graph(planner, tool_runner: ToolRunner, formatter):
+
+def build_agent_graph(planner, tool_runner: ToolRunner, formatter_llm):
     """
     Assemble the LangGraph workflow using injected planner/formatter runnables.
     """
@@ -47,37 +52,102 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter):
         except Exception as e:
             return {"error": str(e)}
 
+    # Build formatter chain directly - this allows LangGraph to capture streaming
+    formatter_chain = build_formatter_chain(formatter_llm)
+    
     def formatter_node(state: AgentState) -> Dict[str, Any]:
         # Handle errors gracefully
-        if state.get("error"):
+        error = state.get("error")
+        if error:
             return {
-                "final_answer": f"I encountered an error: {state['error']}. Please try again.",
-                "error": state["error"],
+                "final_answer": f"I encountered an error: {error}. Please try again.",
+                "error": error,
                 "thinking": state.get("planning_reasoning", ""),
             }
         
         try:
-            formatted = formatter.invoke(
+            # Transform state to chain inputs
+            plan = state.get("plan")
+            tool_result_raw = state.get("tool_result")
+            
+            # BREAKPOINT 4: Check plan and plan.arguments here
+            if plan and hasattr(plan, "arguments"):
+                if not isinstance(plan.arguments, dict):
+                    logger.error(f"BREAKPOINT 4: plan.arguments is not a dict! Type: {type(plan.arguments)}, Value: {plan.arguments}")
+                    raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}")
+            
+            # Ensure tool_result is a dict, not an AIMessage or other type
+            if tool_result_raw is None:
+                tool_result = {}
+            elif isinstance(tool_result_raw, dict):
+                tool_result = tool_result_raw
+            else:
+                # If it's not a dict, log and use empty dict
+                logger.warning(f"tool_result is not a dict: {type(tool_result_raw)}")
+                tool_result = {}
+            
+            # Use chain directly - LangGraph's astream_events() will capture streaming
+            # The chain is: prompt | llm | StrOutputParser(), so it should return a string
+            chain_result = formatter_chain.invoke(
                 {
                     "messages": state.get("messages") or [],
-                    "plan": state.get("plan"),
-                    "tool_result": state.get("tool_result"),
+                    "answer_style": plan.answer_style if plan else "narrative_markdown",
+                    "tool_result_json": json.dumps(tool_result, indent=2, ensure_ascii=False),
+                    "pretty_text": tool_result.get("pretty", ""),
                 }
             )
             
+            # Process the answer and build UI payload
+            from .formatting import build_ui_payload, _extract_icao_codes, _enhance_visualization
+            from langchain_core.messages import BaseMessage
+            
+            # Handle different return types from the chain
+            if isinstance(chain_result, str):
+                answer = chain_result.strip()
+            elif hasattr(chain_result, "content"):
+                # AIMessage or similar - extract content
+                answer = str(chain_result.content).strip()
+            else:
+                # Fallback to string conversion
+                answer = str(chain_result).strip()
+            
+            # Build UI payload - ensure plan and tool_result are valid
+            ui_payload = None
+            if plan and isinstance(plan, AviationPlan) and isinstance(tool_result, dict):
+                try:
+                    ui_payload = build_ui_payload(plan, tool_result)
+                except Exception as e:
+                    logger.warning(f"Error building UI payload: {e}")
+                    ui_payload = None
+            
+            # Optional: Enhance visualization with ICAOs from answer
+            mentioned_icaos = []
+            if ui_payload and ui_payload.get("kind") in ["route", "airport"]:
+                mentioned_icaos = _extract_icao_codes(answer)
+                if mentioned_icaos:
+                    ui_payload = _enhance_visualization(ui_payload, mentioned_icaos, tool_result)
+            
+            # Generate simple formatting reasoning
+            formatting_reasoning = f"Formatted answer using {plan.answer_style if plan else 'default'} style."
+            if mentioned_icaos:
+                formatting_reasoning += f" Mentioned {len(mentioned_icaos)} airports."
+            
             # Combine planning and formatting reasoning
             thinking_parts = []
-            if state.get("planning_reasoning"):
-                thinking_parts.append(state["planning_reasoning"])
-            if formatted.get("formatting_reasoning"):
-                thinking_parts.append(formatted["formatting_reasoning"])
+            planning_reasoning = state.get("planning_reasoning")
+            if planning_reasoning:
+                thinking_parts.append(planning_reasoning)
+            thinking_parts.append(formatting_reasoning)
             
             return {
-                "final_answer": formatted.get("final_answer", ""),
+                "final_answer": answer,
                 "thinking": "\n\n".join(thinking_parts) if thinking_parts else None,
-                "ui_payload": formatted.get("ui_payload"),
+                "ui_payload": ui_payload,
             }
         except Exception as e:
+            import traceback
+            error_details = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            logger.error(f"Formatter node error: {error_details}")
             return {
                 "final_answer": f"Error formatting response: {str(e)}",
                 "error": str(e),
