@@ -78,10 +78,6 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
     """
     if not tool_result:
         return None
-    
-    # Ensure tool_result is a dict (defensive check)
-    if not isinstance(tool_result, dict):
-        return None
 
     # Determine kind based on tool
     kind = _determine_kind(plan.selected_tool)
@@ -95,11 +91,7 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
     }
 
     # Add kind-specific metadata
-    # BREAKPOINT 1: Check if plan.arguments is a dict
     if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
-        # Add breakpoint here to inspect plan.arguments
-        if not isinstance(plan.arguments, dict):
-            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["departure"] = plan.arguments.get("from_icao") or plan.arguments.get("departure")
         base_payload["destination"] = plan.arguments.get("to_icao") or plan.arguments.get("destination")
         if plan.arguments.get("ifr") is not None:
@@ -113,9 +105,6 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
         "get_pilot_reviews",
         "get_fuel_prices",
     }:
-        # BREAKPOINT 2: Check if plan.arguments is a dict
-        if not isinstance(plan.arguments, dict):
-            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["icao"] = plan.arguments.get("icao") or plan.arguments.get("icao_code")
         # For search_airports, also extract icao from first airport if available
         if plan.selected_tool == "search_airports" and tool_result.get("airports"):
@@ -130,9 +119,6 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
         "list_rule_categories_and_tags",
         "list_rule_countries",
     }:
-        # BREAKPOINT 3: Check if plan.arguments is a dict
-        if not isinstance(plan.arguments, dict):
-            raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}, value: {plan.arguments}")
         base_payload["region"] = plan.arguments.get("region") or plan.arguments.get("country_code")
         base_payload["topic"] = plan.arguments.get("topic") or plan.arguments.get("category")
 

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from shared.aviation_agent.adapters import (
@@ -15,6 +18,7 @@ from shared.aviation_agent.adapters import (
     run_aviation_agent,
     stream_aviation_agent,
 )
+from shared.aviation_agent.adapters.logging import log_conversation_from_state
 from shared.aviation_agent.config import AviationAgentSettings, get_settings
 
 router = APIRouter(tags=["aviation-agent"])
@@ -47,23 +51,57 @@ def aviation_agent_chat(
 async def aviation_agent_chat_stream(
     request: ChatRequest,
     settings: AviationAgentSettings = Depends(get_settings),
+    session_id: Optional[str] = None,  # Extract from header if available
 ) -> StreamingResponse:
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
     
     try:
         graph = build_agent(settings=settings)
+        messages = request.to_langchain()
+        start_time = time.time()
+        
+        # Get session_id from request or header
+        if not session_id:
+            session_id = getattr(request, 'session_id', None) or f"session_{int(time.time())}"
+        
+        # Setup conversation logging
+        log_dir = Path(os.getenv("CONVERSATION_LOG_DIR", "conversation_logs"))
         
         async def event_generator():
-            session_id = getattr(request, 'session_id', None)  # Extract from request if available
-            async for event in stream_aviation_agent(
-                request.to_langchain(),
-                graph,
-                session_id=session_id
-            ):
-                event_name = event.get("event")
-                event_data = event.get("data", {})
-                yield f"event: {event_name}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+            try:
+                async for event in stream_aviation_agent(
+                    messages,
+                    graph,
+                    session_id=session_id
+                ):
+                    event_name = event.get("event")
+                    event_data = event.get("data", {})
+                    
+                    yield f"event: {event_name}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+            finally:
+                # After streaming completes (or fails), get final state and log conversation
+                # Note: We need to run the graph again to get final state since astream_events doesn't return it
+                try:
+                    logger.info("Getting final state for conversation logging...")
+                    final_state = graph.invoke({"messages": messages})
+                    end_time = time.time()
+                    
+                    if final_state:
+                        logger.info(f"Logging conversation for session {session_id}...")
+                        log_conversation_from_state(
+                            session_id=session_id,
+                            state=final_state,
+                            messages=messages,
+                            start_time=start_time,
+                            end_time=end_time,
+                            log_dir=log_dir,
+                        )
+                        logger.info("Conversation logged successfully")
+                    else:
+                        logger.warning("Final state is None, skipping conversation logging")
+                except Exception as e:
+                    logger.error(f"Error in conversation logging: {e}", exc_info=True)
         
         return StreamingResponse(
             event_generator(),

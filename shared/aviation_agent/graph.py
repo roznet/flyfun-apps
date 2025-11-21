@@ -68,23 +68,7 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter_llm):
         try:
             # Transform state to chain inputs
             plan = state.get("plan")
-            tool_result_raw = state.get("tool_result")
-            
-            # BREAKPOINT 4: Check plan and plan.arguments here
-            if plan and hasattr(plan, "arguments"):
-                if not isinstance(plan.arguments, dict):
-                    logger.error(f"BREAKPOINT 4: plan.arguments is not a dict! Type: {type(plan.arguments)}, Value: {plan.arguments}")
-                    raise TypeError(f"plan.arguments is not a dict: {type(plan.arguments)}")
-            
-            # Ensure tool_result is a dict, not an AIMessage or other type
-            if tool_result_raw is None:
-                tool_result = {}
-            elif isinstance(tool_result_raw, dict):
-                tool_result = tool_result_raw
-            else:
-                # If it's not a dict, log and use empty dict
-                logger.warning(f"tool_result is not a dict: {type(tool_result_raw)}")
-                tool_result = {}
+            tool_result = state.get("tool_result") or {}
             
             # Use chain directly - LangGraph's astream_events() will capture streaming
             # The chain is: prompt | llm | StrOutputParser(), so it should return a string
@@ -111,14 +95,8 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter_llm):
                 # Fallback to string conversion
                 answer = str(chain_result).strip()
             
-            # Build UI payload - ensure plan and tool_result are valid
-            ui_payload = None
-            if plan and isinstance(plan, AviationPlan) and isinstance(tool_result, dict):
-                try:
-                    ui_payload = build_ui_payload(plan, tool_result)
-                except Exception as e:
-                    logger.warning(f"Error building UI payload: {e}")
-                    ui_payload = None
+            # Build UI payload
+            ui_payload = build_ui_payload(plan, tool_result) if plan else None
             
             # Optional: Enhance visualization with ICAOs from answer
             mentioned_icaos = []
@@ -145,9 +123,7 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter_llm):
                 "ui_payload": ui_payload,
             }
         except Exception as e:
-            import traceback
-            error_details = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-            logger.error(f"Formatter node error: {error_details}")
+            logger.exception("Formatter node error")
             return {
                 "final_answer": f"Error formatting response: {str(e)}",
                 "error": str(e),
