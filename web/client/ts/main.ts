@@ -402,7 +402,7 @@ class Application {
   }
   
   /**
-   * Display airport details (placeholder - will be implemented)
+   * Display airport details
    */
   private displayAirportDetails(data: {
     detail: any;
@@ -411,20 +411,629 @@ class Application {
     aipEntries: any[];
     rules: any;
   }): void {
-    // TODO: Implement airport details panel display
-    // This should render the details in the right panel
-    console.log('Display airport details:', data);
+    const airport = data.detail;
+    const { procedures, runways, aipEntries, rules } = data;
     
-    // For now, just show that it's working
     const infoContainer = document.getElementById('airport-info');
-    if (infoContainer) {
-      infoContainer.innerHTML = `
-        <div class="text-center">
-          <p>Airport details loading...</p>
-          <small class="text-muted">This will be fully implemented in next phase</small>
+    const airportContent = document.getElementById('airport-content');
+    const noSelectionContainer = document.getElementById('no-selection');
+    
+    if (!airport) {
+      // Hide tabbed content, show "no selection" message
+      if (airportContent) (airportContent as HTMLElement).style.display = 'none';
+      if (noSelectionContainer) (noSelectionContainer as HTMLElement).style.display = 'block';
+      return;
+    }
+    
+    // Show tabbed content, hide "no selection" message
+    if (airportContent) (airportContent as HTMLElement).style.display = 'flex';
+    if (noSelectionContainer) (noSelectionContainer as HTMLElement).style.display = 'none';
+    
+    if (!infoContainer) return;
+    
+    let html = '';
+    
+    // Add links section
+    const links: string[] = [];
+    if (airport.home_link) {
+      links.push(`<a href="${this.escapeAttribute(airport.home_link)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm me-2">
+        <i class="fas fa-home"></i> Home Page
+      </a>`);
+    }
+    if (airport.wikipedia_link) {
+      links.push(`<a href="${this.escapeAttribute(airport.wikipedia_link)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-info btn-sm me-2">
+        <i class="fab fa-wikipedia-w"></i> Wikipedia
+      </a>`);
+    }
+    
+    // Always add EuroGA and Airfield Directory links
+    links.push(`<a href="https://airports.euroga.org/search.php?icao=${this.escapeAttribute(airport.ident || '')}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-success btn-sm me-2">
+      <i class="fas fa-plane"></i> EuroGA
+    </a>`);
+    
+    links.push(`<a href="https://airfield.directory/airfield/${this.escapeAttribute(airport.ident || '')}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-success btn-sm me-2">
+      <i class="fas fa-plane"></i> Airfield Directory
+    </a>`);
+    
+    // Add Google Maps "Nearby Restaurants" link
+    if (airport.latitude_deg !== undefined && airport.longitude_deg !== undefined) {
+      const q = encodeURIComponent('restaurants');
+      const zoom = 14;
+      const lat = airport.latitude_deg;
+      const lon = airport.longitude_deg;
+      links.push(`<a href="https://www.google.com/maps/search/${q}/@${lat},${lon},${zoom}z" target="_blank" rel="noopener noreferrer" class="btn btn-outline-danger btn-sm me-2">
+        <i class="fas fa-utensils"></i> Nearby Restaurants
+      </a>`);
+    }
+    
+    if (links.length > 0) {
+      html += `
+        <div class="airport-detail-section">
+          <h6><i class="fas fa-link"></i> Links</h6>
+          <div class="d-flex flex-wrap gap-2">
+            ${links.join('')}
+          </div>
         </div>
       `;
     }
+    
+    // Add basic information
+    html += `
+      <div class="airport-detail-section">
+        <h6><i class="fas fa-info-circle"></i> Basic Information</h6>
+        <table class="table table-sm">
+          <tr><td><strong>ICAO:</strong></td><td>${this.escapeHtml(airport.ident || 'N/A')}</td></tr>
+          <tr><td><strong>Name:</strong></td><td>${this.escapeHtml(airport.name || 'N/A')}</td></tr>
+          <tr><td><strong>Type:</strong></td><td>${this.escapeHtml(airport.type || 'N/A')}</td></tr>
+          <tr><td><strong>Country:</strong></td><td>${this.escapeHtml(airport.iso_country || 'N/A')}</td></tr>
+          <tr><td><strong>Region:</strong></td><td>${this.escapeHtml(airport.iso_region || 'N/A')}</td></tr>
+          <tr><td><strong>Municipality:</strong></td><td>${this.escapeHtml(airport.municipality || 'N/A')}</td></tr>
+          <tr><td><strong>Coordinates:</strong></td><td>${airport.latitude_deg?.toFixed(4) || 'N/A'}, ${airport.longitude_deg?.toFixed(4) || 'N/A'}</td></tr>
+          <tr><td><strong>Elevation:</strong></td><td>${airport.elevation_ft || 'N/A'} ft</td></tr>
+        </table>
+      </div>
+    `;
+    
+    // Add runways section
+    if (runways && runways.length > 0) {
+      html += `
+        <div class="airport-detail-section">
+          <h6><i class="fas fa-plane"></i> Runways (${runways.length})</h6>
+      `;
+      
+      runways.forEach((runway: any) => {
+        html += `
+          <div class="runway-info">
+            <strong>${this.escapeHtml(runway.le_ident || 'N/A')}/${this.escapeHtml(runway.he_ident || 'N/A')}</strong><br>
+            Length: ${runway.length_ft || 'N/A'} ft<br>
+            Width: ${runway.width_ft || 'N/A'} ft<br>
+            Surface: ${this.escapeHtml(runway.surface || 'N/A')}<br>
+            ${runway.lighted ? 'Lighted' : 'Not lighted'}
+          </div>
+        `;
+      });
+      
+      html += '</div>';
+    }
+    
+    // Add procedures section
+    if (procedures && procedures.length > 0) {
+      html += `
+        <div class="airport-detail-section">
+          <h6><i class="fas fa-route"></i> Procedures (${procedures.length})</h6>
+      `;
+      
+      // Group procedures by type
+      const proceduresByType: Record<string, any[]> = {};
+      procedures.forEach((proc: any) => {
+        const type = proc.procedure_type || 'Unknown';
+        if (!proceduresByType[type]) {
+          proceduresByType[type] = [];
+        }
+        proceduresByType[type].push(proc);
+      });
+      
+      Object.entries(proceduresByType).forEach(([type, procs]) => {
+        html += `<h6 class="mt-2">${this.escapeHtml(type.charAt(0).toUpperCase() + type.slice(1))} (${procs.length})</h6>`;
+        procs.forEach((proc: any) => {
+          const badgeClass = this.getProcedureBadgeClass(proc.procedure_type, proc.approach_type);
+          html += `<span class="badge ${badgeClass} procedure-badge">${this.escapeHtml(proc.name || 'Unnamed')}</span>`;
+        });
+      });
+      
+      html += '</div>';
+    }
+    
+    // Add sources section
+    if (airport.sources && Array.isArray(airport.sources) && airport.sources.length > 0) {
+      html += `
+        <div class="airport-detail-section">
+          <h6><i class="fas fa-database"></i> Data Sources</h6>
+          ${airport.sources.map((source: any) => `<span class="badge bg-secondary me-1">${this.escapeHtml(String(source))}</span>`).join('')}
+        </div>
+      `;
+    }
+    
+    infoContainer.innerHTML = html;
+    
+    // Display AIP data and rules
+    this.displayAIPData(aipEntries);
+    this.displayCountryRules(rules, airport.iso_country);
+  }
+  
+  /**
+   * Display AIP data
+   */
+  private displayAIPData(aipEntries: any[]): void {
+    const aipContentContainer = document.getElementById('aip-data-content');
+    
+    if (!aipContentContainer) return;
+    
+    if (!aipEntries || aipEntries.length === 0) {
+      aipContentContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No AIP data available</div>';
+      return;
+    }
+    
+    // Group by standardized field section
+    const entriesBySection: Record<string, any[]> = {};
+    aipEntries.forEach((entry: any) => {
+      let section = 'Other';
+      if (entry.std_field_id) {
+        const sectionId = Math.floor(entry.std_field_id / 100) * 100;
+        switch (sectionId) {
+          case 200: section = 'Admin'; break;
+          case 300: section = 'Operational'; break;
+          case 400: section = 'Handling'; break;
+          case 500: section = 'Passenger'; break;
+          default: section = 'Other'; break;
+        }
+      } else {
+        section = entry.section || 'Other';
+      }
+      
+      if (!entriesBySection[section]) {
+        entriesBySection[section] = [];
+      }
+      entriesBySection[section].push(entry);
+    });
+    
+    let html = '';
+    Object.entries(entriesBySection).forEach(([section, entries]) => {
+      const sectionId = `aip-section-${section.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      html += `
+        <div class="aip-section" data-section="${this.escapeAttribute(section)}">
+          <div class="aip-section-header" onclick="window.toggleAIPSection('${sectionId}')">
+            <span>
+              <i class="fas fa-chevron-right aip-section-toggle" id="toggle-${sectionId}"></i>
+              ${this.escapeHtml(section)} (${entries.length})
+            </span>
+          </div>
+          <div class="aip-section-content" id="${sectionId}">
+      `;
+      
+      entries.forEach((entry: any) => {
+        const fieldName = entry.std_field || entry.field;
+        const entryId = `aip-entry-${entry.std_field_id || entry.field || Math.random()}`;
+        html += `
+          <div class="aip-entry" id="${entryId}" data-field="${this.escapeAttribute(fieldName || '')}" data-value="${this.escapeAttribute(entry.value || '')}">
+            <strong>${this.escapeHtml(fieldName || 'Unknown')}:</strong> ${this.escapeHtml(entry.value || 'N/A')}
+            ${entry.alt_value ? `<br><em>${this.escapeHtml(entry.alt_value)}</em>` : ''}
+          </div>
+        `;
+      });
+      
+      html += `
+          </div>
+        </div>
+      `;
+    });
+    
+    aipContentContainer.innerHTML = html;
+    this.initializeAIPFilter();
+  }
+  
+  /**
+   * Display country rules
+   */
+  private displayCountryRules(rulesData: any, countryCode?: string): void {
+    const rulesContainer = document.getElementById('rules-content');
+    const rulesSummary = document.getElementById('rules-summary');
+    
+    if (!rulesContainer) return;
+    
+    const code = countryCode ? countryCode.toUpperCase() : null;
+    
+    if (!code) {
+      if (rulesSummary) {
+        rulesSummary.textContent = '';
+      }
+      rulesContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No country information available for this airport.</div>';
+      return;
+    }
+    
+    if (!rulesData || !Array.isArray(rulesData.categories) || rulesData.categories.length === 0) {
+      if (rulesSummary) {
+        rulesSummary.textContent = `No published rules available for ${code}.`;
+      }
+      rulesContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No rules available for this country.</div>';
+      return;
+    }
+    
+    if (rulesSummary) {
+      const totalCategories = rulesData.categories.length;
+      rulesSummary.textContent = `Rules for ${code}: ${rulesData.total_rules || 0} answers across ${totalCategories} ${totalCategories === 1 ? 'category' : 'categories'}.`;
+    }
+    
+    let html = '';
+    
+    rulesData.categories.forEach((category: any) => {
+      const sectionId = this.buildRuleSectionId(code, category.name);
+      const toggleId = `rules-toggle-${sectionId}`;
+      
+      html += `
+        <div class="rules-section" data-category="${this.escapeAttribute(category.name || 'General')}">
+          <div class="rules-section-header" onclick="window.toggleRuleSection('${sectionId}')">
+            <span>
+              <i class="fas fa-chevron-right rules-section-toggle" id="${toggleId}"></i>
+              ${this.escapeHtml(category.name || 'General')} (${category.count || 0})
+            </span>
+          </div>
+          <div class="rules-section-content" id="${sectionId}">
+      `;
+      
+      if (category.rules && Array.isArray(category.rules)) {
+        category.rules.forEach((rule: any) => {
+          const question = this.escapeHtml(rule.question_text || 'Untitled rule');
+          const answerText = this.escapeHtml(this.stripHtml(rule.answer_html) || 'No answer available.');
+          const tagsHtml = (rule.tags || [])
+            .map((tag: any) => `<span class="badge bg-secondary">${this.escapeHtml(String(tag))}</span>`)
+            .join(' ');
+          const linksHtml = (rule.links || [])
+            .map((link: any) => {
+              const rawUrl = String(link || '');
+              let label = rawUrl;
+              try {
+                const parsed = new URL(rawUrl, window.location.origin);
+                label = parsed.hostname.replace(/^www\./i, '') || parsed.href;
+              } catch (e) {
+                label = rawUrl;
+              }
+              const safeUrl = this.escapeAttribute(rawUrl);
+              return `<a href="${safeUrl}" class="me-2" target="_blank" rel="noopener noreferrer">${this.escapeHtml(label)}</a>`;
+            })
+            .join(' ');
+          
+          const metaParts: string[] = [];
+          if (rule.last_reviewed) {
+            metaParts.push(`Last reviewed: ${this.escapeHtml(rule.last_reviewed)}`);
+          }
+          if (rule.confidence) {
+            metaParts.push(`Confidence: ${this.escapeHtml(rule.confidence)}`);
+          }
+          
+          html += `
+            <div class="rules-entry">
+              <span class="rule-question"><i class="fas fa-gavel me-2"></i>${question}</span>
+              <div class="rule-answer">${answerText}</div>
+              ${tagsHtml ? `<div class="mb-2">${tagsHtml}</div>` : ''}
+              ${linksHtml ? `<div class="rule-links"><i class="fas fa-link me-1"></i>${linksHtml}</div>` : ''}
+              ${metaParts.length ? `<div class="text-muted small">${metaParts.join(' • ')}</div>` : ''}
+            </div>
+          `;
+        });
+      }
+      
+      html += `
+          </div>
+        </div>
+      `;
+    });
+    
+    rulesContainer.innerHTML = html;
+    this.initializeRuleSections();
+    this.initializeRulesFilter();
+  }
+  
+  /**
+   * Helper methods
+   */
+  private escapeHtml(value: any): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  
+  private escapeAttribute(value: any): string {
+    return this.escapeHtml(value);
+  }
+  
+  private stripHtml(html: any): string {
+    if (!html) {
+      return '';
+    }
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = String(html);
+    return tempDiv.textContent || tempDiv.innerText || '';
+  }
+  
+  private getProcedureBadgeClass(procedureType?: string, approachType?: string): string {
+    if (procedureType === 'approach') {
+      switch (approachType?.toUpperCase()) {
+        case 'ILS': return 'bg-success';
+        case 'RNAV': return 'bg-primary';
+        case 'VOR': return 'bg-info';
+        case 'NDB': return 'bg-warning';
+        default: return 'bg-secondary';
+      }
+    } else if (procedureType === 'departure') {
+      return 'bg-danger';
+    } else if (procedureType === 'arrival') {
+      return 'bg-warning';
+    }
+    return 'bg-secondary';
+  }
+  
+  private buildRuleSectionId(countryCode: string, categoryName?: string): string {
+    const slug = (categoryName || 'general')
+      .toString()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `rules-${countryCode}-${slug || 'general'}`;
+  }
+  
+  /**
+   * Initialize AIP filter
+   */
+  private initializeAIPFilter(): void {
+    const filterInput = document.getElementById('aip-filter-input');
+    const clearButton = document.getElementById('aip-filter-clear');
+    
+    if (!filterInput) return;
+    
+    // Remove existing listeners by cloning and replacing
+    const newFilterInput = filterInput.cloneNode(true) as HTMLInputElement;
+    filterInput.parentNode?.replaceChild(newFilterInput, filterInput);
+    
+    const newClearButton = clearButton ? (clearButton.cloneNode(true) as HTMLButtonElement) : null;
+    if (clearButton && newClearButton) {
+      clearButton.parentNode?.replaceChild(newClearButton, clearButton);
+    }
+    
+    newFilterInput.addEventListener('input', (e) => {
+      this.handleAIPFilter(e as any);
+    });
+    
+    if (newClearButton) {
+      newClearButton.addEventListener('click', () => {
+        newFilterInput.value = '';
+        this.handleAIPFilter({ target: { value: '' } } as any);
+      });
+    }
+    
+    // Load saved section states
+    this.loadAIPSectionStates();
+  }
+  
+  /**
+   * Handle AIP filter
+   */
+  private handleAIPFilter(event: { target: { value: string } }): void {
+    const filterText = (event.target.value || '').toLowerCase();
+    const entries = document.querySelectorAll('.aip-entry');
+    
+    entries.forEach((entry) => {
+      const fieldName = (entry as HTMLElement).dataset.field || '';
+      const value = (entry as HTMLElement).dataset.value || '';
+      const altValue = entry.querySelector('em')?.textContent || '';
+      
+      const matches = fieldName.toLowerCase().includes(filterText) || 
+                     value.toLowerCase().includes(filterText) ||
+                     altValue.toLowerCase().includes(filterText);
+      
+      if (matches) {
+        entry.classList.remove('hidden');
+        if (filterText) {
+          entry.classList.add('highlight');
+        } else {
+          entry.classList.remove('highlight');
+        }
+        
+        const section = entry.closest('.aip-section');
+        if (section) {
+          const content = section.querySelector('.aip-section-content');
+          const toggle = section.querySelector('.aip-section-toggle');
+          if (content) content.classList.add('expanded');
+          if (toggle) toggle.classList.add('expanded');
+        }
+      } else {
+        entry.classList.add('hidden');
+        entry.classList.remove('highlight');
+      }
+    });
+    
+    // Hide sections that have no visible entries
+    const sections = document.querySelectorAll('.aip-section');
+    sections.forEach((section) => {
+      const visibleEntries = section.querySelectorAll('.aip-entry:not(.hidden)');
+      (section as HTMLElement).style.display = visibleEntries.length === 0 ? 'none' : 'block';
+    });
+  }
+  
+  /**
+   * Load AIP section states
+   */
+  private loadAIPSectionStates(): void {
+    try {
+      const states = JSON.parse(localStorage.getItem('aipSectionStates') || '{}');
+      Object.entries(states).forEach(([sectionId, isExpanded]) => {
+        const content = document.getElementById(sectionId);
+        const toggle = document.getElementById(`toggle-${sectionId}`);
+        if (content && toggle) {
+          if (isExpanded) {
+            content.classList.add('expanded');
+            toggle.classList.add('expanded');
+          } else {
+            content.classList.remove('expanded');
+            toggle.classList.remove('expanded');
+          }
+        }
+      });
+    } catch (e) {
+      console.error('Error loading AIP section states:', e);
+    }
+  }
+  
+  /**
+   * Initialize rule sections
+   */
+  private initializeRuleSections(): void {
+    this.loadRuleSectionStates();
+  }
+  
+  /**
+   * Load rule section states
+   */
+  private loadRuleSectionStates(): void {
+    try {
+      const sections = document.querySelectorAll('.rules-section-content');
+      if (!sections.length) return;
+      
+      const states = JSON.parse(localStorage.getItem('ruleSectionStates') || '{}');
+      const hasStoredState = Object.keys(states).length > 0;
+      
+      sections.forEach((section, index) => {
+        const sectionId = (section as HTMLElement).id;
+        const toggle = document.getElementById(`rules-toggle-${sectionId}`);
+        const isExpanded = states[sectionId];
+        const shouldExpand = isExpanded === true || (!hasStoredState && index === 0);
+        
+        if (shouldExpand) {
+          section.classList.add('expanded');
+          if (toggle) toggle.classList.add('expanded');
+          if (!hasStoredState && index === 0) {
+            this.saveRuleSectionState(sectionId, true);
+          }
+        } else {
+          section.classList.remove('expanded');
+          if (toggle) toggle.classList.remove('expanded');
+        }
+      });
+    } catch (e) {
+      console.error('Error loading rule section states:', e);
+    }
+  }
+  
+  /**
+   * Save rule section state
+   */
+  private saveRuleSectionState(sectionId: string, isExpanded: boolean): void {
+    try {
+      const states = JSON.parse(localStorage.getItem('ruleSectionStates') || '{}');
+      states[sectionId] = isExpanded;
+      localStorage.setItem('ruleSectionStates', JSON.stringify(states));
+    } catch (e) {
+      console.error('Error saving rule section state:', e);
+    }
+  }
+  
+  /**
+   * Initialize rules filter
+   */
+  private initializeRulesFilter(): void {
+    const filterInput = document.getElementById('rules-filter-input');
+    const clearButton = document.getElementById('rules-filter-clear');
+    
+    if (!filterInput) return;
+    
+    // Remove existing listeners by cloning and replacing
+    const newFilterInput = filterInput.cloneNode(true) as HTMLInputElement;
+    filterInput.parentNode?.replaceChild(newFilterInput, filterInput);
+    
+    const newClearButton = clearButton ? (clearButton.cloneNode(true) as HTMLButtonElement) : null;
+    if (clearButton && newClearButton) {
+      clearButton.parentNode?.replaceChild(newClearButton, clearButton);
+    }
+    
+    newFilterInput.value = ''; // Clear any stale value
+    
+    newFilterInput.addEventListener('input', (e) => {
+      this.handleRulesFilter(e as any);
+    });
+    
+    if (newClearButton) {
+      newClearButton.addEventListener('click', () => {
+        newFilterInput.value = '';
+        this.handleRulesFilter({ target: { value: '' } } as any);
+      });
+    }
+  }
+  
+  /**
+   * Handle rules filter
+   */
+  private handleRulesFilter(event: { target: { value: string } }): void {
+    const filterText = (event.target.value || '').toLowerCase();
+    const entries = document.querySelectorAll('.rules-entry');
+    
+    const matchedSections = new Set<string>();
+    
+    entries.forEach((entry) => {
+      const question = entry.querySelector('.rule-question')?.textContent || '';
+      const answer = entry.querySelector('.rule-answer')?.textContent || '';
+      const tags = Array.from(entry.querySelectorAll('.badge')).map(b => b.textContent || '').join(' ');
+      const meta = entry.querySelector('.text-muted')?.textContent || '';
+      const category = entry.closest('.rules-section')?.getAttribute('data-category') || '';
+      
+      const combined = `${question} ${answer} ${tags} ${meta} ${category}`.toLowerCase();
+      const matches = combined.includes(filterText);
+      
+      if (matches) {
+        entry.classList.remove('hidden');
+        entry.classList.toggle('highlight', Boolean(filterText));
+        const sectionContent = entry.closest('.rules-section-content');
+        if (sectionContent) {
+          matchedSections.add((sectionContent as HTMLElement).id);
+        }
+      } else {
+        entry.classList.add('hidden');
+        entry.classList.remove('highlight');
+      }
+    });
+    
+    // Expand matched sections, collapse others if filter active
+    const sections = document.querySelectorAll('.rules-section-content');
+    sections.forEach((section) => {
+      const sectionId = (section as HTMLElement).id;
+      const toggle = document.getElementById(`rules-toggle-${sectionId}`);
+      const visibleEntries = section.querySelectorAll('.rules-entry:not(.hidden)');
+      const sectionElement = section.parentElement as HTMLElement;
+      
+      if (filterText) {
+        const shouldExpand = matchedSections.has(sectionId) || visibleEntries.length > 0;
+        if (shouldExpand) {
+          section.classList.add('expanded');
+          if (toggle) toggle.classList.add('expanded');
+        } else {
+          section.classList.remove('expanded');
+          if (toggle) toggle.classList.remove('expanded');
+        }
+        if (sectionElement) {
+          sectionElement.style.display = visibleEntries.length > 0 ? 'block' : 'none';
+        }
+      } else {
+        // Restore visibility when filter cleared
+        if (sectionElement) {
+          sectionElement.style.display = 'block';
+        }
+      }
+    });
   }
   
   /**
@@ -458,6 +1067,55 @@ async function initApp(): Promise<void> {
     app.handleLLMVisualization(visualization);
   } else {
     console.warn('Application not initialized yet');
+  }
+};
+
+// Global functions for HTML onclick handlers
+(window as any).toggleAIPSection = (sectionId: string) => {
+  const content = document.getElementById(sectionId);
+  const toggle = document.getElementById(`toggle-${sectionId}`);
+  if (!content || !toggle) return;
+  
+  const isExpanded = content.classList.contains('expanded');
+  if (isExpanded) {
+    content.classList.remove('expanded');
+    toggle.classList.remove('expanded');
+  } else {
+    content.classList.add('expanded');
+    toggle.classList.add('expanded');
+  }
+  
+  // Save state
+  try {
+    const states = JSON.parse(localStorage.getItem('aipSectionStates') || '{}');
+    states[sectionId] = !isExpanded;
+    localStorage.setItem('aipSectionStates', JSON.stringify(states));
+  } catch (e) {
+    console.error('Error saving AIP section state:', e);
+  }
+};
+
+(window as any).toggleRuleSection = (sectionId: string) => {
+  const content = document.getElementById(sectionId);
+  const toggle = document.getElementById(`rules-toggle-${sectionId}`);
+  if (!content || !toggle) return;
+  
+  const isExpanded = content.classList.contains('expanded');
+  if (isExpanded) {
+    content.classList.remove('expanded');
+    toggle.classList.remove('expanded');
+  } else {
+    content.classList.add('expanded');
+    toggle.classList.add('expanded');
+  }
+  
+  // Save state
+  try {
+    const states = JSON.parse(localStorage.getItem('ruleSectionStates') || '{}');
+    states[sectionId] = !isExpanded;
+    localStorage.setItem('ruleSectionStates', JSON.stringify(states));
+  } catch (e) {
+    console.error('Error saving rule section state:', e);
   }
 };
 
