@@ -2,6 +2,11 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
+  define: {
+    // Replace process.env with browser-safe values
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+    'process.env': JSON.stringify({ NODE_ENV: process.env.NODE_ENV || 'production' })
+  },
   build: {
     outDir: 'dist',
     lib: {

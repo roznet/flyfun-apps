@@ -133,9 +133,8 @@ interface StoreActions {
 /**
  * Zustand store with actions
  */
-export const useStore = create<AppState & StoreActions>()(
-  devtools(
-    (set, get) => ({
+// Create store factory function
+const createStore = (set: any, get: any) => ({
       // Initialize state properly - Maps don't serialize to JSON
       airports: [],
       filteredAirports: [],
@@ -355,8 +354,11 @@ export const useStore = create<AppState & StoreActions>()(
       resetState: () => {
         set(initialState);
       }
-    }),
-    { name: 'AirportExplorerStore' }
-  )
+});
+
+// Export store with devtools
+// Devtools will gracefully handle cases where Redux DevTools extension isn't available
+export const useStore = create<AppState & StoreActions>()(
+  devtools(createStore, { name: 'AirportExplorerStore' })
 );
 
