@@ -1422,20 +1422,21 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- Application Scripts -->
+    <!-- New TypeScript Application (Big Bang Migration) -->
+    <!-- In development: Vite will handle this automatically -->
+    <!-- In production: Use dist/main.iife.js -->
+    <script type="module" src="/ts/main.ts"></script>
+    
+    <!-- Old JavaScript files - REMOVE AFTER TESTING -->
+    <!--
     <script src="js/api.js?v=4.8"></script>
     <script src="js/map.js?v=5.0"></script>
     <script src="js/filters.js?v=5.1"></script>
     <script src="js/charts.js?v=4.8"></script>
-
-    <!-- Chatbot Scripts -->
     <script src="js/chatbot.js?v=5.6"></script>
     <script src="js/chat-map-integration.js?v=5.6"></script>
-
-    <!-- Mode Manager (New Layout) -->
     <script src="js/mode-manager.js?v=1.3"></script>
-
-    <!-- Main App (must be last) -->
     <script src="js/app.js?v=5.2"></script>
+    -->
 </body>
 </html> 

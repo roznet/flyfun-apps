@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true
+  },
+  "exclude": ["**/*.test.ts", "**/*.spec.ts"]
+}
+

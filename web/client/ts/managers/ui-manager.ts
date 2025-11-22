@@ -1,0 +1,889 @@
+/**
+ * UI Manager - Reactive DOM updates based on Zustand store
+ * Handles all user interactions and updates UI based on state changes
+ */
+
+import { useStore } from '../store/store';
+import type { AppState, FilterConfig, LegendMode, Airport } from '../store/types';
+import { APIAdapter } from '../adapters/api-adapter';
+
+/**
+ * UI Manager class
+ */
+export class UIManager {
+  private store: typeof useStore;
+  private apiAdapter: APIAdapter;
+  private unsubscribe: (() => void) | null = null;
+  private debounceTimeouts: Map<string, number> = new Map();
+  
+  constructor(store: typeof useStore, apiAdapter: APIAdapter) {
+    this.store = store;
+    this.apiAdapter = apiAdapter;
+  }
+  
+  /**
+   * Initialize UI Manager
+   */
+  init(): void {
+    // Initialize event listeners first
+    this.initEventListeners();
+    
+    // Subscribe to store changes - Zustand's subscribe works outside React
+    // Use a debounce and state comparison to prevent infinite loops
+    let lastStateHash: string = '';
+    let updateTimeout: number | null = null;
+    this.unsubscribe = this.store.subscribe((state) => {
+      // Create a hash of state to detect actual changes
+      const stateHash = JSON.stringify({
+        filters: state.filters,
+        searchQuery: state.ui.searchQuery,
+        legendMode: state.visualization.legendMode,
+        selectedAirport: state.selectedAirport?.ident,
+        loading: state.ui.loading,
+        error: state.ui.error,
+        filteredCount: state.filteredAirports.length
+      });
+      
+      // Only update if state actually changed
+      if (stateHash === lastStateHash) {
+        return; // No change, skip update
+      }
+      lastStateHash = stateHash;
+      
+      // Debounce UI updates to prevent too many DOM updates
+      if (updateTimeout) {
+        clearTimeout(updateTimeout);
+      }
+      updateTimeout = window.setTimeout(() => {
+        this.updateUI(state);
+      }, 10); // Small delay to batch updates
+    });
+    
+    // Initial UI update
+    const initialState = this.store.getState();
+    this.updateUI(initialState);
+  }
+  
+  /**
+   * Cleanup
+   */
+  destroy(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+    }
+    // Clear debounce timeouts
+    this.debounceTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.debounceTimeouts.clear();
+  }
+  
+  /**
+   * Update UI based on state
+   */
+  private updateUI(state: AppState): void {
+    // Update filter controls
+    this.updateFilterControls(state.filters);
+    
+    // Update search input
+    this.updateSearchInput(state.ui.searchQuery);
+    
+    // Update legend mode
+    this.updateLegendMode(state.visualization.legendMode);
+    
+    // Update loading state
+    this.updateLoadingState(state.ui.loading);
+    
+    // Update error state
+    this.updateErrorState(state.ui.error);
+    
+    // Update airport count
+    this.updateAirportCount(state.filteredAirports.length);
+    
+    // Update airport details panel
+    if (state.selectedAirport) {
+      this.updateAirportDetails(state.selectedAirport);
+    } else {
+      this.hideAirportDetails();
+    }
+    
+    // Update reset zoom button
+    this.updateResetZoomButton(state.filteredAirports.length > 0);
+  }
+  
+  /**
+   * Initialize event listeners
+   */
+  private initEventListeners(): void {
+    // Filter controls
+    const countrySelect = document.getElementById('country-filter');
+    if (countrySelect) {
+      countrySelect.addEventListener('change', (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.store.getState().setFilters({ country: target.value || null });
+      });
+    }
+    
+    const hasProcedures = document.getElementById('has-procedures');
+    if (hasProcedures) {
+      hasProcedures.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      this.store.getState().setFilters({ has_procedures: target.checked || null });
+      });
+    }
+    
+    const hasAipData = document.getElementById('has-aip-data');
+    if (hasAipData) {
+      hasAipData.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      this.store.getState().setFilters({ has_aip_data: target.checked || null });
+      });
+    }
+    
+    const hasHardRunway = document.getElementById('has-hard-runway');
+    if (hasHardRunway) {
+      hasHardRunway.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      this.store.getState().setFilters({ has_hard_runway: target.checked || null });
+      });
+    }
+    
+    const borderCrossing = document.getElementById('border-crossing-only');
+    if (borderCrossing) {
+      borderCrossing.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      this.store.getState().setFilters({ point_of_entry: target.checked || null });
+      });
+    }
+    
+    const maxAirports = document.getElementById('max-airports-filter');
+    if (maxAirports) {
+      maxAirports.addEventListener('change', (e) => {
+      const target = e.target as HTMLSelectElement;
+      const limit = target.value ? parseInt(target.value, 10) : null;
+      this.store.getState().setFilters({ limit: limit || 1000 });
+      });
+    }
+    
+    // Search input
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+      // Debounce search input
+      searchInput.addEventListener('input', (e) => {
+      const target = e.target as HTMLInputElement;
+      this.store.getState().setSearchQuery(target.value);
+        
+        // Clear existing timeout
+        const existingTimeout = this.debounceTimeouts.get('search');
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+        
+        // Debounce search execution
+        const timeout = setTimeout(() => {
+          this.handleSearch(target.value.trim());
+        }, 500);
+        
+        this.debounceTimeouts.set('search', timeout);
+      });
+    }
+    
+    // Legend mode
+    const legendModeSelect = document.getElementById('legend-mode-filter');
+    if (legendModeSelect) {
+      legendModeSelect.addEventListener('change', (e) => {
+      const target = e.target as HTMLSelectElement;
+      this.store.getState().setLegendMode(target.value as LegendMode);
+      });
+    }
+    
+    // Apply filters button
+    const applyFiltersBtn = document.getElementById('apply-filters');
+    if (applyFiltersBtn) {
+      applyFiltersBtn.addEventListener('click', () => {
+        this.applyFilters();
+      });
+    }
+    
+    // Clear filters button
+    const clearFiltersBtn = document.getElementById('clear-filters');
+    if (clearFiltersBtn) {
+      clearFiltersBtn.addEventListener('click', () => {
+        this.clearFilters();
+      });
+    }
+    
+    // Locate button
+    const locateBtn = document.getElementById('locate-button');
+    if (locateBtn) {
+      locateBtn.addEventListener('click', () => {
+        this.handleLocate();
+      });
+    }
+    
+    // Reset zoom button
+    const resetZoomBtn = document.getElementById('reset-zoom');
+    if (resetZoomBtn) {
+      resetZoomBtn.addEventListener('click', () => {
+        this.handleResetZoom();
+      });
+    }
+    
+    // Airport click event (from map)
+    window.addEventListener('airport-click', ((e: Event) => {
+      const customEvent = e as CustomEvent<Airport>;
+      this.store.getState().selectAirport(customEvent.detail);
+      this.loadAirportDetails(customEvent.detail);
+    }) as EventListener);
+  }
+  
+  /**
+   * Update filter controls to match state
+   */
+  private updateFilterControls(filters: FilterConfig): void {
+    const countrySelect = document.getElementById('country-filter') as HTMLSelectElement;
+    if (countrySelect) {
+      countrySelect.value = filters.country || '';
+    }
+    
+    const hasProcedures = document.getElementById('has-procedures') as HTMLInputElement;
+    if (hasProcedures) {
+      hasProcedures.checked = filters.has_procedures === true;
+    }
+    
+    const hasAipData = document.getElementById('has-aip-data') as HTMLInputElement;
+    if (hasAipData) {
+      hasAipData.checked = filters.has_aip_data === true;
+    }
+    
+    const hasHardRunway = document.getElementById('has-hard-runway') as HTMLInputElement;
+    if (hasHardRunway) {
+      hasHardRunway.checked = filters.has_hard_runway === true;
+    }
+    
+    const borderCrossing = document.getElementById('border-crossing-only') as HTMLInputElement;
+    if (borderCrossing) {
+      borderCrossing.checked = filters.point_of_entry === true;
+    }
+    
+    const maxAirports = document.getElementById('max-airports-filter') as HTMLSelectElement;
+    if (maxAirports) {
+      maxAirports.value = filters.limit ? String(filters.limit) : '';
+    }
+  }
+  
+  /**
+   * Update search input
+   */
+  private updateSearchInput(query: string): void {
+    const searchInput = document.getElementById('search-input') as HTMLInputElement;
+    if (searchInput && searchInput.value !== query) {
+      searchInput.value = query;
+    }
+  }
+  
+  /**
+   * Update legend mode
+   */
+  private updateLegendMode(legendMode: LegendMode): void {
+    const legendModeSelect = document.getElementById('legend-mode-filter') as HTMLSelectElement;
+    if (legendModeSelect && legendModeSelect.value !== legendMode) {
+      legendModeSelect.value = legendMode;
+    }
+    
+    // Update legend display
+    this.updateLegendDisplay(legendMode);
+  }
+  
+  /**
+   * Update legend display
+   */
+  private updateLegendDisplay(legendMode: LegendMode): void {
+    const legendContent = document.getElementById('legend-content');
+    if (!legendContent) return;
+    
+    let html = '';
+    
+    switch (legendMode) {
+      case 'airport-type':
+        html = `
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #28a745;"></div>
+            <span>Border Crossing</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #ffc107;"></div>
+            <span>Airport with Procedures</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #dc3545;"></div>
+            <span>Airport without Procedures</span>
+          </div>
+        `;
+        break;
+        
+      case 'procedure-precision':
+        html = `
+          <div class="legend-item">
+            <div class="legend-line" style="background-color: #ffff00;"></div>
+            <span>ILS (Precision)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-line" style="background-color: #0000ff;"></div>
+            <span>RNP/RNAV (RNP)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-line" style="background-color: #ffffff;"></div>
+            <span>VOR/NDB (Non-Precision)</span>
+          </div>
+        `;
+        break;
+        
+      case 'runway-length':
+        html = `
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #28a745;"></div>
+            <span>Long Runway (>8000ft)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #ffc107;"></div>
+            <span>Medium Runway (4000-8000ft)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #dc3545;"></div>
+            <span>Short Runway (<4000ft)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #6c757d;"></div>
+            <span>Unknown Length</span>
+          </div>
+        `;
+        break;
+        
+      case 'country':
+        html = `
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #007bff;"></div>
+            <span>France (LF)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #dc3545;"></div>
+            <span>United Kingdom (EG)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #28a745;"></div>
+            <span>Germany (ED)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #ffc107;"></div>
+            <span>Other Countries</span>
+          </div>
+        `;
+        break;
+    }
+    
+    legendContent.innerHTML = html;
+  }
+  
+  /**
+   * Update loading state
+   */
+  private updateLoadingState(loading: boolean): void {
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) {
+      loadingEl.style.display = loading ? 'block' : 'none';
+    }
+    
+    const applyBtn = document.getElementById('apply-filters');
+    if (applyBtn) {
+      (applyBtn as HTMLButtonElement).disabled = loading;
+      applyBtn.innerHTML = loading
+        ? '<i class="fas fa-spinner fa-spin"></i> Loading...'
+        : '<i class="fas fa-search"></i> Apply Filters';
+    }
+  }
+  
+  /**
+   * Update error state
+   */
+  private updateErrorState(error: string | null): void {
+    // Remove existing error alerts
+    const existingAlerts = document.querySelectorAll('.alert-danger.position-fixed');
+    existingAlerts.forEach(alert => alert.remove());
+    
+    if (error) {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+      alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+      alertDiv.innerHTML = `
+        <i class="fas fa-exclamation-triangle"></i> ${error}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      `;
+      
+      document.body.appendChild(alertDiv);
+      
+      // Auto-remove after 5 seconds
+      setTimeout(() => {
+        if (alertDiv.parentNode) {
+          alertDiv.remove();
+        }
+      }, 5000);
+    }
+  }
+  
+  /**
+   * Update airport count
+   */
+  private updateAirportCount(count: number): void {
+    // Update any elements that display airport count
+    const countElements = document.querySelectorAll('[data-airport-count]');
+    countElements.forEach(el => {
+      el.textContent = String(count);
+    });
+  }
+  
+  /**
+   * Update airport details panel
+   */
+  private updateAirportDetails(airport: Airport): void {
+    // This will be implemented to show airport details in right panel
+    // For now, just ensure panel is visible
+    const airportContent = document.getElementById('airport-content');
+    if (airportContent) {
+      airportContent.style.display = 'flex';
+    }
+    
+    const noSelection = document.getElementById('no-selection');
+    if (noSelection) {
+      noSelection.style.display = 'none';
+    }
+  }
+  
+  /**
+   * Hide airport details panel
+   */
+  private hideAirportDetails(): void {
+    const airportContent = document.getElementById('airport-content');
+    if (airportContent) {
+      airportContent.style.display = 'none';
+    }
+    
+    const noSelection = document.getElementById('no-selection');
+    if (noSelection) {
+      noSelection.style.display = 'block';
+    }
+  }
+  
+  /**
+   * Update reset zoom button state
+   */
+  private updateResetZoomButton(enabled: boolean): void {
+    const resetBtn = document.getElementById('reset-zoom');
+    if (resetBtn) {
+      (resetBtn as HTMLButtonElement).disabled = !enabled;
+    }
+  }
+  
+  /**
+   * Apply filters (trigger API call)
+   */
+  async applyFilters(): Promise<void> {
+    const state = this.store.getState();
+    
+    this.store.getState().setLoading(true);
+    this.store.getState().setError(null);
+    
+    try {
+      // Check if we have route state
+      if (state.route && state.route.isChatbotSelection && state.route.chatbotAirports) {
+        // Client-side filtering for chatbot airports
+        // Filters are already applied via store.setFilters()
+        this.store.getState().setLoading(false);
+        return;
+      }
+      
+      if (state.route && state.route.airports) {
+        // Route search mode
+        await this.applyRouteSearch(state.route);
+        return;
+      }
+      
+      if (state.locate && state.locate.center) {
+        // Locate mode with cached center
+        await this.applyLocateWithCenter(state.locate);
+        return;
+      }
+      
+      // Normal filter mode
+      const response = await this.apiAdapter.getAirports(state.filters);
+      this.store.getState().setAirports(response.data);
+      
+      this.showSuccess(`Applied filters: ${response.data.length} airports found`);
+      this.store.getState().setLoading(false);
+    } catch (error: any) {
+      console.error('Error applying filters:', error);
+      this.store.getState().setError('Error applying filters: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Apply route search
+   */
+  private async applyRouteSearch(route: NonNullable<ReturnType<typeof useStore.getState>['route']>): Promise<void> {
+    if (!route.airports || route.airports.length < 1) return;
+    
+    const state = this.store.getState();
+    const distanceInput = document.getElementById('route-distance') as HTMLInputElement;
+    const distanceNm = distanceInput ? parseFloat(distanceInput.value) || 50.0 : 50.0;
+    
+    const enrouteInput = document.getElementById('enroute-distance') as HTMLInputElement;
+    const enrouteMaxNm = enrouteInput ? parseFloat(enrouteInput.value) || undefined : undefined;
+    
+    try {
+      const filters: Partial<FilterConfig> = { ...state.filters };
+      if (enrouteMaxNm) {
+        filters.enroute_distance_max_nm = enrouteMaxNm;
+      }
+      
+      const response = await this.apiAdapter.searchAirportsNearRoute(
+        route.airports,
+        distanceNm,
+        filters
+      );
+      
+      // Extract airports from response
+      const airports = response.airports.map(item => ({
+        ...item.airport,
+        _routeSegmentDistance: item.segment_distance_nm,
+        _routeEnrouteDistance: item.enroute_distance_nm,
+        _closestSegment: item.closest_segment
+      }));
+      
+      this.store.getState().setAirports(airports);
+      
+      // Update route state
+      this.store.getState().setRoute({
+        ...route,
+        distance_nm: distanceNm
+      });
+      
+      this.showSuccess(`Route search: ${response.airports_found} airports within ${distanceNm}nm`);
+      this.store.getState().setLoading(false);
+    } catch (error: any) {
+      console.error('Error in route search:', error);
+      this.store.getState().setError('Error searching route: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Apply locate with cached center
+   */
+  private async applyLocateWithCenter(locate: NonNullable<ReturnType<typeof useStore.getState>['locate']>): Promise<void> {
+    if (!locate.center) return;
+    
+    const state = this.store.getState();
+    const radiusInput = document.getElementById('route-distance') as HTMLInputElement;
+    const radiusNm = radiusInput ? parseFloat(radiusInput.value) || locate.radiusNm : locate.radiusNm;
+    
+    try {
+      const response = await this.apiAdapter.locateAirportsByCenter(
+        { lat: locate.center.lat, lon: locate.center.lng, label: locate.center.label } as {lat: number; lon: number; label?: string},
+        radiusNm,
+        state.filters
+      );
+      
+      if (response.airports) {
+        this.store.getState().setAirports(response.airports);
+        
+        // Update locate state
+        this.store.getState().setLocate({
+          ...locate,
+          radiusNm
+        });
+        
+        this.showSuccess(response.pretty || `Found ${response.count} airports within ${radiusNm}nm`);
+        this.store.getState().setLoading(false);
+      }
+    } catch (error: any) {
+      console.error('Error in locate:', error);
+      this.store.getState().setError('Error locating airports: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Handle search input
+   */
+  private async handleSearch(query: string): Promise<void> {
+    if (!query.trim()) {
+      // Clear search
+      this.store.getState().setAirports([]);
+      return;
+    }
+    
+    // Check if this is a route search (4-letter ICAO codes)
+    const routeAirports = this.parseRouteFromQuery(query);
+    
+    if (routeAirports && routeAirports.length > 0) {
+      // Route search
+      await this.handleRouteSearch(routeAirports);
+    } else {
+      // Text search
+      this.store.getState().setLoading(true);
+      this.store.getState().setError(null);
+      
+      try {
+        const response = await this.apiAdapter.searchAirports(query, 50);
+        this.store.getState().setAirports(response.data);
+        this.showSuccess(`Search results: ${response.data.length} airports found for "${query}"`);
+        this.store.getState().setLoading(false);
+      } catch (error: any) {
+        console.error('Error in search:', error);
+        this.store.getState().setError('Error searching airports: ' + (error.message || 'Unknown error'));
+        this.store.getState().setLoading(false);
+      }
+    }
+  }
+  
+  /**
+   * Parse route from query string
+   */
+  private parseRouteFromQuery(query: string): string[] | null {
+    const parts = query.trim().split(/\s+/).filter(part => part.length > 0);
+    const icaoPattern = /^[A-Za-z]{4}$/;
+    
+    const allIcaoCodes = parts.every(part => icaoPattern.test(part));
+    
+    if (allIcaoCodes && parts.length >= 1) {
+      return parts.map(part => part.toUpperCase());
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Handle route search
+   */
+  private async handleRouteSearch(routeAirports: string[]): Promise<void> {
+    const distanceInput = document.getElementById('route-distance') as HTMLInputElement;
+    const distanceNm = distanceInput ? parseFloat(distanceInput.value) || 50.0 : 50.0;
+    
+    this.store.getState().setLoading(true);
+    this.store.getState().setError(null);
+    
+    try {
+      const state = this.store.getState();
+      
+      // Get original route airport coordinates for route line
+      const originalRouteAirports = await this.getRouteAirportCoordinates(routeAirports);
+      
+      const response = await this.apiAdapter.searchAirportsNearRoute(
+        routeAirports,
+        distanceNm,
+        state.filters
+      );
+      
+      // Extract airports
+      const airports = response.airports.map(item => ({
+        ...item.airport,
+        _routeSegmentDistance: item.segment_distance_nm,
+        _routeEnrouteDistance: item.enroute_distance_nm,
+        _closestSegment: item.closest_segment
+      }));
+      
+      this.store.getState().setAirports(airports);
+      
+      // Set route state
+      this.store.getState().setRoute({
+        airports: routeAirports,
+        distance_nm: distanceNm,
+        originalRouteAirports,
+        isChatbotSelection: false,
+        chatbotAirports: null
+      });
+      
+      this.showSuccess(`Route search: ${response.airports_found} airports within ${distanceNm}nm of route ${routeAirports.join(' → ')}`);
+      this.store.getState().setLoading(false);
+    } catch (error: any) {
+      console.error('Error in route search:', error);
+      this.store.getState().setError('Error searching route: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Get route airport coordinates
+   */
+  private async getRouteAirportCoordinates(routeAirports: string[]): Promise<Array<{icao: string; lat: number; lng: number}>> {
+    const coordinates: Array<{icao: string; lat: number; lng: number}> = [];
+    
+    for (const icao of routeAirports) {
+      try {
+        const airport = await this.apiAdapter.getAirportDetail(icao);
+        if (airport.latitude_deg && airport.longitude_deg) {
+          coordinates.push({
+            icao,
+            lat: airport.latitude_deg,
+            lng: airport.longitude_deg
+          });
+        }
+      } catch (error) {
+        console.error(`Error getting coordinates for ${icao}:`, error);
+      }
+    }
+    
+    return coordinates;
+  }
+  
+  /**
+   * Handle locate
+   */
+  private async handleLocate(): Promise<void> {
+    const searchInput = document.getElementById('search-input') as HTMLInputElement;
+    const radiusInput = document.getElementById('route-distance') as HTMLInputElement;
+    
+    const query = searchInput ? searchInput.value.trim() : '';
+    const radiusNm = radiusInput ? parseFloat(radiusInput.value) || 50.0 : 50.0;
+    
+    if (!query) {
+      this.store.getState().setError('Enter a place in the search box to locate near.');
+      return;
+    }
+    
+    this.store.getState().setLoading(true);
+    this.store.getState().setError(null);
+    
+    try {
+      const state = this.store.getState();
+      const response = await this.apiAdapter.locateAirports(query, radiusNm, state.filters);
+      
+      if (response.airports) {
+        this.store.getState().setAirports(response.airports);
+        
+        if (response.center) {
+          this.store.getState().setLocate({
+            query,
+            center: { lat: response.center.lat, lng: (response.center as any).lon || (response.center as any).lng || response.center.lat, label: response.center.label || '' },
+            radiusNm
+          });
+        }
+        
+        this.showSuccess(response.pretty || `Located ${response.count} airports within ${radiusNm}nm of "${query}"`);
+        this.store.getState().setLoading(false);
+      }
+    } catch (error: any) {
+      console.error('Error in locate:', error);
+      this.store.getState().setError('Error locating airports: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Clear filters
+   */
+  private clearFilters(): void {
+    this.store.getState().clearFilters();
+    this.store.getState().setRoute(null);
+    this.store.getState().setLocate(null);
+    this.store.getState().setSearchQuery('');
+    this.applyFilters();
+  }
+  
+  /**
+   * Handle reset zoom
+   */
+  private handleResetZoom(): void {
+    const event = new CustomEvent('reset-zoom');
+    window.dispatchEvent(event);
+  }
+  
+  /**
+   * Load airport details
+   */
+  private async loadAirportDetails(airport: Airport): Promise<void> {
+    this.store.getState().setLoading(true);
+    
+    try {
+      const [detail, procedures, runways, aipEntries, rules] = await Promise.all([
+        this.apiAdapter.getAirportDetail(airport.ident),
+        this.apiAdapter.getAirportProcedures(airport.ident),
+        this.apiAdapter.getAirportRunways(airport.ident),
+        this.apiAdapter.getAirportAIPEntries(airport.ident),
+        airport.iso_country ? this.apiAdapter.getCountryRules(airport.iso_country) : Promise.resolve(null)
+      ]);
+      
+      // Dispatch event to display airport details
+      const event = new CustomEvent('display-airport-details', {
+        detail: { detail, procedures, runways, aipEntries, rules }
+      });
+      window.dispatchEvent(event);
+      
+      this.store.getState().setLoading(false);
+    } catch (error: any) {
+      console.error('Error loading airport details:', error);
+      this.store.getState().setError('Error loading airport details: ' + (error.message || 'Unknown error'));
+      this.store.getState().setLoading(false);
+    }
+  }
+  
+  /**
+   * Show success message
+   */
+  private showSuccess(message: string): void {
+    // Remove existing success alerts
+    const existingAlerts = document.querySelectorAll('.alert-success.position-fixed');
+    existingAlerts.forEach(alert => alert.remove());
+    
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+      <i class="fas fa-check-circle"></i> ${message}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+      if (alertDiv.parentNode) {
+        alertDiv.remove();
+      }
+    }, 3000);
+  }
+  
+  /**
+   * Sync filters to UI controls (for chatbot filter profiles)
+   */
+  syncFiltersToUI(filters: Partial<FilterConfig>): void {
+    // Update DOM controls to match filter state
+    if (filters.country) {
+      const select = document.getElementById('country-filter') as HTMLSelectElement;
+      if (select) select.value = filters.country;
+    }
+    
+    if (filters.has_procedures) {
+      const checkbox = document.getElementById('has-procedures') as HTMLInputElement;
+      if (checkbox) checkbox.checked = true;
+    }
+    
+    if (filters.has_aip_data) {
+      const checkbox = document.getElementById('has-aip-data') as HTMLInputElement;
+      if (checkbox) checkbox.checked = true;
+    }
+    
+    if (filters.has_hard_runway) {
+      const checkbox = document.getElementById('has-hard-runway') as HTMLInputElement;
+      if (checkbox) checkbox.checked = true;
+    }
+    
+    if (filters.point_of_entry) {
+      const checkbox = document.getElementById('border-crossing-only') as HTMLInputElement;
+      if (checkbox) checkbox.checked = true;
+    }
+    
+    // Update store filters
+    this.store.getState().setFilters(filters);
+  }
+}
+
