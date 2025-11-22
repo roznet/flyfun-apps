@@ -138,6 +138,7 @@ class Application {
     let lastLegendMode: string = '';
     let lastHighlightsHash: string = '';
     let lastRouteHash: string = '';
+    let lastProcedureLinesHash: string = ''; // Track loaded procedure lines
     
     // Zustand's subscribe - listens to all state changes
     // Use debounce to prevent infinite loops
@@ -202,9 +203,33 @@ class Application {
             lastRouteHash = routeHash;
           }
           
-          // Update procedure lines if needed
-          if (state.visualization.legendMode === 'procedure-precision' && state.visualization.showProcedureLines) {
-            this.loadProcedureLines(state.filteredAirports);
+          // Handle procedure lines based on legend mode
+          // Capture previous mode BEFORE updating lastLegendMode (which happens above)
+          const wasProcedurePrecision = lastLegendMode === 'procedure-precision';
+          const isProcedurePrecision = state.visualization.legendMode === 'procedure-precision';
+          
+          if (legendModeChanged && wasProcedurePrecision && !isProcedurePrecision) {
+            // Clear procedure lines when switching away from procedure-precision mode
+            console.log('Clearing procedure lines - legend mode changed away from procedure-precision');
+            this.visualizationEngine.clearProcedureLines();
+            lastProcedureLinesHash = ''; // Reset hash
+          } else if (isProcedurePrecision && state.visualization.showProcedureLines) {
+            // Load procedure lines when in procedure-precision mode
+            // Only reload if airports changed OR if legend mode just changed TO procedure-precision
+            const currentProcedureLinesHash = currentAirportsHash; // Use airports hash as proxy
+            const shouldLoadProcedureLines = (legendModeChanged && isProcedurePrecision) || 
+              (airportsChanged && currentProcedureLinesHash !== lastProcedureLinesHash);
+            
+            if (shouldLoadProcedureLines) {
+              console.log('Loading procedure lines - procedure-precision mode', {
+                airportCount: state.filteredAirports.length,
+                legendModeChanged,
+                airportsChanged,
+                justSwitchedToPrecision: legendModeChanged && isProcedurePrecision
+              });
+              this.loadProcedureLines(state.filteredAirports);
+              lastProcedureLinesHash = currentProcedureLinesHash;
+            }
           }
           
           // NOTE: We don't update map view here to prevent infinite loops

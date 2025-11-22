@@ -578,5 +578,15 @@ export class VisualizationEngine {
     this.markers.clear();
     this.procedureLines.clear();
   }
+  
+  /**
+   * Clear procedure lines
+   */
+  clearProcedureLines(): void {
+    if (this.procedureLayer) {
+      this.procedureLayer.clearLayers();
+    }
+    this.procedureLines.clear();
+  }
 }
 

@@ -199,10 +199,13 @@ export const useStore = create<AppState & StoreActions>()(
               highlights = new globalThis.Map();
             }
           }
+          // Automatically enable procedure lines when legend mode is 'procedure-precision'
+          const showProcedureLines = mode === 'procedure-precision';
           return {
             visualization: {
               ...state.visualization,
               legendMode: mode,
+              showProcedureLines,
               highlights
             }
           };
