@@ -388,7 +388,7 @@ const visualization = ui_payload.mcp_raw.visualization;
 - `marker_with_details` - Single airport with details
 - `point_with_markers` - Location with nearby airports
 
-See `designs/TOOL_VISUALIZATION_MAPPING.md` for complete tool-to-visualization mapping.
+See `designs/UI_FILTER_STATE_DESIGN.md` for complete tool-to-visualization mapping and LLM integration details.
 
 ---
 
@@ -636,5 +636,5 @@ web/server/api/
 ## Appendix: Related Documents
 
 - `designs/LLM_AGENT_DESIGN.md` - Original agent design
-- `designs/TOOL_VISUALIZATION_MAPPING.md` - Tool-to-visualization mapping
+- `designs/UI_FILTER_STATE_DESIGN.md` - Complete UI, filter, state management, and LLM visualization design
 - `PHASE5_UI_INTEGRATION_SUMMARY.md` - UI integration details

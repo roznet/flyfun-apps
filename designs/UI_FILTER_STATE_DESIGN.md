@@ -648,22 +648,6 @@ If Redux DevTools extension installed:
 3. Call from `UIManager` or `LLMIntegration`
 4. Update store with response
 
-## Migration Notes
-
-### From Old JavaScript
-
-The old JavaScript code (`js/` directory) is still present but commented out in `index.html`. To fully migrate:
-
-1. Test all features work with new TypeScript code
-2. Remove old JavaScript files
-3. Clean up commented code in `index.html`
-4. Update any remaining references
-
-### Backward Compatibility
-
-- **API**: No changes to backend API
-- **LLM Agent**: No changes to LangChain agent
-- **Data Format**: Same data structures
 
 ## Best Practices
 

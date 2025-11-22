@@ -424,7 +424,7 @@ The shared code centralizes every MCP tool signature in `shared/airport_tools.py
 3. **UI payload mapping** - `build_ui_payload()` maps tool names to `kind` buckets.
 4. **Payload stability** - The `Notable mcp_raw keys` column serves as a contract with the UI.
 
-See `designs/TOOL_VISUALIZATION_MAPPING.md` for complete tool-to-visualization mapping.
+See `designs/UI_FILTER_STATE_DESIGN.md` for complete tool-to-visualization mapping and LLM integration details.
 
 ---
 
