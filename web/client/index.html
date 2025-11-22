@@ -1423,8 +1423,22 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <!-- TypeScript Application -->
-    <!-- In development: Vite will handle this automatically -->
-    <!-- In production: Use dist/main.iife.js -->
-    <script type="module" src="/ts/main.ts"></script>
+    <!-- In development: Vite will handle /ts/main.ts automatically -->
+    <!-- In production: Use /dist/main.iife.js -->
+    <script type="module">
+      // Auto-detect production vs development
+      // Try to load production build first, fallback to dev source
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = '/dist/main.iife.js';
+      script.onerror = () => {
+        // Fallback to dev source if dist doesn't exist (development mode)
+        const devScript = document.createElement('script');
+        devScript.type = 'module';
+        devScript.src = '/ts/main.ts';
+        document.head.appendChild(devScript);
+      };
+      document.head.appendChild(script);
+    </script>
 </body>
 </html> 
