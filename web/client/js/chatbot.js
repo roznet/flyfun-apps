@@ -412,6 +412,13 @@ Try the quick actions below or ask me anything!`;
                                     console.log('[DEBUG] Found filter_profile:', data.result.filter_profile);
                                     this.applyFilterProfile(data.result.filter_profile);
                                 }
+
+                                // NOTE: Don't visualize here - wait for ui_payload event
+                                // which contains FILTERED visualization based on ICAOs mentioned in LLM answer
+                                // The ui_payload comes after the formatter processes the answer
+                                if (data.result && data.result.visualization) {
+                                    console.log('[DEBUG] tool_call_end has visualization, but waiting for ui_payload with filtered data');
+                                }
                                 break;
 
                             case 'ui_payload':
@@ -538,6 +545,11 @@ Try the quick actions below or ask me anything!`;
 
         // Convert markdown-style formatting
         let formatted = text
+            // Headers (must be before line breaks) - match at start of line or after <br>
+            .replace(/^#### (.*?)$/gm, '<h4>$1</h4>')
+            .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
+            .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
             .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italic
             .replace(/`(.*?)`/g, '<code>$1</code>') // Code

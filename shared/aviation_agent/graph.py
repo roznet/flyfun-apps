@@ -97,13 +97,16 @@ def build_agent_graph(planner, tool_runner: ToolRunner, formatter_llm):
             
             # Build UI payload
             ui_payload = build_ui_payload(plan, tool_result) if plan else None
-            
+
             # Optional: Enhance visualization with ICAOs from answer
             mentioned_icaos = []
+            logger.info(f"📍 FORMATTER: ui_payload kind={ui_payload.get('kind') if ui_payload else None}, answer length={len(answer) if answer else 0}")
             if ui_payload and ui_payload.get("kind") in ["route", "airport"]:
                 mentioned_icaos = _extract_icao_codes(answer)
+                logger.info(f"📍 FORMATTER: Extracted {len(mentioned_icaos)} ICAO codes from answer: {mentioned_icaos[:10]}...")
                 if mentioned_icaos:
                     ui_payload = _enhance_visualization(ui_payload, mentioned_icaos, tool_result)
+                    logger.info(f"📍 FORMATTER: Enhanced visualization applied")
             
             # Generate simple formatting reasoning
             formatting_reasoning = f"Formatted answer using {plan.answer_style if plan else 'default'} style."

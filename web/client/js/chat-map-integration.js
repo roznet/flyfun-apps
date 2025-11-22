@@ -177,7 +177,7 @@ class ChatMapIntegration {
             }
 
             const route = visualization.route;
-            const markers = visualization.markers;
+            let markers = visualization.markers;
             const fromIcao = route.from?.icao;
             const toIcao = route.to?.icao;
 
@@ -187,17 +187,26 @@ class ChatMapIntegration {
 
             console.log(`Integrating chatbot route ${fromIcao} → ${toIcao} with ${markers.length} airports into FilterManager`);
 
+            // Normalize markers: ensure icao field exists (some tools use 'ident' instead)
+            // Also ensure lat/lng fields for FilterManager compatibility
+            markers = markers.map(m => ({
+                ...m,
+                icao: m.icao || m.ident,  // Use ident as fallback for icao
+                lat: m.lat || m.latitude_deg,
+                lng: m.lng || m.longitude_deg || m.lon
+            }));
+
             // Normalize route airport objects for displayRoute (needs icao, lat, lng)
             const normalizedRouteAirports = [
                 {
                     icao: fromIcao,
-                    lat: route.from.latitude || route.from.latitude_deg || route.from.lat,
-                    lng: route.from.longitude || route.from.longitude_deg || route.from.lon
+                    lat: route.from.lat || route.from.latitude || route.from.latitude_deg,
+                    lng: route.from.lng || route.from.lon || route.from.longitude || route.from.longitude_deg
                 },
                 {
                     icao: toIcao,
-                    lat: route.to.latitude || route.to.latitude_deg || route.to.lat,
-                    lng: route.to.longitude || route.to.longitude_deg || route.to.lon
+                    lat: route.to.lat || route.to.latitude || route.to.latitude_deg,
+                    lng: route.to.lng || route.to.lon || route.to.longitude || route.to.longitude_deg
                 }
             ];
 

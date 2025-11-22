@@ -188,40 +188,63 @@ def _enhance_visualization(
     tool_result: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Enhance visualization with airports mentioned in answer.
-    
-    This is optional - only enhances if answer mentions ICAOs not already in visualization.
-    For now, we keep it simple and just ensure mentioned airports are included.
+    Filter visualization markers to only show airports mentioned in the LLM's answer.
+
+    This implements the same logic as the old chatbot_service.py:
+    - Extract ICAO codes from LLM's answer
+    - Filter markers to only include those ICAOs
+    - Always include route endpoints (from/to airports)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     if not ui_payload or not mentioned_icaos:
         return ui_payload
-    
+
     # Get existing visualization
     visualization = ui_payload.get("visualization") or ui_payload.get("mcp_raw", {}).get("visualization")
-    if not visualization:
+    if not visualization or not isinstance(visualization, dict):
         return ui_payload
-    
-    # Extract existing airport ICAOs from visualization
-    existing_icaos = set()
-    if isinstance(visualization, dict):
-        # Check markers
-        if "markers" in visualization:
-            for marker in visualization.get("markers", []):
-                if isinstance(marker, dict) and "icao" in marker:
-                    existing_icaos.add(marker["icao"])
-        # Check route airports
-        if "route" in visualization and isinstance(visualization["route"], dict):
-            if "airports" in visualization["route"]:
-                for airport in visualization["route"]["airports"]:
-                    if isinstance(airport, dict) and "ident" in airport:
-                        existing_icaos.add(airport["ident"])
-    
-    # Find mentioned ICAOs not already in visualization
-    new_icaos = [icao for icao in mentioned_icaos if icao not in existing_icaos]
-    
-    # If there are new ICAOs, we could fetch their data and add to visualization
-    # For now, we just return the payload as-is (enhancement can be added later if needed)
-    # The UI can handle filtering based on mentioned ICAOs if needed
-    
+
+    # Make a copy to avoid mutating original
+    visualization = dict(visualization)
+
+    # Get route endpoints - these should ALWAYS be included
+    route_icaos = set()
+    if "route" in visualization and isinstance(visualization["route"], dict):
+        route = visualization["route"]
+        if route.get("from", {}).get("icao"):
+            route_icaos.add(route["from"]["icao"])
+        if route.get("to", {}).get("icao"):
+            route_icaos.add(route["to"]["icao"])
+
+    # Build set of ICAOs to show (mentioned + route endpoints)
+    icaos_to_show = set(mentioned_icaos) | route_icaos
+
+    logger.info(f"📍 VISUALIZATION: Filtering to {len(icaos_to_show)} airports mentioned in answer: {sorted(icaos_to_show)}")
+
+    # Filter markers to only include mentioned airports
+    if "markers" in visualization:
+        original_count = len(visualization.get("markers", []))
+        filtered_markers = []
+        for marker in visualization.get("markers", []):
+            if isinstance(marker, dict):
+                # Check both 'ident' and 'icao' fields
+                icao = marker.get("ident") or marker.get("icao")
+                if icao and icao in icaos_to_show:
+                    filtered_markers.append(marker)
+
+        visualization["markers"] = filtered_markers
+        logger.info(f"📍 VISUALIZATION: Filtered markers from {original_count} to {len(filtered_markers)}")
+
+    # Update ui_payload with filtered visualization
+    ui_payload = dict(ui_payload)  # Copy
+    ui_payload["visualization"] = visualization
+
+    # Also update mcp_raw if it exists
+    if "mcp_raw" in ui_payload and isinstance(ui_payload["mcp_raw"], dict):
+        ui_payload["mcp_raw"] = dict(ui_payload["mcp_raw"])
+        ui_payload["mcp_raw"]["visualization"] = visualization
+
     return ui_payload
 
