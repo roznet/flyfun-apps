@@ -95,11 +95,12 @@ export class UIManager {
         // Clear existing options except "All Countries"
         countrySelect.innerHTML = '<option value="">All Countries</option>';
         
-        // Add countries
-        countries.forEach((country: string) => {
+        // Add countries - API returns objects with {code, name, count}
+        countries.forEach((country: any) => {
           const option = document.createElement('option');
-          option.value = country;
-          option.textContent = country;
+          // Use country code for the value and name for display
+          option.value = country.code || country;
+          option.textContent = country.name || country.code || country;
           countrySelect.appendChild(option);
         });
         
