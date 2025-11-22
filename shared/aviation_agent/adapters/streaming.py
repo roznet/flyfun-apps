@@ -15,12 +15,12 @@ async def stream_aviation_agent(
 ) -> AsyncIterator[Dict[str, Any]]:
     """
     Stream agent execution with SSE-compatible events and token tracking.
-    
+
     Uses LangGraph's astream_events() which is the standard pattern for:
     - Streaming node execution
     - Tracking token usage from LLM calls
     - Capturing tool execution
-    
+
     Yields SSE events:
         - {"event": "plan", "data": {...}} - Planner output
         - {"event": "thinking", "data": {"content": "..."}} - Planning reasoning
@@ -29,13 +29,15 @@ async def stream_aviation_agent(
         - {"event": "message", "data": {"content": "..."}} - Character-by-character answer
         - {"event": "thinking_done", "data": {}} - Thinking complete
         - {"event": "ui_payload", "data": {...}} - Visualization data
+        - {"event": "final_answer", "data": {"state": {...}}} - Final complete state for logging
         - {"event": "done", "data": {"session_id": "...", "tokens": {...}}}
         - {"event": "error", "data": {"message": "..."}} - Error occurred
     """
     # Track token usage across all LLM calls
     total_input_tokens = 0
     total_output_tokens = 0
-    
+    final_state = None
+
     try:
         # Use LangGraph's astream_events for fine-grained streaming
         # This is the standard LangGraph pattern for streaming + token tracking
@@ -215,19 +217,40 @@ async def stream_aviation_agent(
                         "event": "ui_payload",
                         "data": output.get("ui_payload")
                     }
-                    
-                    # Emit done event
+
+                # Capture complete state from input (which includes all state fields)
+                # The formatter receives the entire state as input
+                input_data = event.get("data", {}).get("input")
+                if input_data:
+                    # Merge output into state to get final complete state
+                    final_state = dict(input_data) if isinstance(input_data, dict) else {}
+                    final_state.update(output)
+
+                    # Filter out non-serializable objects (like HumanMessage) for JSON serialization
+                    # Only include JSON-serializable fields for logging
+                    serializable_state = {
+                        k: v for k, v in final_state.items()
+                        if k != "messages" and not hasattr(v, "model_dump")
+                    }
+
+                    # Emit final_answer event with serializable state for logging
                     yield {
-                        "event": "done",
-                        "data": {
-                            "session_id": session_id,
-                            "tokens": {
-                                "input": total_input_tokens,
-                                "output": total_output_tokens,
-                                "total": total_input_tokens + total_output_tokens
-                            }
+                        "event": "final_answer",
+                        "data": {"state": serializable_state}
+                    }
+
+                # Emit done event
+                yield {
+                    "event": "done",
+                    "data": {
+                        "session_id": session_id,
+                        "tokens": {
+                            "input": total_input_tokens,
+                            "output": total_output_tokens,
+                            "total": total_input_tokens + total_output_tokens
                         }
                     }
+                }
         
     except Exception as e:
         logger.exception("Error in stream_aviation_agent")

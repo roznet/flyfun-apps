@@ -69,6 +69,7 @@ async def aviation_agent_chat_stream(
         log_dir = Path(os.getenv("CONVERSATION_LOG_DIR", "conversation_logs"))
         
         async def event_generator():
+            final_state = None
             try:
                 async for event in stream_aviation_agent(
                     messages,
@@ -77,16 +78,17 @@ async def aviation_agent_chat_stream(
                 ):
                     event_name = event.get("event")
                     event_data = event.get("data", {})
-                    
+
+                    # Capture final state when graph completes
+                    if event_name == "final_answer":
+                        final_state = event_data.get("state")
+
                     yield f"event: {event_name}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
             finally:
-                # After streaming completes (or fails), get final state and log conversation
-                # Note: We need to run the graph again to get final state since astream_events doesn't return it
+                # After streaming completes, log conversation using captured state
                 try:
-                    logger.info("Getting final state for conversation logging...")
-                    final_state = graph.invoke({"messages": messages})
                     end_time = time.time()
-                    
+
                     if final_state:
                         logger.info(f"Logging conversation for session {session_id}...")
                         log_conversation_from_state(
@@ -99,7 +101,7 @@ async def aviation_agent_chat_stream(
                         )
                         logger.info("Conversation logged successfully")
                     else:
-                        logger.warning("Final state is None, skipping conversation logging")
+                        logger.warning("Final state not captured during streaming, skipping conversation logging")
                 except Exception as e:
                     logger.error(f"Error in conversation logging: {e}", exc_info=True)
         
