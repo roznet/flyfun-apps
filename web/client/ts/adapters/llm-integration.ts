@@ -143,6 +143,7 @@ export class LLMIntegration {
   
   /**
    * Handle route with markers visualization
+   * Shows all airports along route via search, highlights specific airports from chat
    */
   private handleRouteWithMarkers(viz: Visualization): boolean {
     if (!viz.route || !viz.markers) {
@@ -160,63 +161,75 @@ export class LLMIntegration {
       return false;
     }
     
-    // Normalize route airport coordinates
-    const fromLat = route.from.lat || route.from.latitude || 0;
-    const fromLng = route.from.lon || route.from.longitude || 0;
-    const toLat = route.to.lat || route.to.latitude || 0;
-    const toLng = route.to.lon || route.to.longitude || 0;
+    // Clear old LLM highlights (use prefix to identify them)
+    this.clearLLMHighlights();
     
-    const originalRouteAirports = [
-      {
-        icao: fromIcao,
-        lat: fromLat,
-        lng: fromLng
-      },
-      {
-        icao: toIcao,
-        lat: toLat,
-        lng: toLng
-      }
-    ];
-    
-    // Get distance from UI or use default
-    const distanceInput = document.getElementById('route-distance') as HTMLInputElement;
-    const distanceNm = distanceInput ? parseFloat(distanceInput.value) || 50.0 : 50.0;
-    
-    // Set route state (chatbot selection)
+    // Set highlights for airports mentioned in chat
     const store = this.store as any;
-    store.getState().setRoute({
-      airports: [fromIcao, toIcao],
-      distance_nm: distanceNm,
-      originalRouteAirports,
-      isChatbotSelection: true,
-      chatbotAirports: airports
+    airports.forEach((airport) => {
+      if (airport.ident && airport.latitude_deg && airport.longitude_deg) {
+        store.getState().highlightPoint({
+          id: `llm-airport-${airport.ident}`,
+          type: 'airport' as const,
+          lat: airport.latitude_deg,
+          lng: airport.longitude_deg,
+          color: '#007bff',
+          radius: 15,
+          popup: `<b>${airport.ident}</b><br>${airport.name || 'Airport'}<br><em>Mentioned in chat</em>`
+        });
+      }
     });
     
-    // Update store with chatbot's selected airports
-    store.getState().setAirports(airports);
+    // Build route query string for search
+    const routeQuery = [fromIcao, toIcao].join(' ');
     
-    // Fit bounds to show all airports after markers are updated
-    if (this.visualizationEngine && airports.length > 0) {
-      setTimeout(() => {
-        this.visualizationEngine.fitBounds();
-        console.log('LLMIntegration: Fitted map bounds for route with airports');
-      }, 300);
-    }
+    // Update search query in store (will display in UI)
+    store.getState().setSearchQuery(routeQuery);
     
-    // Apply filter profile if provided
+    // Apply filter profile if provided (before triggering search)
     if (viz.filter_profile) {
       this.applyFilterProfile(viz.filter_profile);
     }
     
-    // Dispatch event to render route
-    const event = new CustomEvent('render-route', {
-      detail: { route: { airports: [fromIcao, toIcao], distance_nm: distanceNm, originalRouteAirports } }
-    });
-    window.dispatchEvent(event);
+    // Trigger route search via event (uses normal search flow)
+    // This will show all airports along route, with highlights on chat airports
+    window.dispatchEvent(new CustomEvent('trigger-search', { 
+      detail: { query: routeQuery } 
+    }));
     
-    console.log(`✅ LLM route visualization: ${airports.length} airports from chatbot`);
+    console.log(`✅ LLM route visualization: route ${routeQuery}, highlighting ${airports.length} airports from chat`);
     return true;
+  }
+  
+  /**
+   * Clear LLM-specific highlights (those with 'llm-airport-' prefix)
+   */
+  private clearLLMHighlights(): void {
+    const store = this.store as any;
+    const state = store.getState();
+    const highlights = state.visualization.highlights;
+    
+    // Collect IDs to remove first (avoid modifying Map during iteration)
+    const idsToRemove: string[] = [];
+    
+    if (highlights instanceof globalThis.Map) {
+      highlights.forEach((_, id: string) => {
+        if (id.startsWith('llm-airport-')) {
+          idsToRemove.push(id);
+        }
+      });
+    } else if (highlights && typeof highlights === 'object') {
+      Object.keys(highlights).forEach((id: string) => {
+        if (id.startsWith('llm-airport-')) {
+          idsToRemove.push(id);
+        }
+      });
+    }
+    
+    // Remove collected IDs
+    idsToRemove.forEach(id => {
+      store.getState().removeHighlight(id);
+    });
   }
   
   /**
