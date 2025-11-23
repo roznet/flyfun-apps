@@ -242,15 +242,12 @@ export class LLMIntegration {
       return false;
     }
     
-    // Update search input
-    const searchInput = document.getElementById('search-input') as HTMLInputElement;
-    if (searchInput) {
-      searchInput.value = ident;
-    }
+    // Update store first (UI will sync automatically via subscription)
+    const store = this.store as any;
+    store.getState().setSearchQuery(ident);
     
     // Trigger search for this airport
-    const event = new CustomEvent('trigger-search', { detail: { query: ident } });
-    window.dispatchEvent(event);
+    window.dispatchEvent(new CustomEvent('trigger-search', { detail: { query: ident } }));
     
     return true;
   }
