@@ -114,8 +114,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"Loading model from database at '{db_path}'")
         db_storage = DatabaseStorage(db_path)
         model = db_storage.load_model()
-        # Note: remove_airports_by_country not available in current euro_aip version
-        # model.remove_airports_by_country("RU")
+        model.remove_airports_by_country("RU")
         logger.info(f"Loaded model with {len(model.airports)} airports")
         
         # All derived fields are now updated automatically in load_model()
