@@ -36,6 +36,7 @@ shared/ga_friendliness/
 ├── storage.py                  # Read/write operations for ga_meta.sqlite
 ├── ontology.py                 # Ontology loading, validation, aspect/label lookup
 ├── personas.py                 # Persona loading, validation, score computation
+├── cache.py                    # Caching utility for remote data sources
 ├── nlp/
 │   ├── __init__.py
 │   ├── extractor.py           # LLM-based review tag extraction
@@ -287,7 +288,241 @@ class GAMetaStorage:
 
 ---
 
-## 5. Ontology & Persona Management
+## 5. Caching Layer
+
+### 5.1 Caching Utility (`cache.py`)
+
+```python
+# cache.py - Caching utility for remote data sources
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+from datetime import datetime
+from typing import Any, Optional, Tuple
+import json
+import gzip
+import logging
+
+logger = logging.getLogger(__name__)
+
+class CachedDataLoader(ABC):
+    """
+    Base class for data loaders that implement caching.
+    
+    Similar pattern to euro_aip's CachedSource, but independent.
+    Provides caching for remote data to avoid repeated downloads.
+    
+    Usage:
+        class MyLoader(CachedDataLoader):
+            def fetch_data(self, key: str, **kwargs) -> Any:
+                # Fetch from remote source
+                return data
+        
+        loader = MyLoader(cache_dir="/path/to/cache")
+        data = loader.get_cached("my_key", max_age_days=7)
+    """
+    
+    def __init__(self, cache_dir: Path):
+        """
+        Initialize cached loader.
+        
+        Args:
+            cache_dir: Base directory for caching
+        """
+        # Create cache directory structure
+        # Store cache_dir path
+    
+    def set_force_refresh(self, force_refresh: bool = True) -> None:
+        """Set whether to force refresh of cached data."""
+        # Store flag
+    
+    def set_never_refresh(self, never_refresh: bool = True) -> None:
+        """Set whether to never refresh cached data (use cache if exists)."""
+        # Store flag
+    
+    def _get_cache_file(self, key: str, ext: str = "json") -> Path:
+        """Get cache file path for a key."""
+        # Return Path to cache file
+    
+    def _is_cache_valid(
+        self,
+        cache_file: Path,
+        max_age_days: Optional[int] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Check if cache file is valid.
+        
+        Returns:
+            (is_valid, reason_if_invalid)
+        """
+        # Check force_refresh flag
+        # Check if file exists
+        # Check never_refresh flag
+        # Check age if max_age_days provided
+        # Return (is_valid, reason)
+    
+    def _save_to_cache(self, data: Any, key: str, ext: str = "json") -> None:
+        """Save data to cache."""
+        # Handle JSON (with gzip support)
+        # Handle other formats as needed
+    
+    def _load_from_cache(self, key: str, ext: str = "json") -> Any:
+        """Load data from cache."""
+        # Handle JSON (with gzip support)
+        # Handle other formats as needed
+    
+    @abstractmethod
+    def fetch_data(self, key: str, **kwargs) -> Any:
+        """
+        Fetch data from remote source.
+        
+        Must be implemented by subclasses.
+        """
+        pass
+    
+    def get_cached(
+        self,
+        key: str,
+        max_age_days: Optional[int] = None,
+        ext: str = "json",
+        **kwargs
+    ) -> Any:
+        """
+        Get data from cache or fetch if needed.
+        
+        Args:
+            key: Cache key
+            max_age_days: Maximum age of cache (None = no limit)
+            ext: File extension (json, json.gz)
+            **kwargs: Arguments to pass to fetch_data()
+        
+        Returns:
+            Cached or freshly fetched data
+        """
+        # Get cache file path
+        # Check if cache is valid
+        # If valid, load and return
+        # If not valid, call fetch_data()
+        # Save to cache
+        # Return data
+```
+
+**Design Decision: Independent Caching**
+
+- **Why not reuse CachedSource from euro_aip?**
+  - ga_friendliness should be independent (design principle)
+  - CachedSource is tightly coupled to euro_aip's fetch method pattern
+  - We need simpler caching for our use case (just JSON files)
+  
+- **Why this pattern?**
+  - Follows same conceptual approach (familiar)
+  - Simpler implementation (just JSON, no CSV/PDF)
+  - Supports gzip for large files
+  - Can be extended if needed
+
+- **Alternative considered:**
+  - Composition: Use CachedSource if euro_aip available
+  - **Rejected:** Adds unnecessary complexity, breaks independence
+
+### 5.2 Caching in Review Sources
+
+```python
+# Example: Cached AirfieldDirectorySource
+
+class AirfieldDirectorySource(ReviewSource, CachedDataLoader):
+    """
+    Loads reviews from airfield.directory with caching.
+    """
+    
+    def __init__(
+        self,
+        export_path: Optional[Path] = None,  # If None, download from S3
+        cache_dir: Path,
+        filter_ai_generated: bool = True,
+        preferred_language: str = "EN",
+        max_age_days: int = 7  # Cache bulk export for 7 days
+    ):
+        """
+        Initialize with caching support.
+        
+        If export_path is None, will download from S3 and cache.
+        """
+        # Initialize CachedDataLoader
+        # Store config
+    
+    def fetch_data(self, key: str, **kwargs) -> Dict:
+        """
+        Fetch data from remote source.
+        
+        Keys:
+            - "bulk_export": Download from S3
+            - "airport_{ICAO}": Fetch individual airport JSON
+        """
+        if key == "bulk_export":
+            # Download from S3: airfield-directory-pireps-export-latest.json.gz
+            # Return parsed JSON
+        elif key.startswith("airport_"):
+            icao = key.replace("airport_", "")
+            # Fetch https://airfield.directory/airfield/{ICAO}.json
+            # Return parsed JSON
+        else:
+            raise ValueError(f"Unknown key: {key}")
+    
+    def get_reviews(self) -> List[RawReview]:
+        """
+        Load reviews with caching.
+        
+        If export_path provided, use it directly.
+        Otherwise, download and cache from S3.
+        """
+        if self.export_path and self.export_path.exists():
+            # Use local file
+            # Load and parse
+        else:
+            # Get from cache or download
+            data = self.get_cached(
+                "bulk_export",
+                max_age_days=self.max_age_days,
+                ext="json.gz"
+            )
+            # Parse and return reviews
+    
+    def get_airport_stats(self, icao: str) -> Optional[Dict]:
+        """
+        Get airport stats with caching.
+        
+        Fetches individual airport JSON with 30-day cache.
+        """
+        data = self.get_cached(
+            f"airport_{icao}",
+            max_age_days=30,  # Airport data changes less frequently
+            ext="json"
+        )
+        # Extract and return stats
+```
+
+**Caching Strategy:**
+
+1. **Bulk export (S3):**
+   - Cache key: `bulk_export`
+   - Default max_age: 7 days (export updates regularly)
+   - Format: `.json.gz` (compressed)
+   - Can force refresh for latest data
+
+2. **Individual airport JSON:**
+   - Cache key: `airport_{ICAO}`
+   - Default max_age: 30 days (changes less frequently)
+   - Format: `.json`
+   - Used when fetching airport-level stats
+
+3. **CLI flags:**
+   - `--force-refresh`: Force download even if cache exists
+   - `--never-refresh`: Use cache if exists, never download
+   - `--cache-dir`: Override default cache directory
+
+---
+
+## 6. Ontology & Persona Management
 
 ### 5.1 Ontology (`ontology.py`)
 
@@ -325,7 +560,7 @@ class OntologyManager:
         # Return list of errors
 ```
 
-### 5.2 Personas (`personas.py`)
+### 6.2 Personas (`personas.py`)
 
 ```python
 # personas.py - Persona loading and score computation
@@ -379,9 +614,9 @@ class PersonaManager:
 
 ---
 
-## 6. NLP Pipeline (LangChain 1.0)
+## 7. NLP Pipeline (LangChain 1.0)
 
-### 6.1 Review Tag Extraction (`nlp/extractor.py`)
+### 7.1 Review Tag Extraction (`nlp/extractor.py`)
 
 ```python
 # nlp/extractor.py - LLM-based review tag extraction
@@ -451,7 +686,7 @@ class ReviewExtractor:
   - **Cons:** More API calls
 - **Choice:** Start with Option B (sequential with batch), add Option A as optimization later.
 
-### 6.2 Tag Aggregation (`nlp/aggregator.py`)
+### 7.2 Tag Aggregation (`nlp/aggregator.py`)
 
 ```python
 # nlp/aggregator.py - Aggregate tags into feature scores
@@ -504,7 +739,7 @@ class TagAggregator:
         # Return dict
 ```
 
-### 6.3 Summary Generation (`nlp/summarizer.py`)
+### 7.3 Summary Generation (`nlp/summarizer.py`)
 
 ```python
 # nlp/summarizer.py - LLM-based airport summary generation
@@ -559,9 +794,9 @@ class SummaryGenerator:
 
 ---
 
-## 7. Feature Engineering
+## 8. Feature Engineering
 
-### 7.1 Feature Score Mapping (`features.py`)
+### 8.1 Feature Score Mapping (`features.py`)
 
 ```python
 # features.py - Map label distributions to normalized feature scores
@@ -672,9 +907,9 @@ class FeatureMapper:
 
 ---
 
-## 8. Main Pipeline Orchestrator
+## 9. Main Pipeline Orchestrator
 
-### 8.1 Builder (`builder.py`)
+### 9.1 Builder (`builder.py`)
 
 ```python
 # builder.py - Main pipeline orchestrator
@@ -769,7 +1004,7 @@ class GAFriendlinessBuilder:
         # Return structured dict
 ```
 
-### 8.2 Review Source Interface
+### 9.2 Review Source Interface
 
 ```python
 # Abstract interface for review sources
@@ -802,6 +1037,9 @@ class ReviewSource(ABC):
 # - AirfieldDirectorySource (scrapes/API from airfield.directory)
 # - CSVReviewSource (reads from CSV export)
 # - JSONReviewSource (reads from JSON file)
+# - CompositeReviewSource (combines multiple sources)
+# - DatabaseReviewSource (reads from existing ga_meta.sqlite)
+# - Custom API sources (future: other review platforms)
 ```
 
 **Design Decision: Source Abstraction**
@@ -809,8 +1047,85 @@ class ReviewSource(ABC):
 - **Why:** Allows different review sources (airfield.directory, manual CSV, future APIs)
 - **Implementation:** Abstract base class with concrete implementations outside library
 - **CLI tool** will provide a concrete implementation (e.g., `CSVReviewSource`)
+- **Multiple sources:** Can combine sources using `CompositeReviewSource` (see below)
 
-### 8.3 AirfieldDirectorySource Implementation
+### 9.2.1 Combining Multiple Sources
+
+```python
+# Composite pattern for combining multiple review sources
+
+class CompositeReviewSource(ReviewSource):
+    """
+    Combines reviews from multiple sources.
+    
+    Useful for:
+        - Merging airfield.directory + manual CSV reviews
+        - Combining different API sources
+        - Adding custom reviews to existing data
+    """
+    
+    def __init__(self, sources: List[ReviewSource]):
+        """
+        Initialize with list of sources.
+        
+        Args:
+            sources: List of ReviewSource instances to combine
+        """
+        # Store sources list
+    
+    def get_reviews(self) -> List[RawReview]:
+        """
+        Combine reviews from all sources.
+        
+        Handles:
+            - Deduplication by review_id (if same ID appears in multiple sources)
+            - Merging reviews for same airport
+            - Preserving source metadata if needed
+        
+        Returns:
+            Combined list of RawReview objects
+        """
+        # For each source, call get_reviews()
+        # Combine lists
+        # Deduplicate by review_id (keep first occurrence or merge)
+        # Return combined list
+    
+    def get_source_version(self) -> str:
+        """
+        Return composite version string.
+        
+        Returns:
+            String like "composite:airfield.directory-2025-11-23+csv-2025-01-15"
+        """
+        # Combine source versions from all sources
+        # Return composite string
+```
+
+**Usage Example:**
+
+```python
+# In CLI tool or builder:
+airfield_source = AirfieldDirectorySource(export_path)
+csv_source = CSVReviewSource(csv_path)
+composite = CompositeReviewSource([airfield_source, csv_source])
+
+builder = GAFriendlinessBuilder(settings)
+builder.build(composite, euro_aip_path)
+```
+
+**Design Decision: Extensibility**
+
+- **Adding new sources:** Simply implement the `ReviewSource` interface
+- **No library changes needed:** New sources can be added in CLI tool or separate module
+- **Deduplication:** `CompositeReviewSource` handles deduplication by `review_id`
+- **Source priority:** In composite, first source takes precedence for duplicate IDs
+- **Future sources could include:**
+  - Other review platforms/APIs
+  - Manual curation sources
+  - Scraped data (with proper licensing)
+  - User-submitted reviews from your own platform
+
+### 9.3 AirfieldDirectorySource Implementation
 
 Based on the actual airfield.directory API structure, here's the concrete implementation:
 
@@ -957,9 +1272,9 @@ class RawReview(BaseModel):
 
 ---
 
-## 9. CLI Tool
+## 10. CLI Tool
 
-### 9.1 CLI Structure (`tools/build_ga_friendliness.py`)
+### 10.1 CLI Structure (`tools/build_ga_friendliness.py`)
 
 ```python
 # tools/build_ga_friendliness.py - CLI tool for rebuilding ga_meta.sqlite
@@ -980,11 +1295,21 @@ def main():
             [--preferred-language EN] \
             [--llm-model gpt-4o-mini] \
             [--confidence-threshold 0.5] \
-            [--batch-size 50]
+            [--batch-size 50] \
+            [--cache-dir path/to/cache] \
+            [--force-refresh] \
+            [--never-refresh]
         
         # From CSV (for testing/manual data):
         python tools/build_ga_friendliness.py \
             --reviews-csv path/to/reviews.csv \
+            --ga-meta-db path/to/ga_meta.sqlite \
+            ...
+        
+        # Combining multiple sources:
+        python tools/build_ga_friendliness.py \
+            --airfield-directory-export path/to/airfield-export.json.gz \
+            --reviews-csv path/to/additional-reviews.csv \
             --ga-meta-db path/to/ga_meta.sqlite \
             ...
     """
@@ -1018,12 +1343,27 @@ def create_csv_review_source(csv_path: Path) -> ReviewSource:
     Create ReviewSource from CSV file.
     
     CSV format (expected):
-        icao,review_text,review_id,rating,timestamp
-        LFQQ,"Great airport...",rev_123,4.5,2025-01-15T10:00:00Z
+        icao,review_text,review_id,rating,timestamp,language,ai_generated
+        LFQQ,"Great airport...",rev_123,4.5,2025-01-15T10:00:00Z,EN,false
     """
     # Read CSV
     # Parse rows into RawReview objects
     # Return ReviewSource implementation
+
+def create_composite_source(
+    sources: List[ReviewSource]
+) -> ReviewSource:
+    """
+    Create composite source from multiple sources.
+    
+    Args:
+        sources: List of ReviewSource instances to combine
+    
+    Returns:
+        CompositeReviewSource that merges all sources
+    """
+    # Create CompositeReviewSource
+    # Return
 
 # Additional CLI commands (future):
 # - validate-ontology: Validate ontology.json
@@ -1043,9 +1383,9 @@ def create_csv_review_source(csv_path: Path) -> ReviewSource:
 
 ---
 
-## 10. Integration with euro_aip
+## 11. Integration with euro_aip
 
-### 10.1 Dependency Management
+### 11.1 Dependency Management
 
 **Decision:** `ga_friendliness` library should **not** have a hard dependency on `euro_aip`.
 
@@ -1059,7 +1399,7 @@ def create_csv_review_source(csv_path: Path) -> ReviewSource:
 - When AIP data is needed (for feature engineering), caller provides it
 - Storage layer can ATTACH euro_aip.sqlite for queries, but doesn't require it
 
-### 10.2 Integration Points
+### 11.2 Integration Points
 
 ```python
 # In builder.py or feature mapper:
@@ -1093,9 +1433,9 @@ def fetch_aip_data_for_features(icao: str, euro_aip_path: Path) -> Optional[Dict
 
 ---
 
-## 11. Web App Integration (Future)
+## 12. Web App Integration (Future)
 
-### 11.1 API Endpoints (Conceptual)
+### 12.1 API Endpoints (Conceptual)
 
 ```python
 # web/server/api/ga_friendliness.py (future)
@@ -1138,7 +1478,7 @@ def find_ga_friendly_along_route(
     # Return structured response
 ```
 
-### 11.2 Integration with Existing Tools
+### 12.2 Integration with Existing Tools
 
 ```python
 # In shared/airport_tools.py (future extension)
@@ -1168,9 +1508,9 @@ def find_airports_near_route_with_ga_friendliness(
 
 ---
 
-## 12. Testing Strategy
+## 13. Testing Strategy
 
-### 12.1 Unit Tests
+### 13.1 Unit Tests
 
 ```python
 # tests/ga_friendliness/test_ontology.py
@@ -1194,7 +1534,7 @@ def test_schema_creation()
 def test_write_read_airfield_stats()
 ```
 
-### 12.2 Integration Tests
+### 13.2 Integration Tests
 
 ```python
 # tests/ga_friendliness/test_builder.py
@@ -1206,7 +1546,7 @@ def test_joint_query_with_euro_aip()
 def test_feature_engineering_with_aip_data()
 ```
 
-### 12.3 Golden Data Tests
+### 13.3 Golden Data Tests
 
 ```python
 # tests/ga_friendliness/test_golden_airports.py
@@ -1219,81 +1559,94 @@ def test_known_expensive_airport_scores()
 
 ---
 
-## 13. Key Design Decisions Summary
+## 14. Key Design Decisions Summary
 
-### 13.1 Library Structure
+### 14.1 Library Structure
 - **Choice:** Standalone library in `shared/ga_friendliness/`
 - **Rationale:** Clean separation, reusable, follows existing patterns
 
-### 13.2 Configuration Format
+### 14.2 Configuration Format
 - **Choice:** JSON (not YAML)
 - **Rationale:** Simpler parsing, no extra dependency, consistent with project
 
-### 13.3 LLM Framework
+### 14.3 LLM Framework
 - **Choice:** LangChain 1.0
 - **Rationale:** Already in project, modern API, good Pydantic integration
 
-### 13.4 Database Linking
+### 14.4 Database Linking
 - **Choice:** ICAO codes as external keys, ATTACH DATABASE for queries
 - **Rationale:** No hard dependency on euro_aip, flexible runtime usage
 
-### 13.5 Persona Scores Storage
+### 14.5 Persona Scores Storage
 - **Choice:** Hybrid: one primary persona denormalized, others computed at runtime
 - **Rationale:** Balance between query performance and flexibility
 
-### 13.6 Review Source Abstraction
+### 14.6 Review Source Abstraction
 - **Choice:** Abstract ReviewSource interface, concrete implementations in CLI
 - **Rationale:** Library stays source-agnostic, easy to add new sources
 
-### 13.7 Feature Engineering AIP Integration
+### 14.7 Feature Engineering AIP Integration
 - **Choice:** Optional AIP data parameter, fetched by builder when available
 - **Rationale:** Works with or without euro_aip, flexible
 
-### 13.8 Batch Processing
+### 14.8 Batch Processing
 - **Choice:** Sequential with LangChain batch() for parallelization
 - **Rationale:** Better error handling, can optimize later
 
+### 14.9 Caching Strategy
+- **Choice:** Independent `CachedDataLoader` utility (not reusing euro_aip's CachedSource)
+- **Rationale:** 
+  - Maintains library independence (design principle)
+  - Simpler implementation (JSON only, no CSV/PDF)
+  - Supports gzip for large files
+  - Follows same conceptual pattern (familiar to developers)
+- **Caching targets:**
+  - Bulk export from S3 (7-day cache)
+  - Individual airport JSON (30-day cache)
+- **CLI flags:** `--force-refresh`, `--never-refresh`, `--cache-dir`
+
 ---
 
-## 14. Open Questions & Decisions
+## 15. Open Questions & Decisions
 
 *Note: As decisions are made, replace "Suggestion:" with "Decision:" and add rationale if different from suggestion.*
 
-### 14.1 Non-ICAO Fields
+### 15.1 Non-ICAO Fields
 - **Question:** How to handle non-ICAO strips?
 - **Suggestion:** Start with ICAO-only, add pseudo-ICAO mapping later if needed
 - **Decision:** Start with ICAO only
 
-### 14.2 Missing Data Handling
+### 15.2 Missing Data Handling
 - **Question:** Neutral score (0.5) vs NULL for airports without reviews?
 - **Suggestion:** NULL with flag, let UI decide how to display
 - **Decision:**  NULL with flag, so we can decide later
 
-### 14.3 Persona Explosion
+### 15.3 Persona Explosion
 - **Question:** How many personas to support in UI?
 - **Suggestion:** Start with 3 (IFR touring, VFR budget, training), add more as needed
 - **Decision:** yes start with these 3
 
-### 14.4 Learned Weights
+### 15.4 Learned Weights
 - **Question:** ML-based persona weights from user feedback?
 - **Suggestion:** Phase 2 feature, keep hand-tuned weights for now
 - **Decision:** yes, hand-tuned for now, we'll see later
 
-### 14.5 Review Text Storage
+### 15.5 Review Text Storage
 - **Question:** Store raw review text excerpts or only tags?
 - **Suggestion:** Start with tags only (privacy/licensing), add excerpts later if needed
 - **Decision:** tag only
 
 ---
 
-## 15. Implementation Phases
+## 16. Implementation Phases
 
-### Phase 1: Core Infrastructure
+### Phase 1: Core Infrastructure & Caching
 1. Create library structure
 2. Implement models (Pydantic)
-3. Implement database schema and storage
-4. Implement ontology and persona loading
-5. Unit tests for core components
+3. Implement caching utility (CachedDataLoader)
+4. Implement database schema and storage
+5. Implement ontology and persona loading
+6. Unit tests for core components
 
 ### Phase 2: NLP Pipeline
 1. Implement ReviewExtractor with LangChain
