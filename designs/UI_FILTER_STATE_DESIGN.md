@@ -18,12 +18,39 @@ This document describes the architecture and design of the FlyFun Airport Explor
 - **API Communication**: APIAdapter handles backend communication
 - **LLM Integration**: LLMIntegration handles chatbot visualizations
 
-### 3. Reactive Updates
+### 3. Component Communication Patterns
+
+**Direct Dependency Injection:**
+- `LLMIntegration` receives `UIManager` as a constructor parameter (typed as `any` to avoid circular dependencies)
+- `UIManager` is created first, then passed to `LLMIntegration` during initialization
+- This allows controlled access but maintains separation of concerns
+
+**Communication Methods:**
+1. **Store Updates** (Primary): Components communicate via store state changes
+   - LLMIntegration → `store.setAirports()` → Store subscription → VisualizationEngine updates
+   - LLMIntegration → `store.setSearchQuery()` → Store subscription → UIManager updates UI
+
+2. **Public API Methods** (Limited): Only specific public methods are exposed
+   - `UIManager.syncFiltersToUI()` - Public method specifically for LLM to sync filter UI controls
+
+3. **Events** (For Cross-Component Communication): Custom DOM events for loose coupling
+   - `trigger-search` event - Allows any component to trigger a search (handled in `main.ts`)
+   - `render-route` event - Allows route rendering from any component
+
+**Design Pattern: LLMIntegration Communication**
+
+LLMIntegration communicates with other components through:
+- ✅ Store actions (preferred): `store.getState().setX()`
+- ✅ Events: `window.dispatchEvent(new CustomEvent('trigger-search'))`
+- ✅ Public APIs: `uiManager.syncFiltersToUI()`
+- ❌ Never calls private methods like `handleSearch()` directly
+
+### 4. Reactive Updates
 - **Store Subscriptions**: Components subscribe to store changes
 - **Automatic UI Updates**: UI updates automatically when state changes
 - **Efficient Rendering**: Only updates what changed (no full re-renders)
 
-### 4. Type Safety
+### 5. Type Safety
 - **TypeScript**: Full type safety throughout
 - **Type Definitions**: All types defined in `ts/store/types.ts`
 - **API Types**: Request/response types for all API calls
@@ -84,10 +111,10 @@ All state modifications go through store actions:
 
 #### Filtering Logic
 
-Currently uses basic client-side filtering in `filterAirports()` function. This can be enhanced to:
-- Call Python FilterEngine via API endpoint
-- Port FilterEngine to TypeScript
-- Add more filter types (fuel, runway length, landing fees, etc.)
+Client-side filtering is performed in `filterAirports()` function in `store.ts`. Filters include:
+- Country filter
+- Boolean filters (has_procedures, has_aip_data, has_hard_runway, point_of_entry)
+- Additional filters are applied on the backend via API
 
 ### 2. Visualization Engine (`ts/engines/visualization-engine.ts`)
 
@@ -99,7 +126,7 @@ Manages Leaflet map rendering and all map-related operations.
 - **Marker Management**: Creates, updates, and removes airport markers
 - **Legend Modes**: Applies different marker styles based on legend mode
 - **Route Rendering**: Draws route lines and waypoint markers
-- **Highlight System**: Manages temporary highlights (e.g., locate center)
+- **Highlight System**: Manages temporary highlights (e.g., locate center, route airports, LLM highlights)
 - **Procedure Lines**: Renders procedure lines for airports
 - **Layer Management**: Organizes map elements into layers
 
@@ -112,20 +139,14 @@ Manages Leaflet map rendering and all map-related operations.
 - `updateHighlights(highlights)` - Update highlight markers
 - `setView(lat, lng, zoom)` - Set map view
 - `getMap()` - Get Leaflet map instance
+- `fitBounds()` - Fit map bounds to show all airports
 
 #### Legend Modes
-
-The visualization engine supports multiple legend modes:
 
 - **`airport-type`**: Colors by airport characteristics (border crossing, procedures)
 - **`procedure-precision`**: Colors by procedure precision (ILS, RNAV, etc.)
 - **`runway-length`**: Colors by runway length
 - **`country`**: Colors by country
-
-To add a new legend mode:
-1. Add mode to `LegendMode` type in `types.ts`
-2. Add styling logic in `updateMarkers()` method
-3. Add UI control in `UIManager`
 
 ### 3. UI Manager (`ts/managers/ui-manager.ts`)
 
@@ -138,7 +159,7 @@ Handles all DOM interactions and updates UI based on state changes.
 - **Filter Controls**: Manages filter UI controls (checkboxes, selects)
 - **Search Handling**: Handles search input and triggers searches
 - **Loading/Error States**: Displays loading indicators and error messages
-- **Airport Details**: Updates airport details panel (placeholder)
+- **Airport Details**: Updates airport details panel
 
 #### Key Methods
 
@@ -149,6 +170,10 @@ Handles all DOM interactions and updates UI based on state changes.
 - `updateLoadingState(loading)` - Update loading indicator
 - `updateErrorState(error)` - Display error message
 - `updateAirportCount(count)` - Update airport count display
+- `applyFilters()` - Trigger API call with current filters
+- `handleSearch(query)` - Handle search input (private)
+- `handleRouteSearch(routeAirports)` - Handle route search (private)
+- `syncFiltersToUI(filters)` - Public method for LLM to sync filter UI
 
 ### 4. API Adapter (`ts/adapters/api-adapter.ts`)
 
@@ -166,7 +191,9 @@ Handles all communication with the backend API using Fetch API.
 - `getAirportRunways(icao)` - Get airport runways
 - `getAirportAIPEntries(icao)` - Get AIP entries
 - `getCountryRules(countryCode)` - Get country rules
-- `chat(sessionId, message, history)` - Chat with LLM agent
+- `getAllFilters()` - Get available filters metadata
+- `getAIPFilterPresets()` - Get AIP filter presets
+- `getAvailableAIPFields()` - Get available AIP fields
 
 ### 5. LLM Integration (`ts/adapters/llm-integration.ts`)
 
@@ -174,52 +201,29 @@ Handles chatbot visualizations and filter profile application.
 
 #### Visualization Types
 
-The LLM can return different visualization types:
+The LLM can return these visualization types:
 
 1. **`markers`**: Display airports as markers
-   ```typescript
-   {
-     type: 'markers',
-     data: Airport[],
-     filter_profile?: FilterConfig
-   }
-   ```
+   - Sets airports in store via `store.setAirports()`
+   - Applies filter profile if provided
+   - Fits map bounds to show all airports
 
 2. **`route_with_markers`**: Display route with airports
-   ```typescript
-   {
-     type: 'route_with_markers',
-     route: { from: {icao, lat, lon}, to: {icao, lat, lon} },
-     markers: Airport[],
-     filter_profile?: FilterConfig
-   }
-   ```
+   - Clears old LLM highlights
+   - Sets highlights for airports mentioned in chat
+   - Updates search query in store
+   - Triggers route search via `trigger-search` event
+   - Shows all airports along route with highlights on chat airports
 
 3. **`point_with_markers`**: Display point location with airports
-   ```typescript
-   {
-     type: 'point_with_markers',
-     point: { lat, lng, label },
-     markers: Airport[],
-     filter_profile?: FilterConfig
-   }
-   ```
+   - Sets airports in store
+   - Sets locate state with point coordinates
+   - Applies filter profile if provided
+   - Fits map bounds to show all airports
 
 4. **`marker_with_details`**: Focus on specific airport
-   ```typescript
-   {
-     type: 'marker_with_details',
-     marker: { ident, lat, lon, zoom },
-     filter_profile?: FilterConfig
-   }
-   ```
-
-#### Adding New Visualization Types
-
-1. Add type to `VisualizationData` interface in `types.ts`
-2. Add handler method in `LLMIntegration` class
-3. Update `visualizeData()` method to route to new handler
-4. Update `VisualizationEngine` if new map elements needed
+   - Updates search query in store
+   - Triggers search via `trigger-search` event
 
 ## Data Flow
 
@@ -253,432 +257,147 @@ User clicks "Apply Filters"
   → UIManager updates UI
 ```
 
+### Route Search Flow
+
+When a user types a route (e.g., "EGKB LFPG") in the search input:
+
+```
+1. User types in search-input field
+   ↓
+2. Input event listener fires → store.setSearchQuery() (immediate)
+   ↓
+3. Debounced handler (500ms) → handleSearch()
+   ↓
+4. Route detection: parseRouteFromQuery() checks for 4-letter ICAO codes
+   ↓
+5. If route detected → handleRouteSearch():
+   - Fetches coordinates for route airports
+   - Calls API: searchAirportsNearRoute()
+   - Updates store: setAirports() + setRoute()
+   ↓
+6. Store subscription fires → VisualizationEngine:
+   - updateMarkers() - Shows airports along route
+   - displayRoute() - Draws route line
+   - updateHighlights() - Shows route airport highlights
+   ↓
+7. UIManager.updateUI() - Updates search input display
+```
+
+**Key Details:**
+- Route detection: All parts must be 4-letter ICAO codes (regex: `/^[A-Za-z]{4}$/`)
+- Debouncing: 500ms delay prevents excessive API calls
+- Route state: Stores both ICAO codes and coordinates for route line rendering
+- Filter integration: Route search results are filtered by current filters
+
+**Non-route search:** Falls back to text search via `searchAirports()` endpoint
+
+### Search Input Synchronization
+
+The search input field uses bidirectional synchronization between DOM and store.
+
+**Source of Truth:** Store (`state.ui.searchQuery`)
+
+**User Typing Flow:**
+```
+User types → Input event → store.setSearchQuery() → Store subscription → updateSearchInput() → DOM syncs
+```
+
+**Programmatic Updates:**
+- Update store: `store.getState().setSearchQuery(query)` 
+- UI syncs automatically via subscription
+- No search is triggered (just display update)
+
+**To Trigger Search:**
+- Use `trigger-search` event which sets DOM value and dispatches input event
+
 ### LLM Visualization Flow
 
 ```
 Chatbot sends visualization
-  → LLMIntegration.visualizeData() called
-  → LLMIntegration routes to appropriate handler
-  → Handler calls store.setAirports() or store.setRoute()
+  → LLMIntegration.handleVisualization() called
+  → Routes to appropriate handler (markers, route_with_markers, etc.)
+  → Handler updates store (setAirports, setRoute, highlightPoint, etc.)
   → If filter_profile present, applyFilterProfile() called
-  → Store updates state
   → Store subscription fires
   → VisualizationEngine updates map
   → UIManager updates UI
 ```
 
-## How to Enhance
+**LLM Route with Markers Pattern:**
+1. Clear old LLM highlights (`clearLLMHighlights()`)
+2. Set highlights for chat airports (`highlightPoint()`)
+3. Update search query in store (`setSearchQuery()`)
+4. Apply filter profile if provided
+5. Trigger route search via `trigger-search` event
+6. Route search shows all airports, highlights show chat airports
 
-### Adding a New Filter
+## Filter Updates with Active Route
 
-1. **Add to FilterConfig** (`ts/store/types.ts`):
-   ```typescript
-   export interface FilterConfig {
-     // ... existing filters
-     new_filter?: boolean | string | number;
-   }
-   ```
+When filters are changed while a route is active:
 
-2. **Add to API Adapter** (`ts/adapters/api-adapter.ts`):
-   ```typescript
-   async getAirports(filters: FilterConfig = {}): Promise<AirportsApiResponse> {
-     const params = new URLSearchParams();
-     // ... existing params
-     if (filters.new_filter) params.append('new_filter', filters.new_filter.toString());
-     // ...
-   }
-   ```
-
-3. **Add to Filter Logic** (`ts/store/store.ts`):
-   ```typescript
-   function filterAirports(airports: Airport[], filters: Partial<FilterConfig>): Airport[] {
-     return airports.filter(airport => {
-       // ... existing filters
-       if (filters.new_filter !== undefined && airport.new_property !== filters.new_filter) {
-         return false;
-       }
-       return true;
-     });
-   }
-   ```
-
-4. **Add UI Control** (`ts/managers/ui-manager.ts`):
-   ```typescript
-   private initEventListeners(): void {
-     // ... existing listeners
-     document.getElementById('new-filter')?.addEventListener('change', (e) => {
-       const target = e.target as HTMLInputElement;
-       this.store.getState().setFilters({ new_filter: target.checked });
-       this.applyFilters();
-     });
-   }
-   ```
-
-5. **Add to HTML** (`index.html`):
-   ```html
-   <input type="checkbox" id="new-filter" />
-   <label for="new-filter">New Filter</label>
-   ```
-
-### Adding a New LLM Visualization Type
-
-1. **Add to Types** (`ts/store/types.ts`):
-   ```typescript
-   export interface VisualizationData {
-     type: 'markers' | 'route_with_markers' | 'point_with_markers' | 'marker_with_details' | 'new_type';
-     // ... existing fields
-     new_field?: NewType;
-   }
-   ```
-
-2. **Add Handler** (`ts/adapters/llm-integration.ts`):
-   ```typescript
-   private handleNewType(viz: Visualization): boolean {
-     // Extract data from visualization
-     const data = viz.new_field;
-     
-     // Update store
-     this.store.getState().setAirports(data.airports);
-     
-     // Apply filter profile if present
-     if (viz.filter_profile) {
-       this.applyFilterProfile(viz.filter_profile);
-     }
-     
-     return true;
-   }
-   ```
-
-3. **Route in visualizeData** (`ts/adapters/llm-integration.ts`):
-   ```typescript
-   public visualizeData(visualization: VisualizationData): void {
-     switch (visualization.type) {
-       // ... existing cases
-       case 'new_type':
-         this.handleNewType(visualization);
-         break;
-     }
-   }
-   ```
-
-### Adding a New Data Display
-
-1. **Add to AppState** (`ts/store/types.ts`):
-   ```typescript
-   export interface AppState {
-     // ... existing state
-     newData: NewDataType[];
-   }
-   ```
-
-2. **Add Store Action** (`ts/store/store.ts`):
-   ```typescript
-   interface StoreActions {
-     // ... existing actions
-     setNewData: (data: NewDataType[]) => void;
-   }
-   
-   // In store implementation:
-   setNewData: (data) => {
-     set({ newData: data });
-   }
-   ```
-
-3. **Add UI Rendering** (`ts/managers/ui-manager.ts`):
-   ```typescript
-   private updateUI(state: AppState): void {
-     // ... existing updates
-     this.updateNewData(state.newData);
-   }
-   
-   private updateNewData(data: NewDataType[]): void {
-     const container = document.getElementById('new-data-container');
-     if (container) {
-       container.innerHTML = this.renderNewData(data);
-     }
-   }
-   ```
-
-4. **Subscribe to Changes** (`ts/managers/ui-manager.ts`):
-   ```typescript
-   init(): void {
-     // ... existing subscriptions
-     this.unsubscribe = this.store.subscribe((state) => {
-       // ... existing updates
-       if (state.newData !== lastNewData) {
-         this.updateNewData(state.newData);
-         lastNewData = state.newData;
-       }
-     });
-   }
-   ```
-
-### Adding a New Feature
-
-1. **Define State** - Add to `AppState` if needed
-2. **Add Store Actions** - Add actions to modify state
-3. **Create UI Components** - Add DOM elements and event listeners
-4. **Add API Endpoints** - If backend communication needed
-5. **Update Visualization** - If map visualization needed
-6. **Wire Everything** - Connect components in `main.ts`
-
-## Filter Enhancement Guide
-
-### Current Filtering
-
-Currently uses basic client-side filtering in `filterAirports()` function. This works for simple filters but can be enhanced.
-
-### Option 1: Enhanced Client-Side Filtering
-
-Add more filter logic to `filterAirports()`:
-
-```typescript
-function filterAirports(airports: Airport[], filters: Partial<FilterConfig>): Airport[] {
-  return airports.filter(airport => {
-    // Country filter
-    if (filters.country && airport.iso_country !== filters.country) return false;
-    
-    // Boolean filters
-    if (filters.has_procedures !== undefined && airport.has_procedures !== filters.has_procedures) return false;
-    if (filters.has_aip_data !== undefined && airport.has_aip_data !== filters.has_aip_data) return false;
-    if (filters.has_hard_runway !== undefined && airport.has_hard_runway !== filters.has_hard_runway) return false;
-    if (filters.point_of_entry !== undefined && airport.point_of_entry !== filters.point_of_entry) return false;
-    
-    // Fuel filters
-    if (filters.has_avgas !== undefined && airport.has_avgas !== filters.has_avgas) return false;
-    if (filters.has_jet_a !== undefined && airport.has_jet_a !== filters.has_jet_a) return false;
-    
-    // Runway length filters
-    if (filters.min_runway_length_ft && airport.longest_runway_length_ft && 
-        airport.longest_runway_length_ft < filters.min_runway_length_ft) return false;
-    if (filters.max_runway_length_ft && airport.longest_runway_length_ft && 
-        airport.longest_runway_length_ft > filters.max_runway_length_ft) return false;
-    
-    // Landing fee filter
-    if (filters.max_landing_fee && airport.landing_fee && 
-        airport.landing_fee > filters.max_landing_fee) return false;
-    
-    // AIP field filters
-    if (filters.aip_field && filters.aip_value) {
-      // Filter by AIP field value
-      // Implementation depends on AIP data structure
-    }
-    
-    return true;
-  });
-}
+```
+Filter checkbox toggled
+  → handleFilterChange() updates store filters
+  → Detects active route (route exists, not chatbot selection)
+  → Calls applyFilters()
+  → applyRouteSearch() re-runs route search API with new filters
+  → Store updates → Map updates reactively
 ```
 
-### Option 2: Python FilterEngine Integration
-
-Create API endpoint that uses Python FilterEngine:
-
-1. **Backend** (`web/server/api/airports.py`):
-   ```python
-   @router.post("/filter")
-   async def filter_airports_endpoint(
-       airports: List[Airport],
-       filters: FilterConfig
-   ):
-       from shared.filtering import FilterEngine
-       engine = FilterEngine()
-       filtered = engine.filter(airports, filters)
-       return {"airports": filtered}
-   ```
-
-2. **Frontend** (`ts/adapters/api-adapter.ts`):
-   ```typescript
-   async filterAirports(airports: Airport[], filters: FilterConfig): Promise<Airport[]> {
-     const response = await this.request<{airports: Airport[]}>('/api/airports/filter', {
-       method: 'POST',
-       body: JSON.stringify({ airports, filters }),
-     });
-     return response.airports;
-   }
-   ```
-
-3. **Update Store** (`ts/store/store.ts`):
-   ```typescript
-   setAirports: async (airports) => {
-     const currentFilters = get().filters;
-     const filtered = await apiAdapter.filterAirports(airports, currentFilters);
-     set({ airports, filteredAirports: filtered });
-   }
-   ```
-
-### Option 3: TypeScript FilterEngine Port
-
-Port the Python FilterEngine to TypeScript for client-side filtering without API calls.
-
-## LLM Visualization Enhancement
-
-### Adding Custom Visualization Styles
-
-1. **Add Style to VisualizationData**:
-   ```typescript
-   export interface VisualizationData {
-     // ... existing fields
-     style?: 'customs' | 'fuel' | 'new_style';
-   }
-   ```
-
-2. **Handle Style in VisualizationEngine**:
-   ```typescript
-   private createAirportMarker(airport: Airport, legendMode: LegendMode, style?: string): Marker {
-     // ... existing logic
-     if (style === 'new_style') {
-       // Custom styling for this visualization type
-       color = '#custom-color';
-       radius = 12;
-     }
-     // ...
-   }
-   ```
-
-3. **Apply in LLM Integration**:
-   ```typescript
-   private handleMarkers(viz: Visualization): boolean {
-     // ... existing logic
-     // Style is automatically passed through to visualization engine
-     return true;
-   }
-   ```
-
-## Performance Considerations
-
-### Debouncing
-
-- **Store Subscriptions**: Debounced to prevent rapid-fire updates
-- **Map Events**: Debounced to prevent infinite loops
-- **Search Input**: Debounced to prevent excessive API calls
-
-### Efficient Updates
-
-- **Marker Updates**: Only updates changed markers, doesn't clear/recreate all
-- **State Comparison**: Compares state hashes before updating
-- **Selective Subscriptions**: Only subscribes to relevant state slices
-
-### Optimization Tips
-
-1. **Use Selectors**: Subscribe to specific state slices instead of entire state
-2. **Memoization**: Cache expensive computations
-3. **Batch Updates**: Group multiple state updates together
-4. **Lazy Loading**: Load data only when needed
-
-## Testing
-
-### Unit Testing
-
-Test individual components in isolation:
-
-```typescript
-// Example: Test filter function
-describe('filterAirports', () => {
-  it('filters by country', () => {
-    const airports = [/* test data */];
-    const filters = { country: 'FR' };
-    const result = filterAirports(airports, filters);
-    expect(result.every(a => a.iso_country === 'FR')).toBe(true);
-  });
-});
-```
-
-### Integration Testing
-
-Test component interactions:
-
-```typescript
-// Example: Test filter application flow
-describe('Filter Application', () => {
-  it('updates map when filter changes', () => {
-    const store = useStore.getState();
-    store.setFilters({ country: 'FR' });
-    // Verify map markers updated
-  });
-});
-```
-
-## Debugging
-
-### Browser Console
-
-Access components via window:
-
-```javascript
-// View current state
-window.appState.getState()
-
-// Access components
-window.visualizationEngine
-window.uiManager
-window.llmIntegration
-
-// Manually trigger actions
-window.appState.getState().setFilters({ country: 'FR' })
-```
-
-### Zustand DevTools
-
-If Redux DevTools extension installed:
-- View state changes
-- Time-travel through state
-- Export/import state
+This ensures filters work correctly with route searches by re-running the API call with updated filters.
 
 ## Common Patterns
 
-### Pattern 1: Adding a New Filter
+### Pattern 1: Updating Display Value Only
 
-1. Add to `FilterConfig` type
-2. Add to API adapter parameter building
-3. Add to `filterAirports()` function
-4. Add UI control in `UIManager`
-5. Add HTML element
+```typescript
+// Just update the store - UI syncs automatically
+store.getState().setSearchQuery("EGKB LFPG");
+// No search triggered, just display update
+```
 
-### Pattern 2: Adding a New Map Element
+### Pattern 2: Triggering Search from Non-UI Code
 
-1. Add layer to `VisualizationEngine`
-2. Add update method
-3. Subscribe to relevant state in `main.ts`
-4. Call update method from subscription
+```typescript
+// Update store and trigger search
+store.getState().setSearchQuery(query);
+window.dispatchEvent(new CustomEvent('trigger-search', { 
+  detail: { query } 
+}));
+```
 
-### Pattern 3: Adding a New API Endpoint
+### Pattern 3: Updating State and Reacting
 
-1. Add method to `APIAdapter`
-2. Add types for request/response
-3. Call from `UIManager` or `LLMIntegration`
-4. Update store with response
-
+```typescript
+// Update store
+store.getState().setAirports(airports);
+// Store subscription automatically triggers:
+// - VisualizationEngine.updateMarkers()
+// - UIManager.updateUI()
+```
 
 ## Best Practices
 
 1. **Always use store actions** - Never modify state directly
 2. **Type everything** - Use TypeScript types, avoid `any`
-3. **Subscribe selectively** - Only subscribe to needed state slices
+3. **Subscribe selectively** - Components subscribe to store for reactive updates
 4. **Debounce updates** - Prevent rapid-fire updates
 5. **Handle errors** - Always catch and display errors
-6. **Test incrementally** - Test each feature as you add it
+6. **Use events for cross-component actions** - Loose coupling via custom events
 
 ## Troubleshooting
 
 ### Infinite Loops
-
 - **Cause**: Store subscription triggers state update which triggers subscription
-- **Fix**: Add guards, debouncing, or remove circular updates
+- **Fix**: Guards and state comparison (hash-based) prevent unnecessary updates
 
 ### Map Not Updating
-
 - **Cause**: Store not updating or subscription not firing
-- **Fix**: Check store actions are called, verify subscriptions
-
-### Type Errors
-
-- **Cause**: Type mismatches or missing types
-- **Fix**: Add proper types, use type assertions carefully
+- **Fix**: Verify store actions are called, check subscriptions in `main.ts`
 
 ### Performance Issues
-
 - **Cause**: Too many updates or inefficient rendering
-- **Fix**: Add debouncing, optimize subscriptions, batch updates
+- **Fix**: Debouncing (50ms store subscriptions, 500ms search input), state hashing to detect actual changes
 
 ## References
 
@@ -686,4 +405,3 @@ If Redux DevTools extension installed:
 - **Leaflet Docs**: https://leafletjs.com/
 - **TypeScript Docs**: https://www.typescriptlang.org/
 - **Vite Docs**: https://vitejs.dev/
-
