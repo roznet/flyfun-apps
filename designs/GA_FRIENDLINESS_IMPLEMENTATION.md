@@ -3783,48 +3783,111 @@ def test_known_expensive_airport_scores()
 ## 17. Implementation Phases
 
 ### Phase 1: Core Infrastructure & Caching
-1. Create library structure
-2. Implement exception hierarchy
-3. Implement models (Pydantic)
-4. Implement caching utility (CachedDataLoader)
-5. Implement database schema with versioning
-6. Implement storage with transaction support
-7. Implement ontology and persona loading
-8. Implement feature mappings loading
+1. Create library structure (`shared/ga_friendliness/`)
+2. Implement exception hierarchy (`exceptions.py`)
+3. Implement models (Pydantic) - including `AggregationContext` for optional extensions
+4. Implement caching utility (`CachedDataLoader`) - supports JSON and gzip
+5. Implement database schema with versioning (`database.py`)
+6. Implement storage with transaction support (`storage.py`)
+   - Include methods for global priors computation (for Bayesian smoothing)
+7. Implement ontology and persona loading (`ontology.py`, `personas.py`)
+8. Implement feature mappings loading (`features.py`)
 9. Unit tests for core components
 
 ### Phase 2: NLP Pipeline
 1. Implement ReviewExtractor with LangChain (with retry logic)
+   - Preserve timestamps from `RawReview` in `ReviewExtraction` (for time decay)
 2. Implement TagAggregator
+   - Support optional `AggregationContext` parameter
+   - Implement time decay logic (disabled by default)
 3. Implement SummaryGenerator (with retry logic)
 4. Add token usage tracking
 5. Integration tests with mock LLM
 
 ### Phase 3: Feature Engineering
 1. Implement FeatureMapper with configurable mappings
-2. Implement scoring functions
-3. Integration with optional AIP data
-4. Add feature mapping validation
-5. Golden data tests
+   - All mapping methods support optional `AggregationContext` parameter
+   - Implement Bayesian smoothing logic (disabled by default)
+2. Implement fee band aggregation
+   - Aircraft type → MTOW mapping
+   - MTOW → fee band mapping (6 granular bands)
+   - Aggregate fees from individual airport JSON
+3. Implement scoring functions
+   - All feature scores support optional extensions
+4. Integration with optional AIP data (stub for now, full integration in Phase 5)
+5. Add feature mapping validation
+6. Golden data tests
+7. Unit tests for time decay and Bayesian smoothing (with extensions enabled)
 
 ### Phase 4: Builder & CLI
 1. Implement GAFriendlinessBuilder with dependency injection
-2. Add incremental update support
-3. Add structured logging and progress tracking
-4. Implement BuildMetrics and BuildResult classes
-5. Add error handling with configurable failure modes
-6. Add comprehensive metrics collection (LLM usage, timing, errors)
-7. Add metrics export to JSON
-8. Implement CSVReviewSource
-9. Create CLI tool with all flags (including failure-mode, metrics-output)
-10. Add resource management (context managers)
-11. End-to-end test with sample data
-12. Test failure modes (continue, fail_fast, skip)
+2. Implement ReviewSource abstraction
+3. Implement AirfieldDirectorySource
+   - Support bulk export (reviews only)
+   - Support individual airport JSON (reviews + fees)
+   - Implement `get_reviews()` from bulk export
+   - Implement `get_airport_stats()` from individual JSON (with caching)
+   - Handle both data sources together
+4. Implement CSVReviewSource (for testing/manual data)
+5. Implement CompositeReviewSource (combine multiple sources)
+6. Add incremental update support
+   - Change detection (review IDs, timestamps)
+   - `has_changes()` method
+7. Add structured logging and progress tracking
+8. Implement BuildMetrics and BuildResult classes
+9. Add error handling with configurable failure modes
+10. Add comprehensive metrics collection (LLM usage, timing, errors, cache stats)
+11. Add metrics export to JSON
+12. Create CLI tool with all flags:
+    - Review source flags (`--airfield-directory-export`, `--reviews-csv`)
+    - Fee fetching flags (`--fetch-fees`, `--no-fees`)
+    - Caching flags (`--cache-dir`, `--force-refresh`, `--never-refresh`)
+    - Failure mode flags (`--failure-mode`)
+    - Metrics flags (`--metrics-output`)
+    - Incremental flags (`--incremental`, `--since`, `--icaos`)
+13. Add resource management (context managers)
+14. End-to-end test with sample data (bulk export + individual JSON)
+15. Test failure modes (continue, fail_fast, skip)
+16. Test caching behavior (hits, misses, refresh flags)
 
-### Phase 5: Web Integration (Future)
-1. API endpoints
-2. Integration with existing tools
+### Phase 5: AIP Rule Parsing (Optional)
+1. Implement AIPSource (`aip/aip_source.py`)
+   - Load AIP text from euro_aip.sqlite
+   - Track AIP change timestamps
+2. Implement AIPRuleParser (`aip/rule_parser.py`)
+   - Hybrid regex/LLM approach
+   - Parse complex notification rules
+3. Implement AIPRuleSummarizer (`aip/rule_summarizer.py`)
+   - Generate high-level summaries
+   - Calculate notification hassle score
+4. Extend storage for AIP rules
+   - `write_notification_requirements()`
+   - `write_aip_rule_summary()`
+   - `update_notification_hassle_score()`
+5. Integrate into builder
+   - `process_aip_rules()` method
+   - Optional step in build pipeline
+   - Incremental update support for AIP data
+6. Update FeatureMapper
+   - Combine review-based bureaucracy with AIP notification score
+7. Add CLI flag (`--parse-aip-rules`)
+8. Integration tests with sample AIP data
+
+### Phase 6: Web Integration (Future)
+1. API endpoints for GA friendliness data
+2. Integration with existing tools (`shared/airport_tools.py`)
 3. UI components for displaying scores
+4. Route-based search with GA friendliness
+
+---
+
+**Implementation Notes:**
+
+- **Optional Features:** Time decay and Bayesian smoothing are implemented in Phases 2-3 but disabled by default. Can be enabled via configuration flags.
+- **Data Sources:** Phase 4 implements both bulk export (reviews) and individual JSON (fees) with proper caching.
+- **AIP Integration:** Phase 5 is optional and can be implemented independently or skipped if euro_aip is not available.
+- **Testing:** Each phase should include unit tests, integration tests, and where applicable, golden data tests.
+- **Dependencies:** Phases build on each other sequentially. Phase 5 can be done in parallel with Phase 4 if needed.
 
 ---
 
