@@ -898,7 +898,7 @@ class AirportStats(BaseModel):
     fee_band_1500_2000: Optional[float]
     fee_currency: Optional[str]
     mandatory_handling: bool
-    ifr_available: bool
+    ifr_procedure_available: bool  # True if airport has instrument approach procedures (ILS, RNAV, VOR, etc.) from AIP
     night_available: bool
     # ... feature scores ...
     source_version: str
@@ -999,9 +999,17 @@ def create_schema(conn: sqlite3.Connection) -> None:
         - ga_review_ner_tags (structured review tags)
         - ga_review_summary (LLM-generated summaries)
         - ga_meta_info (versioning metadata)
+        - ga_notification_requirements (AIP notification rules, optional)
+        - ga_aip_rule_summary (AIP rule summaries, optional)
     
     Also creates indexes for performance.
     Sets schema_version in ga_meta_info.
+    
+    **Note on `ifr_procedure_available` field:**
+    This flag indicates the presence of instrument approach procedures (ILS, RNAV, 
+    VOR, etc.) as identified from the AIP database, NOT just whether the airfield 
+    accepts IFR flight plans. An airfield may accept IFR flight plans but not have 
+    published instrument approaches.
     """
     # Execute CREATE TABLE statements
     # Create indexes on icao, (icao, aspect) for ga_review_ner_tags
@@ -1903,11 +1911,16 @@ class FeatureMapper:
         
         Combines:
             - Review tags about IFR capability
-            - AIP data (procedures available, runway length, etc.)
+            - AIP data (instrument approach procedures available, runway length, etc.)
+        
+        **Important:** `ifr_procedure_available` flag indicates presence of instrument approach 
+        procedures (ILS, RNAV, VOR, etc.) from AIP database, NOT just whether the 
+        airfield accepts IFR flight plans. An airfield may accept IFR flight plans 
+        but not have published instrument approaches.
         
         Returns [0, 1] where 1.0 = excellent IFR support.
         """
-        # Check AIP for IFR procedures
+        # Check AIP for instrument approach procedures (ILS, RNAV, VOR, etc.)
         # Check tags for IFR-related aspects
         # Combine into score
     
@@ -2335,11 +2348,22 @@ class GAFriendlinessBuilder:
         Fetch AIP data for an airport from euro_aip.sqlite.
         
         Returns:
-            Dict with IFR procedures, runway info, etc. (or None if not found)
+            Dict with:
+                - has_ifr_procedures: bool (True if instrument approach procedures exist)
+                - ifr_procedure_types: List[str] (e.g., ['ILS', 'RNAV', 'VOR'])
+                - runway_length_m: Optional[float]
+                - has_customs: bool
+                - etc.
+        
+        **Important:** `has_ifr_procedures` checks for instrument approach procedures 
+        (ILS, RNAV, VOR, etc.) from the AIP database, NOT just IFR flight plan acceptance. 
+        This is used to set the `ifr_procedure_available` flag in `ga_airfield_stats`. An airfield 
+        may accept IFR flight plans but not have published instrument approaches.
         """
         # ATTACH euro_aip
-        # Query airport, procedures, runways
-        # Return structured dict
+        # Query airport, procedures (filter for instrument approaches), runways
+        # Check for instrument approach procedures (ILS, RNAV, VOR, etc.)
+        # Return structured dict with has_ifr_procedures flag
 ```
 
 ### 10.2 Review Source Interface

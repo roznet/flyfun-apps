@@ -1,8 +1,8 @@
 # GA Friendliness Enrichment Design
 
-This document defines the **design, plan, and structure** for a GA friendliness enrichment system for European airports, built as an add-on to the `euro_aip` database.
+This document defines the **high-level design and architecture** for a GA friendliness enrichment system for European airports, built as an add-on to the `euro_aip` database.
 
-The system is explicitly **design-only**. Implementation (Python, Swift, etc.) is intentionally left for later (Cursor / Codex / other tools).
+This is a **conceptual design document**. For detailed implementation architecture, see `GA_FRIENDLINESS_IMPLEMENTATION.md`.
 
 ---
 
@@ -74,18 +74,18 @@ The system is explicitly **design-only**. Implementation (Python, Swift, etc.) i
     - Aggregated per-airport GA stats.
     - Parsed review tags.
     - Airport-level summaries.
+    - AIP notification requirements (optional, from euro_aip).
     - (Optionally) precomputed persona-specific scores.
 
-- **Config / Data Files**
-  - `ontology.json` (or `.yml`)
-    - Defines aspects & labels for review parsing (cost, staff, bureaucracy, etc.).
-  - `personas.json` (or `.yml`)
-    - Defines pilot personas and their weights on features.
-  - Optional additional config files for feature engineering or thresholds.
+- **Config / Data Files** (JSON format)
+  - `ontology.json` - Defines aspects & labels for review parsing (cost, staff, bureaucracy, etc.).
+  - `personas.json` - Defines pilot personas and their weights on features.
+  - `feature_mappings.json` - Configurable mappings from label distributions to feature scores (optional).
 
-- **Offline Pipelines (Conceptual)**
-  - Ingestion from airfield.directory exports.
+- **Offline Pipelines**
+  - Ingestion from review sources (airfield.directory, CSV, etc.).
   - NLP/LLM extraction from free-text reviews → structured tags.
+  - Optional: AIP rule parsing from euro_aip (notification requirements, handling rules).
   - Aggregation → normalized feature scores.
   - Persona scoring → scores per airport/persona.
   - Airport-level text summaries & tags.
@@ -163,7 +163,7 @@ CREATE TABLE ga_airfield_stats (
 
     -- Binary/boolean-style flags (derived from source + PIREPs + AIP if needed)
     mandatory_handling  INTEGER,       -- 0/1
-    ifr_available       INTEGER,       -- 0/1
+    ifr_procedure_available INTEGER,   -- 0/1: True if instrument approach procedures exist (ILS, RNAV, VOR, etc.)
     night_available     INTEGER,       -- 0/1
 
     -- Normalized feature scores (0.0–1.0)
@@ -174,6 +174,7 @@ CREATE TABLE ga_airfield_stats (
     ga_ops_vfr_score    REAL,
     ga_access_score     REAL,
     ga_fun_score        REAL,
+    notification_hassle_score REAL,  -- From AIP notification rules (optional)
 
     -- Persona-specific composite scores (denormalized cache; optional)
     score_ifr_touring   REAL,
@@ -262,7 +263,53 @@ Intended usage:
 - Tag-based filtering (optional future extension):
   - e.g. filter airports that have tags like “good restaurant” or “no handling”.
 
-#### 3.2.5 `ga_meta_info`
+#### 3.2.5 `ga_notification_requirements` (Optional)
+
+Detailed structured notification requirements parsed from AIP data.
+
+```sql
+CREATE TABLE ga_notification_requirements (
+    id                  INTEGER PRIMARY KEY,
+    icao                TEXT NOT NULL,
+    rule_type           TEXT NOT NULL,  -- 'ppr', 'pn', 'customs_notification'
+    weekday_start       INTEGER,         -- 0=Monday, 6=Sunday, NULL=all days
+    weekday_end         INTEGER,         -- NULL=single day, or end of range
+    notification_hours  INTEGER,         -- Hours before flight (24, 48, etc.)
+    notification_type   TEXT NOT NULL,  -- 'hours', 'business_day', 'specific_time', 'h24', 'on_request'
+    specific_time        TEXT,           -- e.g., "1300" for "before 1300"
+    business_day_offset  INTEGER,        -- e.g., -1 for "last business day before"
+    is_obligatory        INTEGER,        -- 0/1
+    raw_text             TEXT,           -- Original AIP text
+    source_section       TEXT,           -- Which AIP section (customs, handling, etc.)
+    created_utc          TEXT,
+    updated_utc          TEXT
+);
+```
+
+**Purpose:**
+- Store detailed breakdown of notification rules for operational use.
+- Examples: "PPR 24 HR weekdays, 48 HR weekends" → two rows with weekday ranges.
+- Supports complex rules: business day requirements, specific times, conditional rules.
+
+#### 3.2.6 `ga_aip_rule_summary` (Optional)
+
+High-level summary of AIP notification requirements for scoring.
+
+```sql
+CREATE TABLE ga_aip_rule_summary (
+    icao                TEXT PRIMARY KEY,
+    notification_summary TEXT,     -- Human-readable: "24h weekdays, 48h weekends"
+    hassle_level        TEXT,      -- 'low', 'moderate', 'high', 'very_high'
+    notification_score  REAL,      -- Normalized score [0, 1] for scoring
+    last_updated_utc    TEXT
+);
+```
+
+**Purpose:**
+- High-level summary for UI display.
+- Normalized score feeds into `ga_hassle_score` feature.
+
+#### 3.2.7 `ga_meta_info`
 
 General metadata and build info.
 
@@ -276,10 +323,12 @@ CREATE TABLE ga_meta_info (
 Example keys:
 
 - `build_timestamp`
-- `source_airfield_directory_snapshot`
+- `source_version` - Source snapshot identifier
 - `ontology_version`
 - `personas_version`
 - `scoring_version`
+- `last_processed_{icao}` - Per-airport processing timestamps (for incremental updates)
+- `last_aip_processed_{icao}` - Per-airport AIP processing timestamps
 
 ### 3.3 Indexing Strategy
 
@@ -370,96 +419,119 @@ The ontology file should be referenced in `ga_meta_info` via `ontology_version`.
 
 ### 4.4 Extraction Step (Per Review)
 
-Conceptual pipeline:
+**Pipeline:**
 
-1. **LLM call:**
-   - Input:
-     - Ontology (aspects + allowed labels).
-     - Raw `review_text`.
-   - Output:
-     - Strict JSON, e.g.:
-
-       ```json
-       {
-         "aspects": [
-           {
-             "aspect": "cost",
-             "labels": ["expensive"],
-             "confidence": 0.87
-           },
-           {
-             "aspect": "staff",
-             "labels": ["very_positive"],
-             "confidence": 0.92
-           }
-         ]
-       }
-       ```
+1. **LLM call** (using LangChain 1.0):
+   - Input: Ontology + raw `review_text`
+   - Output: Structured JSON with aspect-label pairs and confidence scores
+   - Uses Pydantic models for validation
 
 2. **Validation:**
-   - Ensure `aspect` is known (found in `ontology.json`).
-   - Ensure all `labels` are allowed labels for that aspect.
-   - Ensure `confidence` is in [0.0, 1.0]; apply a threshold if needed (e.g. drop < 0.5).
+   - Ensure `aspect` exists in ontology
+   - Ensure `labels` are allowed for that aspect
+   - Apply confidence threshold (configurable, default 0.5)
 
-3. **Insertion into `ga_review_ner_tags`:**
-   - For each aspect-label pair, insert a row with:
-     - `icao`, `review_id`, `aspect`, `label`, `confidence`, `created_utc`.
+3. **Storage:**
+   - Insert validated tags into `ga_review_ner_tags`
+   - Track `review_id` for incremental updates
 
-Note: Raw review text does **not** need to be stored in `ga_meta.sqlite` if licensing/privacy constraints exist; only derived tags are stored.
+**Note:** Raw review text is not stored; only derived structured tags are persisted.
 
 ### 4.5 Aggregation Step (Per Airport)
 
 For each `icao`:
 
-- Use `ga_review_ner_tags` to compute:
-  - Label distributions per aspect:
-    - e.g. for `cost`, counts or weighted counts of `cheap` vs `expensive`.
-  - Mapped normalized scores:
-    - e.g. `ga_cost_score` from distribution of `cheap`/`reasonable` vs `expensive`.
-    - `ga_hassle_score` from `bureaucracy` labels (simple vs complex).
-    - `ga_fun_score` from `food`, `overall_experience`, etc.
-- Incorporate numeric ratings:
-  - `rating_avg`, `rating_count`.
+1. **Compute label distributions** from `ga_review_ner_tags`:
+   - Count occurrences per `(aspect, label)` pair
+   - Weight by confidence if configured
 
-These aggregated scores and stats are written into `ga_airfield_stats`.
+2. **Map to normalized feature scores** [0, 1]:
+   - `ga_cost_score` from `cost` aspect labels
+   - `ga_hassle_score` from `bureaucracy` labels (combined with AIP notification rules if available)
+   - `ga_review_score` from `overall_experience` labels
+   - `ga_fun_score` from `food`, `overall_experience`, etc.
+   - `ga_ops_ifr_score` from review tags + AIP data (if available)
+   - `ga_ops_vfr_score` from review tags + AIP data (if available)
+   - `ga_access_score` from `transport` aspect labels
 
-The precise mapping from label distributions to numeric scores is defined in the feature engineering / persona section (see below).
+3. **Incorporate numeric ratings:**
+   - `rating_avg`, `rating_count` from source
+
+4. **Combine with AIP data** (if available):
+   - `notification_hassle_score` from AIP rules feeds into `ga_hassle_score`
+   - AIP operational data (IFR procedures, runway length) feeds into ops scores
+
+**Mapping Configuration:**
+- Mappings defined in `feature_mappings.json` (optional)
+- Falls back to hard-coded defaults if config not provided
+- Validated against ontology on load
+
+Scores are written to `ga_airfield_stats`.
 
 ### 4.6 Summary Generation Step (Per Airport)
 
 For each airport (`icao`):
 
-1. Aggregate:
-   - All tags from `ga_review_ner_tags` for that airport.
-   - Rating stats from source.
-   - (Optionally) some AIP info (e.g. IFR available, runway types) for context.
+1. **Aggregate context:**
+   - Tags from `ga_review_ner_tags`
+   - Rating stats from source
+   - Feature scores (for context)
+   - Optional: AIP info (IFR available, runway types)
 
-2. LLM step:
-   - Generate `summary_text`:
-     - 2–4 sentences summarizing the recurring themes.
-   - Generate `tags_json`:
-     - A small set of human-readable tags:
-       - e.g. `["GA friendly","expensive","good restaurant","busy weekends"]`.
+2. **LLM generation:**
+   - Generate `summary_text`: 2–4 sentence summary of recurring themes
+   - Generate `tags_json`: Human-readable tags array
+     - Example: `["GA friendly","expensive","good restaurant"]`
 
-3. Store / update in `ga_review_summary`.
+3. **Store** in `ga_review_summary`.
 
-### 4.7 Idempotency & Versioning
+### 4.7 AIP Rule Parsing (Optional)
 
-- Full pipeline should be **repeatable**:
-  - Same input snapshot + same ontology + same scoring configuration → same `ga_meta.sqlite`.
-- Important version info:
-  - Source snapshot ID (`source_airfield_directory_snapshot`).
-  - `ontology_version`.
-  - `scoring_version`.
-  - `personas_version`.
+**Goal:** Parse structured notification requirements and handling rules from euro_aip database.
 
-Stored in `ga_meta_info` and `ga_airfield_stats.source_version` / `scoring_version`.
+**Two-stage processing:**
 
-### 4.8 Open Questions
+1. **Detailed extraction:**
+   - Parse AIP text (customs, handling sections) using LLM
+   - Extract structured rules: weekday ranges, time requirements, business day rules
+   - Store in `ga_notification_requirements` table
+   - Handles complex patterns: "PPR 24 HR weekdays, 48 HR weekends", "Last business day before 1300"
 
-- Keep a minimal subset of **raw review text** (e.g. short excerpts) for transparency or avoid entirely?
-- How strict should confidence thresholds be for tag inclusion?
-- Do we support multiple languages or assume normalization into a single language?
+2. **High-level summarization:**
+   - Generate human-readable summary: "24h weekdays, 48h weekends"
+   - Calculate normalized `notification_score` [0, 1]
+   - Store in `ga_aip_rule_summary`
+   - Feeds into `ga_hassle_score` feature
+
+**Integration:**
+- Optional feature (works with or without euro_aip)
+- Separate NLP pipeline (rule extraction vs. sentiment extraction)
+- Supports incremental updates (tracks AIP change timestamps)
+
+### 4.8 Incremental Updates
+
+**Change Detection:**
+- Track processed `review_id`s in `ga_review_ner_tags`
+- Track `last_processed_timestamp` per airport in `ga_meta_info`
+- Compare incoming reviews against stored data
+- Only process airports with new/changed reviews
+
+**Benefits:**
+- Efficient updates when only some airports change
+- Faster rebuilds for regular updates
+- Full rebuild still supported for schema changes
+
+### 4.9 Idempotency & Versioning
+
+- Full pipeline is **repeatable**:
+  - Same input + same config → same `ga_meta.sqlite`
+- Version tracking:
+  - `source_version` - Source snapshot identifier
+  - `ontology_version` - Ontology config version
+  - `scoring_version` - Feature mapping version
+  - `personas_version` - Persona config version
+
+Stored in `ga_meta_info` and `ga_airfield_stats`.
 
 ---
 
@@ -490,51 +562,53 @@ General idea:
 
 ### 5.2 Persona Definitions
 
-Personas are defined in a small config file, e.g. `personas.json`:
+Personas are defined in `personas.json` (JSON format):
 
 ```json
 {
-  "ifr_touring_sr22": {
-    "label": "IFR touring (SR22)",
-    "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy.",
-    "weights": {
-      "ga_ops_ifr_score": 0.30,
-      "ga_hassle_score": 0.20,
-      "ga_cost_score": 0.20,
-      "ga_review_score": 0.20,
-      "ga_access_score": 0.10
-    }
-  },
-  "vfr_budget": {
-    "label": "VFR fun / budget",
-    "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, and general GA friendliness.",
-    "weights": {
-      "ga_cost_score": 0.35,
-      "ga_fun_score": 0.25,
-      "ga_review_score": 0.20,
-      "ga_access_score": 0.10,
-      "ga_ops_vfr_score": 0.10
-    }
-  },
-  "training": {
-    "label": "Training field",
-    "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
-    "weights": {
-      "ga_ops_vfr_score": 0.30,
-      "ga_hassle_score": 0.25,
-      "ga_cost_score": 0.20,
-      "ga_review_score": 0.15,
-      "ga_fun_score": 0.10
+  "version": "1.0",
+  "personas": {
+    "ifr_touring_sr22": {
+      "label": "IFR touring (SR22)",
+      "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy.",
+      "weights": {
+        "ga_ops_ifr_score": 0.30,
+        "ga_hassle_score": 0.20,
+        "ga_cost_score": 0.20,
+        "ga_review_score": 0.20,
+        "ga_access_score": 0.10
+      }
+    },
+    "vfr_budget": {
+      "label": "VFR fun / budget",
+      "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, and general GA friendliness.",
+      "weights": {
+        "ga_cost_score": 0.35,
+        "ga_fun_score": 0.25,
+        "ga_review_score": 0.20,
+        "ga_access_score": 0.10,
+        "ga_ops_vfr_score": 0.10
+      }
+    },
+    "training": {
+      "label": "Training field",
+      "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
+      "weights": {
+        "ga_ops_vfr_score": 0.30,
+        "ga_hassle_score": 0.25,
+        "ga_cost_score": 0.20,
+        "ga_review_score": 0.15,
+        "ga_fun_score": 0.10
+      }
     }
   }
 }
 ```
 
-Rules:
-
-- Per persona, weights should ideally sum to 1.0 (but not strictly required).
-- Any base feature not mentioned in `weights` implicitly has weight 0.0.
-- Personae are versioned via `personas_version` in `ga_meta_info`.
+**Rules:**
+- Weights should ideally sum to 1.0 (not strictly required)
+- Features not mentioned have weight 0.0
+- Versioned via `personas_version` in `ga_meta_info`
 
 ### 5.3 Scoring Function (Conceptual)
 
@@ -552,29 +626,22 @@ Where:
 
 ### 5.4 Where Scores Are Stored
 
-Two complementary approaches:
+**Hybrid approach:**
 
-1. **Denormalized persona columns in `ga_airfield_stats`**  
-   e.g. `score_ifr_touring`, `score_vfr_budget`, `score_training`.
+1. **Primary persona(s) denormalized:**
+   - One or more common personas stored as columns in `ga_airfield_stats`
+   - Example: `score_ifr_touring`, `score_vfr_budget`
+   - Enables fast SQL sorting/filtering
 
-   - Pros:
-     - Very simple SQL sorting/filtering.
-     - Good for most common persona(s).
-   - Cons:
-     - Schema changes if you want many personas (or accept sparse columns).
+2. **Other personas computed at runtime:**
+   - Base features stored in `ga_airfield_stats`
+   - Runtime layer computes scores using `personas.json` weights
+   - No schema changes needed for new personas
 
-2. **Runtime scoring only**
-   - Store only base features.
-   - Persona scoring done in API / app layer using `personas.json`.
-   - Pros:
-     - More flexible; no DB schema changes when adding personas.
-   - Cons:
-     - Slightly more logic in runtime layer.
-
-**Design choice for now:**
-
-- At least one **primary persona** (e.g. `ifr_touring_sr22`) may be denormalized into a score column for convenience.
-- Additional personas can initially be computed in runtime without schema changes.
+**Benefits:**
+- Fast queries for common personas
+- Flexibility for adding new personas
+- Clear separation: base features vs. persona scores
 
 ### 5.5 API / UI Interaction
 
@@ -783,29 +850,56 @@ Exact protocol (HTTP/MCP/etc.) is outside this design; this only defines **what 
 
 ---
 
-## 7. Open Questions & Next Steps
+## 7. Implementation Architecture
 
-### 7.1 Open Questions
+### 7.1 Library Structure
 
-- **Non-ICAO fields:**
-  - Represent with pseudo-ICAO codes or separate table?
-- **Neutral vs missing data:**
-  - How to treat airports with no reviews or no GA data in rankings?
-- **Persona explosion:**
-  - How many personas do we actually want to support in UI?
-  - How do we communicate differences clearly to users?
-- **Learned scoring:**
-  - Do we want to eventually learn persona weights from labeled examples (your own ratings, other users’ feedback) instead of hand-tuning?
+**Standalone Python library:** `shared/ga_friendliness/`
 
-### 7.2 Next Steps (for Implementation, Not in This Design)
+- Independent library (no hard dependency on euro_aip)
+- Uses ICAO codes as linking keys
+- Supports ATTACH DATABASE pattern for joint queries
+- Configurable via JSON files (ontology, personas, feature mappings)
 
-- Define `ontology.json` schema and initial values in detail.
-- Define mapping from label distributions → each `ga_*_score`.
-- Decide which persona(s) should be denormalized into DB columns.
-- Write a separate **implementation design**:
-  - offline builder CLI,
-  - integration into web backend / MCP tools,
-  - testing strategy (e.g. golden airports with known GA friendliness).
+### 7.2 Key Components
+
+- **Review Sources:** Abstract interface for multiple data sources (airfield.directory, CSV, etc.)
+- **NLP Pipeline:** LLM-based extraction (LangChain 1.0), aggregation, summarization
+- **AIP Rule Parsing:** Optional module for parsing notification requirements from euro_aip
+- **Feature Engineering:** Configurable mappings from label distributions to scores
+- **Persona Scoring:** Weighted combination of base features
+- **Incremental Updates:** Change detection and selective reprocessing
+- **CLI Tool:** `tools/build_ga_friendliness.py` for rebuilding database
+
+### 7.3 Design Decisions
+
+- **JSON config** (not YAML) - simpler, no extra dependencies
+- **LangChain 1.0** - modern API, good Pydantic integration
+- **Optional AIP parsing** - works with or without euro_aip
+- **Incremental updates** - efficient for regular updates
+- **Schema versioning** - safe schema evolution
+- **Comprehensive metrics** - track build progress, LLM usage, errors
+- **Configurable failure modes** - continue, fail_fast, or skip on errors
+
+### 7.4 Integration Points
+
+- **Runtime consumers:** ATTACH both databases, LEFT JOIN for GA data
+- **Web API:** Optional endpoints for GA friendliness queries
+- **Route-based search:** Extend existing tools to include GA scores
+- **Backward compatible:** Existing tools work without ga_meta.sqlite
+
+---
+
+## 8. Open Questions
+
+- **Non-ICAO fields:** Represent with pseudo-ICAO codes or separate table?
+- **Neutral vs missing data:** How to treat airports with no reviews in rankings?
+- **Persona explosion:** How many personas to support in UI? How to communicate differences?
+- **Learned scoring:** Eventually learn persona weights from user feedback?
+
+---
+
+*For detailed implementation architecture, see `GA_FRIENDLINESS_IMPLEMENTATION.md`.*
 
 ---
 
