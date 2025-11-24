@@ -894,8 +894,12 @@ class AirportStats(BaseModel):
     rating_avg: Optional[float]
     rating_count: int
     last_review_utc: Optional[str]
-    fee_band_lt_1500kg: Optional[float]
-    fee_band_1500_2000: Optional[float]
+    fee_band_0_749kg: Optional[float]      # 0-749 kg MTOW
+    fee_band_750_1199kg: Optional[float]   # 750-1199 kg MTOW
+    fee_band_1200_1499kg: Optional[float]  # 1200-1499 kg MTOW
+    fee_band_1500_1999kg: Optional[float]  # 1500-1999 kg MTOW
+    fee_band_2000_3999kg: Optional[float]  # 2000-3999 kg MTOW
+    fee_band_4000_plus_kg: Optional[float] # 4000+ kg MTOW
     fee_currency: Optional[str]
     mandatory_handling: bool
     ifr_procedure_available: bool  # True if airport has instrument approach procedures (ILS, RNAV, VOR, etc.) from AIP
@@ -1816,6 +1820,124 @@ class SummaryGenerator:
 
 ## 9. Feature Engineering
 
+### 9.0 Fee Band Aggregation
+
+**Implementation Note:**
+
+A helper function or class should be created to handle the aircraft type → MTOW → fee band mapping:
+
+```python
+# features.py or a new fee_aggregator.py
+
+# Standard aircraft type → MTOW (kg) mapping
+AIRCRAFT_MTOW_MAP: Dict[str, int] = {
+    "A210": 600,
+    "C172": 1157,
+    "SR22": 1542,
+    "DA42": 1999,
+    "TBM850": 3350,
+    "C510": 4100,
+    "PC12": 4740,
+    # Extend as needed
+}
+
+def get_mtow_for_aircraft(aircraft_type: str) -> Optional[int]:
+    """Get MTOW for a given aircraft type."""
+    return AIRCRAFT_MTOW_MAP.get(aircraft_type.upper())
+
+def get_fee_band_for_mtow(mtow: int) -> str:
+    """Map MTOW to fee band field name."""
+    if mtow <= 749:
+        return "fee_band_0_749kg"
+    elif mtow <= 1199:
+        return "fee_band_750_1199kg"
+    elif mtow <= 1499:
+        return "fee_band_1200_1499kg"
+    elif mtow <= 1999:
+        return "fee_band_1500_1999kg"
+    elif mtow <= 3999:
+        return "fee_band_2000_3999kg"
+    else:
+        return "fee_band_4000_plus_kg"
+
+def aggregate_fees_by_band(landing_fees: Dict[str, List[Dict]]) -> Dict[str, Optional[float]]:
+    """
+    Aggregate landing fees from aircraft-specific dict to fee bands.
+    
+    Args:
+        landing_fees: Dict[aircraft_type, List[fee_dict]]
+            e.g., {"C172": [{"lineNet": 35.0, ...}], "SR22": [{"lineNet": 70.0, ...}]}
+    
+    Returns:
+        Dict mapping fee band field names to representative fees (median if multiple)
+        e.g., {"fee_band_750_1199kg": 35.0, "fee_band_1200_1499kg": 70.0, ...}
+    """
+    # Group fees by band
+    # For each band, compute median or representative fee
+    # Return dict with all 6 bands (None for missing bands)
+```
+
+### 9.0 Fee Band Aggregation (continued)
+
+**Fee Band Structure:**
+
+Based on airfield.directory data structure, landing fees are organized by aircraft type (e.g., C172, SR22, TBM850). These are aggregated into standardized fee bands based on the aircraft's known MTOW:
+
+- `fee_band_0_749kg`: 0-749 kg MTOW
+- `fee_band_750_1199kg`: 750-1199 kg MTOW  
+- `fee_band_1200_1499kg`: 1200-1499 kg MTOW
+- `fee_band_1500_1999kg`: 1500-1999 kg MTOW
+- `fee_band_2000_3999kg`: 2000-3999 kg MTOW
+- `fee_band_4000_plus_kg`: 4000+ kg MTOW
+
+**Aircraft Type → MTOW Mapping:**
+
+**Critical:** The fee data structure uses aircraft type keys (e.g., "C172", "SR22", "TBM850") as the primary identifier. The `title` field in the fee data is **NOT standardized** and varies by airport. For example:
+- EDAZ: C172 title says "MTOW bis 1200kg"
+- EGMC: C172 title says "MTOW up to 1499kg"
+
+Therefore, we **must** map from aircraft type to known MTOW, then to fee band. We do **NOT** parse the title field.
+
+```python
+# Standard aircraft type → MTOW (kg) mapping
+# These are actual aircraft MTOW values, not airport-specific fee ranges
+AIRCRAFT_MTOW = {
+    "A210": 600,      # Aeroprakt A-22 (varies by model, ~450-600kg)
+    "C172": 1157,     # Cessna 172 Skyhawk
+    "SR22": 1542,     # Cirrus SR22
+    "DA42": 1999,     # Diamond DA42 Twin Star
+    "TBM850": 3350,   # TBM 850
+    "C510": 4100,     # Citation Mustang
+    "PC12": 4740,     # Pilatus PC-12
+    # Add more as needed
+}
+```
+
+**Mapping Logic:**
+
+From airfield.directory `aerops.data.landing_fees`:
+1. Extract aircraft type key from `landing_fees` dict (e.g., "C172", "SR22")
+2. Look up MTOW from `AIRCRAFT_MTOW` mapping (not from title field)
+3. Map MTOW to appropriate fee band:
+   - 0-749kg → `fee_band_0_749kg` (A210)
+   - 750-1199kg → `fee_band_750_1199kg` (C172)
+   - 1200-1499kg → `fee_band_1200_1499kg` (SR22)
+   - 1500-1999kg → `fee_band_1500_1999kg` (DA42)
+   - 2000-3999kg → `fee_band_2000_3999kg` (TBM850)
+   - 4000+kg → `fee_band_4000_plus_kg` (C510, PC12)
+4. If multiple aircraft types map to same band, use median or representative fee
+5. Store in `ga_airfield_stats` for quick queries
+6. Detailed fees also stored in `ga_landing_fees` table for precise lookups
+
+**Rationale:**
+- Title field is unreliable and varies by airport
+- Aircraft type is consistent across airports
+- Known MTOW values provide accurate band assignment
+- More granular than original 2-band structure (lt_1500kg, 1500_2000kg)
+- Works across different airports with different title formats (e.g., EDAZ vs EGMC)
+- Better coverage of common GA aircraft weight ranges
+- Supports more accurate cost scoring for different aircraft types
+
 ### 9.1 Feature Score Mapping (`features.py`)
 
 ```python
@@ -2328,9 +2450,14 @@ class GAFriendlinessBuilder:
             # Track LLM token usage
             # Aggregate tags → feature scores
             # Incorporate airport_stats (average_rating, landing fees) if available
+            # Aggregate landing fees into fee bands:
+            #   - Map aircraft type (e.g., "C172", "SR22") to known MTOW using standard mapping
+            #   - Map MTOW to appropriate fee_band_* field (0-749kg, 750-1199kg, 1200-1499kg, 1500-1999kg, 2000-3999kg, 4000+kg)
+            #   - Do NOT parse title field (varies by airport, not standardized)
+            #   - If multiple aircraft types map to same band, use median or representative fee
             # Generate summary (with retry logic)
             # Compute persona scores
-            # Build AirportStats (include rating_avg, fee_band_* from airport_stats)
+            # Build AirportStats (include rating_avg, fee_band_* from aggregated fees)
             # Write to storage (within transaction)
             # Update last_processed_timestamp for this airport
             # Use max(review.timestamp) as the processed timestamp
@@ -2583,7 +2710,18 @@ class AirfieldDirectorySource(ReviewSource):
             Dict with:
                 - average_rating: float (from airfield.data.average_rating)
                 - landing_fees: Dict by aircraft type (from aerops.data.landing_fees)
+                    - Key: aircraft type (e.g., "C172", "SR22")
+                    - Value: List of fee dicts with structure: `[{"lineNet": ..., "price": ..., "tax": ..., "title": ...}]`
+                    - **Note:** The `title` field is NOT used for mapping - it varies by airport
                 - fuel_prices: Dict (from aerops.data.fuel_prices)
+        
+        **Fee Band Mapping:**
+        Landing fees from airfield.directory are organized by aircraft type (e.g., "C172", "SR22").
+        The title field is NOT standardized and varies by airport (e.g., "MTOW bis 750kg" vs "MTOW up to 1499kg").
+        Therefore, map aircraft type → known MTOW → fee band:
+            - Use aircraft type key to look up MTOW from standard mapping
+            - Map MTOW to appropriate fee band (0-749kg, 750-1199kg, 1200-1499kg, 1500-1999kg, 2000-3999kg, 4000+kg)
+            - See section 9.0 for detailed mapping logic
         """
         # Fetch https://airfield.directory/airfield/{ICAO}.json
         # Extract stats
@@ -2608,9 +2746,21 @@ class AirfieldDirectorySource(ReviewSource):
    - Airport-level `average_rating` available in individual airport JSON
 
 4. **Landing fees:**
-   - Available in `aerops.data.landing_fees` by aircraft type (PC12, DA42, C172, etc.)
-   - Can be used to populate `ga_landing_fees` table
+   - Available in `aerops.data.landing_fees` by aircraft type (PC12, DA42, C172, A210, etc.)
+   - **Important:** The `title` field is NOT standardized and varies by airport (e.g., EDAZ uses "MTOW bis 750kg", EGMC uses "MTOW up to 1499kg")
+   - **Solution:** Use aircraft type key (e.g., "C172", "SR22") to look up known MTOW, then map to fee band
+   - Mapping from aircraft type → MTOW → fee band:
+     - A210 (~600kg) → `fee_band_0_749kg`
+     - C172 (~1157kg) → `fee_band_750_1199kg`
+     - SR22 (~1542kg) → `fee_band_1200_1499kg`
+     - DA42 (~2000kg) → `fee_band_1500_1999kg`
+     - TBM850 (~3350kg) → `fee_band_2000_3999kg`
+     - C510 (~4100kg) → `fee_band_4000_plus_kg`
+     - PC12 (~4740kg) → `fee_band_4000_plus_kg`
+   - Can be used to populate `ga_landing_fees` table (detailed) and `ga_airfield_stats` (aggregated bands)
    - Fees have structure: `{"lineNet": ..., "price": ..., "tax": ..., "title": ...}`
+   - Use `lineNet` (net price) or `price` (with tax) depending on requirements
+   - See section 9.0 for the complete aircraft type → MTOW mapping table
 
 5. **Bulk export format:**
    - Nested structure: `pireps[ICAO][review_id]`

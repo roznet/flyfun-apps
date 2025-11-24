@@ -155,9 +155,13 @@ CREATE TABLE ga_airfield_stats (
     rating_count        INTEGER,       -- number of ratings
     last_review_utc     TEXT,          -- timestamp of latest review
 
-    -- Fee info (aggregated GA bands, typically for common MTOW ranges)
-    fee_band_lt_1500kg  REAL,
-    fee_band_1500_2000  REAL,
+    -- Fee info (aggregated GA bands by MTOW ranges)
+    fee_band_0_749kg    REAL,          -- 0-749 kg MTOW
+    fee_band_750_1199kg REAL,          -- 750-1199 kg MTOW
+    fee_band_1200_1499kg REAL,         -- 1200-1499 kg MTOW
+    fee_band_1500_1999kg REAL,         -- 1500-1999 kg MTOW
+    fee_band_2000_3999kg REAL,         -- 2000-3999 kg MTOW
+    fee_band_4000_plus_kg REAL,        -- 4000+ kg MTOW
     fee_currency        TEXT,
     fee_last_updated_utc TEXT,
 
