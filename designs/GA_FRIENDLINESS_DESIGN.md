@@ -453,7 +453,7 @@ For each `icao`:
    - `ga_cost_score` from `cost` aspect labels
    - `ga_hassle_score` from `bureaucracy` labels (combined with AIP notification rules if available)
    - `ga_review_score` from `overall_experience` labels
-   - `ga_fun_score` from `food`, `overall_experience`, etc.
+    - `ga_fun_score` from `food`, `overall_experience`, etc.
    - `ga_ops_ifr_score` from review tags + AIP data (if available)
    - `ga_ops_vfr_score` from review tags + AIP data (if available)
    - `ga_access_score` from `transport` aspect labels
@@ -572,37 +572,37 @@ Personas are defined in `personas.json` (JSON format):
 {
   "version": "1.0",
   "personas": {
-    "ifr_touring_sr22": {
-      "label": "IFR touring (SR22)",
-      "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy.",
-      "weights": {
-        "ga_ops_ifr_score": 0.30,
-        "ga_hassle_score": 0.20,
-        "ga_cost_score": 0.20,
-        "ga_review_score": 0.20,
-        "ga_access_score": 0.10
-      }
-    },
-    "vfr_budget": {
-      "label": "VFR fun / budget",
-      "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, and general GA friendliness.",
-      "weights": {
-        "ga_cost_score": 0.35,
-        "ga_fun_score": 0.25,
-        "ga_review_score": 0.20,
-        "ga_access_score": 0.10,
-        "ga_ops_vfr_score": 0.10
-      }
-    },
-    "training": {
-      "label": "Training field",
-      "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
-      "weights": {
-        "ga_ops_vfr_score": 0.30,
-        "ga_hassle_score": 0.25,
-        "ga_cost_score": 0.20,
-        "ga_review_score": 0.15,
-        "ga_fun_score": 0.10
+  "ifr_touring_sr22": {
+    "label": "IFR touring (SR22)",
+    "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy.",
+    "weights": {
+      "ga_ops_ifr_score": 0.30,
+      "ga_hassle_score": 0.20,
+      "ga_cost_score": 0.20,
+      "ga_review_score": 0.20,
+      "ga_access_score": 0.10
+    }
+  },
+  "vfr_budget": {
+    "label": "VFR fun / budget",
+    "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, and general GA friendliness.",
+    "weights": {
+      "ga_cost_score": 0.35,
+      "ga_fun_score": 0.25,
+      "ga_review_score": 0.20,
+      "ga_access_score": 0.10,
+      "ga_ops_vfr_score": 0.10
+    }
+  },
+  "training": {
+    "label": "Training field",
+    "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
+    "weights": {
+      "ga_ops_vfr_score": 0.30,
+      "ga_hassle_score": 0.25,
+      "ga_cost_score": 0.20,
+      "ga_review_score": 0.15,
+      "ga_fun_score": 0.10
       }
     }
   }
