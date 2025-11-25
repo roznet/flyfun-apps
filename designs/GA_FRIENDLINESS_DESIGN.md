@@ -178,6 +178,7 @@ CREATE TABLE ga_airfield_stats (
     ga_ops_vfr_score    REAL,
     ga_access_score     REAL,
     ga_fun_score        REAL,
+    ga_hospitality_score REAL,       -- Restaurant, hotel, accommodation quality
     notification_hassle_score REAL,  -- From AIP notification rules (optional)
 
     -- Persona-specific composite scores (denormalized cache; optional)
@@ -398,6 +399,8 @@ Examples:
 - `runway`
 - `transport`
 - `food`
+- `restaurant` - Quality of on-airport or nearby restaurant/café
+- `accommodation` - Quality of nearby hotels/accommodation
 - `noise_neighbours`
 - `training_traffic`
 - `overall_experience`
@@ -414,6 +417,10 @@ Per aspect, allowed labels. Example:
   - `simple`, `moderate`, `complex`
 - `fuel`:
   - `excellent`, `ok`, `poor`, `unavailable`
+- `restaurant`:
+  - `excellent`, `good`, `ok`, `poor`, `none`
+- `accommodation`:
+  - `excellent`, `good`, `limited`, `poor`, `none`
 - `overall_experience`:
   - `very_positive`, `positive`, `neutral`, `negative`, `very_negative`
 
@@ -454,10 +461,11 @@ For each `icao`:
    - `ga_cost_score` from `cost` aspect labels
    - `ga_hassle_score` from `bureaucracy` labels (combined with AIP notification rules if available)
    - `ga_review_score` from `overall_experience` labels
-    - `ga_fun_score` from `food`, `overall_experience`, etc.
+   - `ga_fun_score` from `food`, `overall_experience`, etc.
    - `ga_ops_ifr_score` from review tags + AIP data (if available)
    - `ga_ops_vfr_score` from review tags + AIP data (if available)
    - `ga_access_score` from `transport` aspect labels
+   - `ga_hospitality_score` from `restaurant`, `accommodation` aspect labels
    - **Optional: Bayesian smoothing** - For airports with few reviews, smooth scores toward global average to handle small sample sizes
 
 3. **Incorporate numeric ratings:**
@@ -561,6 +569,7 @@ Scores stored in `ga_airfield_stats` as inputs to persona scoring:
 - `ga_ops_vfr_score`    (0–1)
 - `ga_access_score`     (0–1)
 - `ga_fun_score`        (0–1)
+- `ga_hospitality_score` (0–1) - Restaurant, hotel, accommodation quality
 
 General idea:
 
@@ -581,24 +590,26 @@ Personas are defined in `personas.json` (JSON format):
   "personas": {
   "ifr_touring_sr22": {
     "label": "IFR touring (SR22)",
-    "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy.",
+    "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy. Some weight on hospitality for overnight stops.",
     "weights": {
-      "ga_ops_ifr_score": 0.30,
+      "ga_ops_ifr_score": 0.25,
       "ga_hassle_score": 0.20,
       "ga_cost_score": 0.20,
-      "ga_review_score": 0.20,
-      "ga_access_score": 0.10
+      "ga_review_score": 0.15,
+      "ga_access_score": 0.10,
+      "ga_hospitality_score": 0.10
     }
   },
   "vfr_budget": {
     "label": "VFR fun / budget",
-    "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, and general GA friendliness.",
+    "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, hospitality (good lunch spot), and general GA friendliness.",
     "weights": {
-      "ga_cost_score": 0.35,
-      "ga_fun_score": 0.25,
-      "ga_review_score": 0.20,
+      "ga_cost_score": 0.30,
+      "ga_fun_score": 0.20,
+      "ga_hospitality_score": 0.20,
+      "ga_review_score": 0.15,
       "ga_access_score": 0.10,
-      "ga_ops_vfr_score": 0.10
+      "ga_ops_vfr_score": 0.05
     }
   },
   "training": {
@@ -610,6 +621,17 @@ Personas are defined in `personas.json` (JSON format):
       "ga_cost_score": 0.20,
       "ga_review_score": 0.15,
       "ga_fun_score": 0.10
+      }
+    },
+  "lunch_stop": {
+    "label": "Lunch stop / day trip",
+    "description": "Day trip destination: emphasis on great restaurant/café, good vibe, easy access, reasonable cost.",
+    "weights": {
+      "ga_hospitality_score": 0.35,
+      "ga_fun_score": 0.25,
+      "ga_cost_score": 0.15,
+      "ga_hassle_score": 0.15,
+      "ga_access_score": 0.10
       }
     }
   }
@@ -865,18 +887,24 @@ Exact protocol (HTTP/MCP/etc.) is outside this design; this only defines **what 
 
 ### 7.1 Library Structure
 
-**Standalone Python library:** `shared/ga_friendliness/`
+**Core library:** `shared/ga_friendliness/`
 
 - Independent library (no hard dependency on euro_aip)
 - Uses ICAO codes as linking keys
 - Supports ATTACH DATABASE pattern for joint queries
 - Configurable via JSON files (ontology, personas, feature mappings)
 
+**Reusable agents at `shared/` level:**
+
+- `shared/ga_review_agent/` - LLM-based review processing (extraction, aggregation, summarization)
+- `shared/ga_notification_requirement_agent/` - AIP notification rule parsing
+- Both agents follow the same pattern as `shared/aviation_agent/` (same level, reusable in other contexts)
+
 ### 7.2 Key Components
 
 - **Review Sources:** Abstract interface for multiple data sources (airfield.directory, CSV, etc.)
-- **NLP Pipeline:** LLM-based extraction (LangChain 1.0), aggregation, summarization
-- **AIP Rule Parsing:** Optional module for parsing notification requirements from euro_aip
+- **GA Review Agent:** `shared/ga_review_agent/` - LLM-based extraction (LangChain 1.0), aggregation, summarization
+- **GA Notification Requirement Agent:** `shared/ga_notification_requirement_agent/` - Parse notification requirements from euro_aip
 - **Feature Engineering:** Configurable mappings from label distributions to scores
 - **Persona Scoring:** Weighted combination of base features
 - **Incremental Updates:** Change detection and selective reprocessing

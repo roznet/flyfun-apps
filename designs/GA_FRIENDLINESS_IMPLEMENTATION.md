@@ -28,40 +28,58 @@ This document defines the **implementation architecture, module structure, and f
 ### 1.2 Module Structure
 
 ```
-shared/ga_friendliness/
-├── __init__.py                 # Public API exports
-├── config.py                   # Configuration loading (JSON, env vars)
-├── models.py                   # Pydantic models for ontology, personas, reviews
-├── exceptions.py               # Exception hierarchy
-├── database.py                 # SQLite schema creation, connection management, migrations
-├── storage.py                  # Read/write operations for ga_meta.sqlite
-├── ontology.py                 # Ontology loading, validation, aspect/label lookup
-├── personas.py                 # Persona loading, validation, score computation
-├── cache.py                    # Caching utility for remote data sources
-├── nlp/
+shared/
+├── ga_friendliness/                    # Core GA friendliness library
+│   ├── __init__.py                     # Public API exports
+│   ├── config.py                       # Configuration loading (JSON, env vars)
+│   ├── models.py                       # Pydantic models for ontology, personas, reviews
+│   ├── exceptions.py                   # Exception hierarchy
+│   ├── database.py                     # SQLite schema creation, connection management, migrations
+│   ├── storage.py                      # Read/write operations for ga_meta.sqlite
+│   ├── ontology.py                     # Ontology loading, validation, aspect/label lookup
+│   ├── personas.py                     # Persona loading, validation, score computation
+│   ├── cache.py                        # Caching utility for remote data sources
+│   ├── features.py                     # Feature engineering (label distributions → scores)
+│   ├── scoring.py                      # Persona-based scoring functions
+│   └── builder.py                      # Main pipeline orchestrator
+│
+├── ga_review_agent/                    # Review processing agent (reusable)
 │   ├── __init__.py
-│   ├── extractor.py           # LLM-based review tag extraction
-│   ├── aggregator.py           # Tag aggregation → feature scores
-│   ├── summarizer.py           # LLM-based airport summary generation
-│   └── aip_rule_extractor.py   # LLM-based AIP rule parsing (notification, handling, etc.)
-├── aip/
+│   ├── extractor.py                    # LLM-based review tag extraction
+│   ├── aggregator.py                   # Tag aggregation → feature scores
+│   └── summarizer.py                   # LLM-based airport summary generation
+│
+├── ga_notification_requirement_agent/  # AIP notification rules agent (reusable)
 │   ├── __init__.py
-│   ├── aip_source.py           # Source for AIP data from euro_aip.sqlite
-│   ├── rule_parser.py          # Parse structured rules from AIP text
-│   └── rule_summarizer.py      # Generate high-level summaries from detailed rules
-├── features.py                 # Feature engineering (label distributions → scores)
-├── scoring.py                  # Persona-based scoring functions
-└── builder.py                  # Main pipeline orchestrator
+│   ├── aip_source.py                   # Source for AIP data from euro_aip.sqlite
+│   ├── rule_parser.py                  # Parse structured rules from AIP text
+│   └── rule_summarizer.py              # Generate high-level summaries from detailed rules
+│
+└── aviation_agent/                     # Existing aviation agent (for reference)
+    └── ...
 
 tools/
-└── build_ga_friendliness.py    # CLI tool for rebuilding ga_meta.sqlite
+└── build_ga_friendliness.py            # CLI tool for rebuilding ga_meta.sqlite
 
 data/
-├── ontology.json               # Ontology definition (versioned)
-├── personas.json               # Persona definitions (versioned)
-├── feature_mappings.json       # Feature mapping configurations (versioned)
-└── aip_rule_schema.json       # Schema for AIP rule extraction (notification patterns, etc.)
+├── ontology.json                       # Ontology definition (versioned)
+├── personas.json                       # Persona definitions (versioned)
+├── feature_mappings.json               # Feature mapping configurations (versioned)
+└── aip_rule_schema.json                # Schema for AIP rule extraction (notification patterns, etc.)
 ```
+
+**Design Decision: Agent Module Organization**
+
+- **Why separate agents at `shared/` level?**
+  - `ga_review_agent` and `ga_notification_requirement_agent` are reusable in other contexts
+  - Follows the pattern of `aviation_agent` (same level)
+  - Clean separation: `ga_friendliness` is the core library, agents are independent components
+  - Agents can be used independently or composed together
+
+- **Import paths:**
+  - `from shared.ga_review_agent import ReviewExtractor, TagAggregator, SummaryGenerator`
+  - `from shared.ga_notification_requirement_agent import AIPSource, AIPRuleParser, AIPRuleSummarizer`
+  - `from shared.ga_friendliness import GAFriendlinessBuilder`
 
 ---
 
@@ -88,12 +106,14 @@ data/
 ### 2.2 Module Structure
 
 ```
-shared/ga_friendliness/aip/
+shared/ga_notification_requirement_agent/
 ├── __init__.py
 ├── aip_source.py           # Load AIP text from euro_aip.sqlite
 ├── rule_parser.py          # Parse structured rules using LLM
 └── rule_summarizer.py      # Generate high-level summaries
 ```
+
+**Note:** This agent is at the `shared/` level (same as `aviation_agent`) for reusability in other contexts.
 
 ### 2.3 Database Schema Extensions
 
@@ -160,10 +180,10 @@ ALTER TABLE ga_airfield_stats ADD COLUMN notification_hassle_score REAL;
 -- Derived from ga_aip_rule_summary.notification_score
 ```
 
-### 2.4 AIP Source (`aip/aip_source.py`)
+### 2.4 AIP Source (`ga_notification_requirement_agent/aip_source.py`)
 
 ```python
-# aip/aip_source.py - Load AIP text from euro_aip.sqlite
+# ga_notification_requirement_agent/aip_source.py - Load AIP text from euro_aip.sqlite
 
 class AIPSource:
     """
@@ -232,7 +252,7 @@ class AIPSource:
         # Return datetime or None
 ```
 
-### 2.5 AIP Rule Parser (`aip/rule_parser.py`)
+### 2.5 AIP Rule Parser (`ga_notification_requirement_agent/rule_parser.py`)
 
 **Design Decision: LLM vs. Regex for Rule Parsing**
 
@@ -250,7 +270,7 @@ class AIPSource:
 - Cache LLM results to avoid reprocessing
 
 ```python
-# aip/rule_parser.py - Parse structured rules from AIP text
+# ga_notification_requirement_agent/rule_parser.py - Parse structured rules from AIP text
 
 from typing import List, Optional
 from pydantic import BaseModel
@@ -275,13 +295,18 @@ class ParsedAIPRules(BaseModel):
 
 class AIPRuleParser:
     """
-    Parses structured rules from AIP text using LLM.
+    Parses structured rules from AIP text using LLM (LangChain 1.0).
     
     Uses specialized prompt for rule extraction (different from review extraction).
     Handles complex patterns:
         - "PPR 24 HR weekdays, 48 HR weekends"
         - "Last business day before 1300"
         - "Tue-Fri: 24h, Sat-Mon: 48h"
+    
+    Uses LangChain 1.0:
+        - ChatPromptTemplate for prompt construction
+        - ChatOpenAI for LLM calls
+        - PydanticOutputParser for structured output
     """
     
     def __init__(
@@ -292,11 +317,12 @@ class AIPRuleParser:
         max_retries: int = 3
     ):
         """
-        Initialize rule parser with LLM.
+        Initialize rule parser with LLM (LangChain 1.0).
         
-        Creates LangChain chain for structured rule extraction.
+        Creates LangChain chain:
+            prompt -> llm -> PydanticOutputParser(ParsedAIPRules)
         """
-        # Build prompt template for rule extraction
+        # Build prompt template for rule extraction (ChatPromptTemplate)
         # Create ChatOpenAI instance
         # Create PydanticOutputParser for ParsedAIPRules
         # Chain: prompt | llm | parser
@@ -397,7 +423,7 @@ class AIPRuleParser:
         # Return list of NotificationRule
 ```
 
-### 2.6 Rule Summarizer (`aip/rule_summarizer.py`)
+### 2.6 Rule Summarizer (`ga_notification_requirement_agent/rule_summarizer.py`)
 
 **Purpose:** Convert detailed structured rules into:
 1. **Human-readable summary** for UI (e.g., "24h weekdays, 48h weekends")
@@ -418,7 +444,7 @@ class AIPRuleParser:
 - Final score clamped to [0, 1]
 
 ```python
-# aip/rule_summarizer.py - Generate high-level summaries from detailed rules
+# ga_notification_requirement_agent/rule_summarizer.py - Generate high-level summaries from detailed rules
 
 class RuleSummary(BaseModel):
     """High-level summary of notification requirements."""
@@ -429,6 +455,11 @@ class RuleSummary(BaseModel):
 class AIPRuleSummarizer:
     """
     Generates high-level summaries from detailed notification rules.
+    
+    Uses LangChain 1.0:
+        - ChatPromptTemplate for prompt construction
+        - ChatOpenAI for LLM calls
+        - JsonOutputParser for structured output
     
     Two purposes:
         1. Human-readable summary for UI
@@ -442,13 +473,14 @@ class AIPRuleSummarizer:
         api_key: Optional[str] = None
     ):
         """
-        Initialize summarizer with LLM.
+        Initialize summarizer with LLM (LangChain 1.0).
         
-        Creates LangChain chain for rule summarization.
+        Creates LangChain chain:
+            prompt -> llm -> JsonOutputParser
         """
-        # Build prompt template
+        # Build prompt template (ChatPromptTemplate)
         # Create ChatOpenAI instance
-        # Create JSON output parser
+        # Create JsonOutputParser
         # Chain: prompt | llm | parser
     
     def summarize_rules(
@@ -865,6 +897,7 @@ class PersonaWeights(BaseModel):
     ga_ops_vfr_score: float = 0.0
     ga_access_score: float = 0.0
     ga_fun_score: float = 0.0
+    ga_hospitality_score: float = 0.0  # Restaurant, hotel, accommodation quality
 
 class PersonaConfig(BaseModel):
     """Single persona definition."""
@@ -900,6 +933,7 @@ class AirportFeatureScores(BaseModel):
     ga_ops_vfr_score: float
     ga_access_score: float
     ga_fun_score: float
+    ga_hospitality_score: float  # Restaurant, hotel, accommodation quality [0, 1]
 
 class AirportStats(BaseModel):
     """Aggregated stats for ga_airfield_stats table."""
@@ -917,7 +951,16 @@ class AirportStats(BaseModel):
     mandatory_handling: bool
     ifr_procedure_available: bool  # True if airport has instrument approach procedures (ILS, RNAV, VOR, etc.) from AIP
     night_available: bool
-    # ... feature scores ...
+    # Feature scores (all normalized [0, 1])
+    ga_cost_score: Optional[float]
+    ga_review_score: Optional[float]
+    ga_hassle_score: Optional[float]
+    ga_ops_ifr_score: Optional[float]
+    ga_ops_vfr_score: Optional[float]
+    ga_access_score: Optional[float]
+    ga_fun_score: Optional[float]
+    ga_hospitality_score: Optional[float]  # Restaurant, hotel, accommodation quality
+    # Versioning
     source_version: str
     scoring_version: str
 ```
@@ -1401,6 +1444,7 @@ class GAMetaStorage:
                 'ga_cost_score': 0.52,
                 'ga_hassle_score': 0.61,
                 'ga_review_score': 0.68,
+                'ga_hospitality_score': 0.55,
                 ...
             }
         """
@@ -1411,7 +1455,8 @@ class GAMetaStorage:
         #   AVG(ga_ops_ifr_score) as ga_ops_ifr_score,
         #   AVG(ga_ops_vfr_score) as ga_ops_vfr_score,
         #   AVG(ga_access_score) as ga_access_score,
-        #   AVG(ga_fun_score) as ga_fun_score
+        #   AVG(ga_fun_score) as ga_fun_score,
+        #   AVG(ga_hospitality_score) as ga_hospitality_score
         # FROM ga_airfield_stats
         # WHERE ga_cost_score IS NOT NULL  # Only airports with data
         # Return dict with averages (handle NULLs as 0.5 default)
@@ -1768,10 +1813,10 @@ class PersonaManager:
 
 ## 8. NLP Pipeline (LangChain 1.0)
 
-### 8.1 Review Tag Extraction (`nlp/extractor.py`)
+### 8.1 Review Tag Extraction (`ga_review_agent/extractor.py`)
 
 ```python
-# nlp/extractor.py - LLM-based review tag extraction
+# ga_review_agent/extractor.py - LLM-based review tag extraction
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -1869,10 +1914,10 @@ class ReviewExtractor:
   - **Cons:** More API calls
 - **Choice:** Start with Option B (sequential with batch), add Option A as optimization later.
 
-### 8.2 Tag Aggregation (`nlp/aggregator.py`)
+### 8.2 Tag Aggregation (`ga_review_agent/aggregator.py`)
 
 ```python
-# nlp/aggregator.py - Aggregate tags into feature scores
+# ga_review_agent/aggregator.py - Aggregate tags into feature scores
 
 class TagAggregator:
     """Aggregates review tags into normalized feature scores."""
@@ -1901,6 +1946,7 @@ class TagAggregator:
             - ga_hassle_score: from 'bureaucracy' aspect (simple=1.0, complex=0.0)
             - ga_review_score: from 'overall_experience' aspect
             - ga_fun_score: from 'food', 'overall_experience' aspects
+            - ga_hospitality_score: from 'restaurant', 'accommodation' aspects
         
         Args:
             icao: Airport ICAO code
@@ -1972,10 +2018,10 @@ class TagAggregator:
         # Return dict
 ```
 
-### 8.3 Summary Generation (`nlp/summarizer.py`)
+### 8.3 Summary Generation (`ga_review_agent/summarizer.py`)
 
 ```python
-# nlp/summarizer.py - LLM-based airport summary generation
+# ga_review_agent/summarizer.py - LLM-based airport summary generation
 
 class SummaryGenerator:
     """Generates airport-level summaries from aggregated data."""
@@ -2344,6 +2390,47 @@ class FeatureMapper:
         """
         # Combine food, overall_experience distributions
         # Compute composite score
+        # Apply Bayesian smoothing if context provided
+        # Return composite score
+    
+    def map_hospitality_score(
+        self,
+        distribution_restaurant: Dict[str, float],
+        distribution_accommodation: Dict[str, float],
+        context: Optional[AggregationContext] = None
+    ) -> float:
+        """
+        Map 'restaurant' and 'accommodation' aspect labels to ga_hospitality_score [0, 1].
+        
+        Indicates quality of restaurant/food options and nearby accommodation.
+        Important for:
+            - Day trip/lunch stop planning
+            - Overnight stay planning
+            - Multi-day touring
+        
+        Uses mapping from config if available, otherwise defaults:
+            restaurant:
+                - excellent -> 1.0
+                - good -> 0.75
+                - ok -> 0.5
+                - poor -> 0.25
+                - none -> 0.0
+            accommodation:
+                - excellent -> 1.0
+                - good -> 0.75
+                - limited -> 0.5
+                - poor -> 0.25
+                - none -> 0.0
+        
+        Final score is weighted average:
+            - 60% restaurant (more common use case for GA pilots)
+            - 40% accommodation
+        
+        Supports Bayesian smoothing if context provided (same as other mapping methods).
+        """
+        # Get restaurant score from distribution
+        # Get accommodation score from distribution
+        # Weighted combination (0.6 restaurant + 0.4 accommodation)
         # Apply Bayesian smoothing if context provided
         # Return composite score
 ```
@@ -2846,6 +2933,7 @@ class GAFriendlinessBuilder:
                                         'ga_ops_vfr_score': 0.5,
                                         'ga_access_score': 0.5,
                                         'ga_fun_score': 0.5,
+                                        'ga_hospitality_score': 0.5,
                                     }
                                     logger.info("using_default_priors", priors=global_priors)
                         else:
@@ -4066,13 +4154,13 @@ def test_known_expensive_airport_scores()
 16. Test caching behavior (hits, misses, refresh flags)
 
 ### Phase 5: AIP Rule Parsing (Optional)
-1. Implement AIPSource (`aip/aip_source.py`)
+1. Implement AIPSource (`ga_notification_requirement_agent/aip_source.py`)
    - Load AIP text from euro_aip.sqlite
    - Track AIP change timestamps
-2. Implement AIPRuleParser (`aip/rule_parser.py`)
+2. Implement AIPRuleParser (`ga_notification_requirement_agent/rule_parser.py`)
    - Hybrid regex/LLM approach
    - Parse complex notification rules
-3. Implement AIPRuleSummarizer (`aip/rule_summarizer.py`)
+3. Implement AIPRuleSummarizer (`ga_notification_requirement_agent/rule_summarizer.py`)
    - Generate high-level summaries
    - Calculate notification hassle score
 4. Extend storage for AIP rules
