@@ -588,50 +588,65 @@ Personas are defined in `personas.json` (JSON format):
 {
   "version": "1.0",
   "personas": {
-  "ifr_touring_sr22": {
-    "label": "IFR touring (SR22)",
-    "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy. Some weight on hospitality for overnight stops.",
-    "weights": {
-      "ga_ops_ifr_score": 0.25,
-      "ga_hassle_score": 0.20,
-      "ga_cost_score": 0.20,
-      "ga_review_score": 0.15,
-      "ga_access_score": 0.10,
-      "ga_hospitality_score": 0.10
-    }
-  },
-  "vfr_budget": {
-    "label": "VFR fun / budget",
-    "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, hospitality (good lunch spot), and general GA friendliness.",
-    "weights": {
-      "ga_cost_score": 0.30,
-      "ga_fun_score": 0.20,
-      "ga_hospitality_score": 0.20,
-      "ga_review_score": 0.15,
-      "ga_access_score": 0.10,
-      "ga_ops_vfr_score": 0.05
-    }
-  },
-  "training": {
-    "label": "Training field",
-    "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
-    "weights": {
-      "ga_ops_vfr_score": 0.30,
-      "ga_hassle_score": 0.25,
-      "ga_cost_score": 0.20,
-      "ga_review_score": 0.15,
-      "ga_fun_score": 0.10
+    "ifr_touring_sr22": {
+      "label": "IFR touring (SR22)",
+      "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy. Some weight on hospitality for overnight stops.",
+      "weights": {
+        "ga_ops_ifr_score": 0.25,
+        "ga_hassle_score": 0.20,
+        "ga_cost_score": 0.20,
+        "ga_review_score": 0.15,
+        "ga_access_score": 0.10,
+        "ga_hospitality_score": 0.10
+      },
+      "missing_behaviors": {
+        "ga_ops_ifr_score": "negative",
+        "ga_hospitality_score": "exclude"
       }
     },
-  "lunch_stop": {
-    "label": "Lunch stop / day trip",
-    "description": "Day trip destination: emphasis on great restaurant/café, good vibe, easy access, reasonable cost.",
-    "weights": {
-      "ga_hospitality_score": 0.35,
-      "ga_fun_score": 0.25,
-      "ga_cost_score": 0.15,
-      "ga_hassle_score": 0.15,
-      "ga_access_score": 0.10
+    "vfr_budget": {
+      "label": "VFR fun / budget",
+      "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, hospitality (good lunch spot), and general GA friendliness.",
+      "weights": {
+        "ga_cost_score": 0.30,
+        "ga_fun_score": 0.20,
+        "ga_hospitality_score": 0.20,
+        "ga_review_score": 0.15,
+        "ga_access_score": 0.10,
+        "ga_ops_vfr_score": 0.05
+      },
+      "missing_behaviors": {
+        "ga_hospitality_score": "neutral"
+      }
+    },
+    "training": {
+      "label": "Training field",
+      "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
+      "weights": {
+        "ga_ops_vfr_score": 0.30,
+        "ga_hassle_score": 0.25,
+        "ga_cost_score": 0.20,
+        "ga_review_score": 0.15,
+        "ga_fun_score": 0.10
+      },
+      "missing_behaviors": {
+        "ga_hospitality_score": "exclude",
+        "ga_ops_ifr_score": "exclude"
+      }
+    },
+    "lunch_stop": {
+      "label": "Lunch stop / day trip",
+      "description": "Day trip destination: emphasis on great restaurant/café, good vibe, easy access, reasonable cost.",
+      "weights": {
+        "ga_hospitality_score": 0.35,
+        "ga_fun_score": 0.25,
+        "ga_cost_score": 0.15,
+        "ga_hassle_score": 0.15,
+        "ga_access_score": 0.10
+      },
+      "missing_behaviors": {
+        "ga_hospitality_score": "negative",
+        "ga_ops_ifr_score": "exclude"
       }
     }
   }
@@ -643,12 +658,21 @@ Personas are defined in `personas.json` (JSON format):
 - Features not mentioned have weight 0.0
 - Versioned via `personas_version` in `ga_meta_info`
 
+**Missing Behaviors:**
+- `neutral` (default): Treat missing value as 0.5 (average)
+- `negative`: Treat missing as 0.0 (feature is required, missing = worst case)
+- `positive`: Treat missing as 1.0 (rare, assume best case)
+- `exclude`: Skip this feature entirely, re-normalize remaining weights
+
+When a feature has weight 0.0, missing_behavior is irrelevant. Only specify missing_behaviors for features where the default (neutral) isn't appropriate.
+
 ### 5.3 Scoring Function (Conceptual)
 
 For airport `icao`, persona `P`:
 
 ```text
-score_P(icao) = Σ_f ( weight_P[f] * feature_f[icao] )
+effective_value[f] = resolve_missing(feature_f[icao], missing_behavior_P[f])
+score_P(icao) = Σ_f ( weight_P[f] * effective_value[f] ) / Σ(active_weights)
 ```
 
 Where:
@@ -656,6 +680,12 @@ Where:
 - `feature_f[icao]` is one of:
   - `ga_cost_score`, `ga_review_score`, etc.
 - `weight_P[f]` is read from persona config.
+- `missing_behavior_P[f]` determines how to handle NULL feature values:
+  - `neutral`: use 0.5
+  - `negative`: use 0.0 (required feature)
+  - `positive`: use 1.0
+  - `exclude`: skip feature, don't include in `active_weights`
+- `active_weights` = sum of weights for features that weren't excluded
 
 ### 5.4 Where Scores Are Stored
 

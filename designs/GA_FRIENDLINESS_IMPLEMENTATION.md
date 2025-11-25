@@ -899,12 +899,38 @@ class PersonaWeights(BaseModel):
     ga_fun_score: float = 0.0
     ga_hospitality_score: float = 0.0  # Restaurant, hotel, accommodation quality
 
+class MissingBehavior(str, Enum):
+    """
+    How to handle missing (NULL) feature values when computing persona scores.
+    
+    Different personas have different tolerance for missing data:
+        - IFR touring persona: missing IFR score is bad (assume no IFR capability)
+        - Training persona: missing hospitality score is irrelevant (exclude)
+        - Lunch stop persona: missing hospitality is bad (can't recommend)
+    """
+    NEUTRAL = "neutral"      # Treat missing as 0.5 (neutral/average)
+    NEGATIVE = "negative"    # Treat missing as 0.0 (worst case, feature is required)
+    POSITIVE = "positive"    # Treat missing as 1.0 (best case, rare use)
+    EXCLUDE = "exclude"      # Exclude from scoring, re-normalize remaining weights
+
+class PersonaMissingBehaviors(BaseModel):
+    """Per-feature missing value behavior for a persona."""
+    ga_cost_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_review_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_hassle_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_ops_ifr_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_ops_vfr_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_access_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_fun_score: MissingBehavior = MissingBehavior.NEUTRAL
+    ga_hospitality_score: MissingBehavior = MissingBehavior.EXCLUDE  # Default: optional
+
 class PersonaConfig(BaseModel):
     """Single persona definition."""
     id: str
     label: str
     description: str
     weights: PersonaWeights
+    missing_behaviors: Optional[PersonaMissingBehaviors] = None  # Default: all NEUTRAL
 
 class PersonasConfig(BaseModel):
     """Loaded personas.json structure."""
@@ -1785,15 +1811,55 @@ class PersonaManager:
         """
         Compute persona-specific score from base features.
         
-        Formula:
-            score = Σ(weight[feature] * feature_value)
+        Handles missing (None) feature values based on persona's missing_behaviors:
+            - NEUTRAL: treat as 0.5 (average)
+            - NEGATIVE: treat as 0.0 (worst case - feature is required)
+            - POSITIVE: treat as 1.0 (best case - rare)
+            - EXCLUDE: skip this feature, re-normalize remaining weights
+        
+        Formula (with missing value handling):
+            effective_value = resolve_missing(feature_value, missing_behavior)
+            score = Σ(weight[feature] * effective_value) / Σ(active_weights)
         
         Returns:
             Score in [0, 1] range (assuming features are normalized).
         """
         # Get persona config
-        # For each feature in features, multiply by persona weight
-        # Sum and return
+        persona = self.get_persona(persona_id)
+        missing_behaviors = persona.missing_behaviors or PersonaMissingBehaviors()
+        
+        total_score = 0.0
+        total_weight = 0.0
+        
+        # For each feature
+        for feature_name in ['ga_cost_score', 'ga_review_score', 'ga_hassle_score',
+                            'ga_ops_ifr_score', 'ga_ops_vfr_score', 'ga_access_score',
+                            'ga_fun_score', 'ga_hospitality_score']:
+            weight = getattr(persona.weights, feature_name, 0.0)
+            if weight == 0.0:
+                continue  # Feature not used by this persona
+            
+            value = getattr(features, feature_name, None)
+            behavior = getattr(missing_behaviors, feature_name, MissingBehavior.NEUTRAL)
+            
+            if value is None:
+                # Handle missing value based on persona's missing_behavior
+                if behavior == MissingBehavior.EXCLUDE:
+                    continue  # Skip, don't include weight in total
+                elif behavior == MissingBehavior.NEGATIVE:
+                    value = 0.0  # Treat missing as worst case
+                elif behavior == MissingBehavior.POSITIVE:
+                    value = 1.0  # Treat missing as best case
+                else:  # NEUTRAL
+                    value = 0.5  # Treat missing as average
+            
+            total_score += weight * value
+            total_weight += weight
+        
+        # Normalize by total active weight (handles EXCLUDE behavior)
+        if total_weight > 0:
+            return total_score / total_weight
+        return 0.5  # Default if no features available
     
     def compute_scores_for_all_personas(
         self,
