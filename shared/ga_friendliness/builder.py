@@ -24,7 +24,7 @@ from .models import (
 )
 from .ontology import OntologyManager
 from .personas import PersonaManager
-from .sources import AirfieldDirectorySource, AirportJsonDirectorySource
+from .sources import AirfieldDirectorySource, AirportJsonDirectorySource, AirportsDatabaseSource
 from .storage import GAMetaStorage
 
 # Optional imports for NLP components
@@ -146,6 +146,7 @@ class GAFriendlinessBuilder:
         since: Optional[datetime] = None,
         icaos: Optional[List[str]] = None,
         resume: bool = False,
+        airports_db: Optional[AirportsDatabaseSource] = None,
     ) -> BuildResult:
         """
         Build GA friendliness database from reviews.
@@ -156,6 +157,7 @@ class GAFriendlinessBuilder:
             since: Only process reviews after this date
             icaos: Optional list of specific ICAOs to process
             resume: Resume from last successful ICAO
+            airports_db: Optional AirportsDatabaseSource for IFR/hotel/restaurant data
         
         Returns:
             BuildResult with metrics and status
@@ -210,7 +212,7 @@ class GAFriendlinessBuilder:
                                 continue
                         
                         # Process airport
-                        self._process_airport(icao, reviews, review_source)
+                        self._process_airport(icao, reviews, review_source, airports_db)
                         
                         self._metrics.successful_airports += 1
                         self._metrics.total_reviews += len(reviews)
@@ -271,6 +273,7 @@ class GAFriendlinessBuilder:
         icao: str,
         reviews: List[RawReview],
         source: ReviewSource,
+        airports_db: Optional[AirportsDatabaseSource] = None,
     ) -> None:
         """
         Process a single airport's reviews.
@@ -279,8 +282,9 @@ class GAFriendlinessBuilder:
             1. Extract tags from reviews
             2. Aggregate tags into distributions
             3. Map distributions to feature scores
-            4. Generate summary
-            5. Write to database
+            4. Get airport metadata from airports.db (if available)
+            5. Generate summary
+            6. Write to database
         """
         logger.debug(f"Processing airport {icao} with {len(reviews)} reviews")
         
@@ -308,10 +312,23 @@ class GAFriendlinessBuilder:
         if self._aggregator and extractions:
             distributions, context = self._aggregator.aggregate_tags(extractions)
         
-        # Compute feature scores
-        # Check for IFR procedures (would come from euro_aip in production)
-        ifr_available = False  # Default, would be queried from AIP
+        # Get airport metadata from airports.db (IFR score, hotel, restaurant)
+        ifr_score = 0  # Default: IFR not available
+        ifr_available = False
+        hotel_info = None
+        restaurant_info = None
         
+        if airports_db:
+            try:
+                metadata = airports_db.get_airport_metadata(icao)
+                ifr_score = metadata.get("ifr_score", 0)
+                ifr_available = metadata.get("ifr_permitted", False)
+                hotel_info = metadata.get("hotel_info")
+                restaurant_info = metadata.get("restaurant_info")
+            except Exception as e:
+                logger.warning(f"Failed to get airports.db metadata for {icao}: {e}")
+        
+        # Compute feature scores
         feature_scores = self.feature_mapper.compute_feature_scores(
             icao=icao,
             distributions=distributions,
@@ -360,7 +377,10 @@ class GAFriendlinessBuilder:
             fee_currency=fee_currency,
             mandatory_handling=False,
             ifr_procedure_available=ifr_available,
+            ifr_score=ifr_score,
             night_available=False,
+            hotel_info=hotel_info,
+            restaurant_info=restaurant_info,
             ga_cost_score=feature_scores.ga_cost_score,
             ga_review_score=feature_scores.ga_review_score,
             ga_hassle_score=feature_scores.ga_hassle_score,

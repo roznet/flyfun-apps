@@ -75,10 +75,15 @@ def create_schema(conn: sqlite3.Connection) -> None:
             fee_currency        TEXT,
             fee_last_updated_utc TEXT,
             
-            -- Binary/boolean-style flags
+            -- Binary/boolean-style flags and IFR capabilities
             mandatory_handling  INTEGER,
             ifr_procedure_available INTEGER,
+            ifr_score           INTEGER,  -- 0=no IFR, 1=IFR permitted, 2=VOR/NDB, 3=RNP, 4=ILS
             night_available     INTEGER,
+            
+            -- AIP metadata (from airports.db)
+            hotel_info          TEXT,
+            restaurant_info     TEXT,
             
             -- Normalized feature scores (0.0-1.0)
             ga_cost_score       REAL,

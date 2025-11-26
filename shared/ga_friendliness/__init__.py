@@ -134,6 +134,7 @@ from .sources import (
     AirfieldDirectorySource,
     AirportJsonDirectorySource,
     CompositeReviewSource,
+    AirportsDatabaseSource,
 )
 
 # --- Features ---
@@ -218,6 +219,7 @@ __all__ = [
     "AirfieldDirectorySource",
     "AirportJsonDirectorySource",
     "CompositeReviewSource",
+    "AirportsDatabaseSource",
     # Features
     "FeatureMapper",
     "AIRCRAFT_MTOW_MAP",

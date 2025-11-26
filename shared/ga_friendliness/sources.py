@@ -666,3 +666,181 @@ class CompositeReviewSource(ReviewSource):
         source_names = [s.get_source_name() for s in self.sources]
         return f"composite({', '.join(source_names)})"
 
+
+class AirportsDatabaseSource:
+    """
+    Extract airport metadata from euro_aip airports.db.
+    
+    Provides:
+        - IFR score (0-4) based on traffic type and available procedures
+        - Hotel availability info
+        - Restaurant availability info
+    
+    This is NOT a ReviewSource - it provides supplementary airport metadata.
+    """
+    
+    # Standard field IDs from aip_entries
+    STD_FIELD_IFR_VFR = 207      # Type of Traffic permitted (IFR/VFR)
+    STD_FIELD_HOTEL = 501        # Hotels
+    STD_FIELD_RESTAURANT = 502   # Restaurants
+    
+    # IFR score values
+    IFR_SCORE_NOT_PERMITTED = 0  # IFR not in traffic type
+    IFR_SCORE_PERMITTED = 1      # IFR permitted but no procedures
+    IFR_SCORE_BASIC = 2          # Has VOR/NDB/LOC procedures
+    IFR_SCORE_RNP = 3            # Has RNP/RNAV procedures
+    IFR_SCORE_ILS = 4            # Has ILS procedures
+    
+    def __init__(self, db_path: Path):
+        """
+        Initialize airports database source.
+        
+        Args:
+            db_path: Path to airports.db SQLite database
+        """
+        self.db_path = Path(db_path)
+        self._conn = None
+        self._cache: Dict[str, Dict] = {}
+    
+    def _get_connection(self):
+        """Get or create database connection."""
+        if self._conn is None:
+            import sqlite3
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"Airports database not found: {self.db_path}")
+            self._conn = sqlite3.connect(self.db_path)
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+    
+    def close(self):
+        """Close database connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+    
+    def _get_aip_field(self, icao: str, std_field_id: int) -> Optional[str]:
+        """Get a specific AIP field value for an airport."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT value FROM aip_entries 
+            WHERE airport_icao = ? AND std_field_id = ?
+            ORDER BY source_priority DESC
+            LIMIT 1
+            """,
+            (icao.upper(), std_field_id)
+        )
+        row = cursor.fetchone()
+        return row["value"] if row else None
+    
+    def _is_ifr_permitted(self, icao: str) -> bool:
+        """Check if IFR traffic is permitted at the airport."""
+        value = self._get_aip_field(icao, self.STD_FIELD_IFR_VFR)
+        if not value:
+            return False
+        # Check if "IFR" appears in the traffic type
+        return "IFR" in value.upper()
+    
+    def _get_best_approach_type(self, icao: str) -> Optional[str]:
+        """
+        Get the best approach type available at the airport.
+        
+        Returns: 'ILS', 'RNP', 'RNAV', 'VOR', 'NDB', 'LOC', or None
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT DISTINCT approach_type FROM procedures 
+            WHERE airport_icao = ? AND approach_type IS NOT NULL AND approach_type != ''
+            """,
+            (icao.upper(),)
+        )
+        approach_types = {row["approach_type"].upper() for row in cursor}
+        
+        if not approach_types:
+            return None
+        
+        # Return best available (ILS > RNP/RNAV > others)
+        if "ILS" in approach_types:
+            return "ILS"
+        if "RNP" in approach_types or "RNAV" in approach_types:
+            return "RNP"
+        # Return first available
+        return next(iter(approach_types))
+    
+    def get_ifr_score(self, icao: str) -> int:
+        """
+        Calculate IFR score for an airport (0-4).
+        
+        Scoring:
+            0 = IFR not permitted (field 207 doesn't contain "IFR")
+            1 = IFR permitted but no published procedures
+            2 = Has basic procedures (VOR, NDB, LOC)
+            3 = Has RNP/RNAV procedures
+            4 = Has ILS procedures
+        
+        Args:
+            icao: Airport ICAO code
+            
+        Returns:
+            IFR score from 0 to 4
+        """
+        if not self._is_ifr_permitted(icao):
+            return self.IFR_SCORE_NOT_PERMITTED
+        
+        best_approach = self._get_best_approach_type(icao)
+        
+        if best_approach is None:
+            return self.IFR_SCORE_PERMITTED
+        elif best_approach == "ILS":
+            return self.IFR_SCORE_ILS
+        elif best_approach in ("RNP", "RNAV"):
+            return self.IFR_SCORE_RNP
+        else:
+            return self.IFR_SCORE_BASIC
+    
+    def get_hotel_info(self, icao: str) -> Optional[str]:
+        """Get hotel availability info for an airport."""
+        return self._get_aip_field(icao, self.STD_FIELD_HOTEL)
+    
+    def get_restaurant_info(self, icao: str) -> Optional[str]:
+        """Get restaurant availability info for an airport."""
+        return self._get_aip_field(icao, self.STD_FIELD_RESTAURANT)
+    
+    def get_airport_metadata(self, icao: str) -> Dict[str, Any]:
+        """
+        Get all relevant metadata for an airport.
+        
+        Returns dict with:
+            - ifr_score: int (0-4)
+            - ifr_permitted: bool
+            - best_approach_type: str or None
+            - hotel_info: str or None
+            - restaurant_info: str or None
+        """
+        icao = icao.upper()
+        
+        # Check cache
+        if icao in self._cache:
+            return self._cache[icao]
+        
+        ifr_permitted = self._is_ifr_permitted(icao)
+        best_approach = self._get_best_approach_type(icao) if ifr_permitted else None
+        
+        metadata = {
+            "ifr_score": self.get_ifr_score(icao),
+            "ifr_permitted": ifr_permitted,
+            "best_approach_type": best_approach,
+            "hotel_info": self.get_hotel_info(icao),
+            "restaurant_info": self.get_restaurant_info(icao),
+        }
+        
+        self._cache[icao] = metadata
+        return metadata
+    
+    def get_all_icaos(self) -> Set[str]:
+        """Get all ICAO codes in the database."""
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT DISTINCT icao_code FROM airports WHERE icao_code IS NOT NULL")
+        return {row["icao_code"] for row in cursor}
+

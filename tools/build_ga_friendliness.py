@@ -39,6 +39,7 @@ from shared.ga_friendliness import (
     AirportJsonDirectorySource,
     CSVReviewSource,
     CompositeReviewSource,
+    AirportsDatabaseSource,
 )
 from shared.ga_friendliness.builder import GAFriendlinessBuilder
 
@@ -73,6 +74,11 @@ def parse_args() -> argparse.Namespace:
         "--json-dir",
         type=Path,
         help="Directory containing per-airport JSON files (e.g., EGTF.json)",
+    )
+    source_group.add_argument(
+        "--airports-db",
+        type=Path,
+        help="Path to airports.db for IFR/hotel/restaurant metadata",
     )
     
     # Output options
@@ -261,6 +267,15 @@ def main() -> int:
         
         return 0
     
+    # Create airports database source if provided
+    airports_db_source = None
+    if args.airports_db:
+        if not args.airports_db.exists():
+            logger.error(f"Airports database not found: {args.airports_db}")
+            return 1
+        airports_db_source = AirportsDatabaseSource(args.airports_db)
+        logger.info(f"Using airports database: {args.airports_db}")
+    
     # Create builder
     builder = GAFriendlinessBuilder(settings=settings)
     
@@ -272,6 +287,7 @@ def main() -> int:
             since=since_dt,
             icaos=icaos,
             resume=args.resume,
+            airports_db=airports_db_source,
         )
         
         # Print summary

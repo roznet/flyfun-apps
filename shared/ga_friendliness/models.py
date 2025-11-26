@@ -259,13 +259,27 @@ class AirportStats(BaseModel):
     )
     fee_currency: Optional[str] = Field(default=None, description="Currency code")
 
-    # Binary flags
+    # Binary flags and IFR capabilities
     mandatory_handling: bool = Field(default=False)
     ifr_procedure_available: bool = Field(
         default=False,
         description="True if airport has instrument approach procedures (ILS, RNAV, VOR, etc.)",
     )
+    ifr_score: int = Field(
+        default=0,
+        ge=0,
+        le=4,
+        description="IFR capability score: 0=no IFR, 1=IFR permitted, 2=basic (VOR/NDB), 3=RNP, 4=ILS",
+    )
     night_available: bool = Field(default=False)
+    
+    # AIP metadata (from airports.db)
+    hotel_info: Optional[str] = Field(
+        default=None, description="Hotel availability info from AIP"
+    )
+    restaurant_info: Optional[str] = Field(
+        default=None, description="Restaurant availability info from AIP"
+    )
 
     # Feature scores (all normalized [0, 1])
     ga_cost_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)

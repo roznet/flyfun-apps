@@ -112,12 +112,13 @@ class GAMetaStorage(StorageInterface):
                         fee_band_0_749kg, fee_band_750_1199kg, fee_band_1200_1499kg,
                         fee_band_1500_1999kg, fee_band_2000_3999kg, fee_band_4000_plus_kg,
                         fee_currency,
-                        mandatory_handling, ifr_procedure_available, night_available,
+                        mandatory_handling, ifr_procedure_available, ifr_score, night_available,
+                        hotel_info, restaurant_info,
                         ga_cost_score, ga_review_score, ga_hassle_score,
                         ga_ops_ifr_score, ga_ops_vfr_score, ga_access_score,
                         ga_fun_score, ga_hospitality_score, notification_hassle_score,
                         source_version, scoring_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     stats.icao,
                     stats.rating_avg,
@@ -132,7 +133,10 @@ class GAMetaStorage(StorageInterface):
                     stats.fee_currency,
                     1 if stats.mandatory_handling else 0,
                     1 if stats.ifr_procedure_available else 0,
+                    stats.ifr_score,
                     1 if stats.night_available else 0,
+                    stats.hotel_info,
+                    stats.restaurant_info,
                     stats.ga_cost_score,
                     stats.ga_review_score,
                     stats.ga_hassle_score,
@@ -174,7 +178,10 @@ class GAMetaStorage(StorageInterface):
                 fee_currency=row["fee_currency"],
                 mandatory_handling=bool(row["mandatory_handling"]),
                 ifr_procedure_available=bool(row["ifr_procedure_available"]),
+                ifr_score=row["ifr_score"] or 0,
                 night_available=bool(row["night_available"]),
+                hotel_info=row["hotel_info"],
+                restaurant_info=row["restaurant_info"],
                 ga_cost_score=row["ga_cost_score"],
                 ga_review_score=row["ga_review_score"],
                 ga_hassle_score=row["ga_hassle_score"],
