@@ -123,6 +123,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force refresh of cached data",
     )
+    proc_group.add_argument(
+        "--parse-notifications",
+        action="store_true",
+        help="Parse AIP notification rules (requires --airports-db)",
+    )
     
     # LLM options
     llm_group = parser.add_argument_group("LLM options")
@@ -206,8 +211,7 @@ def create_source(args: argparse.Namespace) -> "ReviewSource":
         ))
     
     if not sources:
-        logger.error("No source specified. Use --export, --csv, or --json-dir")
-        sys.exit(1)
+        return None  # Allow running notification-only mode
     
     if len(sources) == 1:
         return sources[0]
@@ -247,14 +251,24 @@ def main() -> int:
         source_version=f"build-{datetime.now().strftime('%Y%m%d')}",
     )
     
-    # Create source
+    # Create source (may be None for notification-only mode)
     source = create_source(args)
     
-    logger.info(f"Source: {source.get_source_name()}")
-    logger.info(f"Output: {args.output}")
-    logger.info(f"Incremental: {args.incremental}")
+    # Check if we're in notification-only mode
+    notification_only = source is None and args.parse_notifications and args.airports_db
     
-    if args.dry_run:
+    if source is None and not notification_only:
+        logger.error("No source specified. Use --export, --csv, or --json-dir")
+        logger.error("Or use --parse-notifications with --airports-db for notification-only mode")
+        return 1
+    
+    if source:
+        logger.info(f"Source: {source.get_source_name()}")
+    logger.info(f"Output: {args.output}")
+    if not notification_only:
+        logger.info(f"Incremental: {args.incremental}")
+    
+    if args.dry_run and source:
         # Just show what would be done
         icaos_to_process = source.get_icaos()
         if icaos:
@@ -275,6 +289,50 @@ def main() -> int:
             return 1
         airports_db_source = AirportsDatabaseSource(args.airports_db)
         logger.info(f"Using airports database: {args.airports_db}")
+    
+    # Handle notification-only mode
+    if notification_only:
+        logger.info("Running in notification-only mode (no review processing)")
+        
+        # Ensure database and schema exist
+        from shared.ga_friendliness.database import get_connection, ensure_schema_version
+        conn = get_connection(args.output)
+        ensure_schema_version(conn)
+        conn.close()
+        
+        # Parse notifications
+        try:
+            from shared.ga_notification_agent import NotificationScorer
+            
+            logger.info("Parsing notification rules from airports.db...")
+            notification_scorer = NotificationScorer()
+            
+            # Score notifications
+            scores, parsed_rules = notification_scorer.load_and_score_from_airports_db(
+                args.airports_db,
+                icaos=icaos,
+                return_parsed=True,
+            )
+            
+            # Write to database
+            updated = notification_scorer.write_to_ga_meta(
+                args.output,
+                scores,
+                parsed_rules=parsed_rules,
+            )
+            
+            print("\n" + "=" * 60)
+            print("NOTIFICATION PARSING SUMMARY")
+            print("=" * 60)
+            print(f"Airports parsed: {len(scores)}")
+            print(f"Rules stored: {sum(len(p.rules) for p in parsed_rules.values())}")
+            print(f"Airports updated: {updated}")
+            
+            return 0
+            
+        except Exception as e:
+            logger.exception(f"Notification parsing failed: {e}")
+            return 1
     
     # Create builder
     builder = GAFriendlinessBuilder(settings=settings)
@@ -310,6 +368,43 @@ def main() -> int:
                 print(f"  - {error}")
             if len(result.metrics.errors) > 10:
                 print(f"  ... and {len(result.metrics.errors) - 10} more")
+        
+        # Parse notification rules if requested
+        if args.parse_notifications:
+            if not args.airports_db:
+                logger.error("--parse-notifications requires --airports-db")
+                return 1
+            
+            try:
+                from shared.ga_notification_agent import NotificationScorer
+                
+                logger.info("Parsing notification rules from airports.db...")
+                notification_scorer = NotificationScorer()
+                
+                # Get ICAOs to process (either specified or from build results)
+                notification_icaos = icaos if icaos else None
+                
+                # Score notifications (also get parsed rules for detailed storage)
+                scores, parsed_rules = notification_scorer.load_and_score_from_airports_db(
+                    args.airports_db,
+                    icaos=notification_icaos,
+                    return_parsed=True,
+                )
+                
+                # Write to ga_meta.sqlite (including detailed rules)
+                updated = notification_scorer.write_to_ga_meta(
+                    args.output,
+                    scores,
+                    parsed_rules=parsed_rules,
+                )
+                
+                logger.info(f"Updated {updated} airports with notification scores")
+                print(f"Notification scores: {len(scores)} parsed, {updated} updated")
+                
+            except ImportError as e:
+                logger.error(f"Notification agent not available: {e}")
+            except Exception as e:
+                logger.error(f"Notification parsing failed: {e}")
         
         # Save metrics if requested
         if args.metrics_output:
