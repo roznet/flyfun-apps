@@ -36,6 +36,7 @@ from shared.ga_friendliness import (
     get_settings,
     BuildResult,
     AirfieldDirectorySource,
+    AirportJsonDirectorySource,
     CSVReviewSource,
     CompositeReviewSource,
 )
@@ -67,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         "--csv",
         type=Path,
         help="Path to CSV file with reviews",
+    )
+    source_group.add_argument(
+        "--json-dir",
+        type=Path,
+        help="Directory containing per-airport JSON files (e.g., EGTF.json)",
     )
     
     # Output options
@@ -183,8 +189,18 @@ def create_source(args: argparse.Namespace) -> "ReviewSource":
         
         sources.append(CSVReviewSource(args.csv))
     
+    if args.json_dir:
+        if not args.json_dir.exists():
+            logger.error(f"JSON directory not found: {args.json_dir}")
+            sys.exit(1)
+        
+        sources.append(AirportJsonDirectorySource(
+            directory=args.json_dir,
+            filter_ai_generated=True,
+        ))
+    
     if not sources:
-        logger.error("No source specified. Use --export or --csv")
+        logger.error("No source specified. Use --export, --csv, or --json-dir")
         sys.exit(1)
     
     if len(sources) == 1:

@@ -325,6 +325,275 @@ class AirfieldDirectorySource(ReviewSource, CachedDataLoader):
         return "airfield.directory"
 
 
+class AirportJsonDirectorySource(ReviewSource):
+    """
+    Load airport data from individual JSON files in a directory.
+    
+    Each JSON file follows the airfield.directory per-airport format:
+    {
+        "airfield": { "data": { "icao": "EGTF", ... } },
+        "aerops": { "data": { "landing_fees": {...}, "currency": "EUR" } },
+        "pireps": { "data": [ { "id": "...", "content": {...}, ... } ] }
+    }
+    
+    This source also extracts fee data which can be used for cost scoring.
+    """
+    
+    # Aircraft type to MTOW mapping for fee band assignment
+    AIRCRAFT_MTOW_MAP: Dict[str, int] = {
+        # Light singles
+        "c172": 1157,      # Cessna 172
+        "pa28": 1111,      # Piper PA-28
+        "c152": 757,       # Cessna 152
+        "c182": 1406,      # Cessna 182
+        "a210": 1814,      # Cessna 210 (alternative key)
+        
+        # High performance singles
+        "sr22": 1633,      # Cirrus SR22
+        "c210": 1814,      # Cessna 210
+        "m20": 1315,       # Mooney M20
+        "pa32": 1542,      # Piper PA-32
+        
+        # Light twins
+        "pa34": 2155,      # Piper Seneca
+        "be76": 1769,      # Beech Duchess
+        "da42": 1785,      # Diamond DA42
+        
+        # Turboprops
+        "tbm850": 3354,    # TBM 850
+        "tbm85": 3354,     # TBM 850 (alternative)
+        "tbm9": 3354,      # TBM 900 series
+        "pc12": 4740,      # Pilatus PC-12
+        
+        # Jets
+        "c510": 4536,      # Cessna Citation Mustang
+        "c525": 5670,      # Citation CJ series
+    }
+    
+    # Fee bands (MTOW ranges in kg)
+    FEE_BANDS = [
+        (0, 749, "fee_band_0_749kg"),
+        (750, 1199, "fee_band_750_1199kg"),
+        (1200, 1499, "fee_band_1200_1499kg"),
+        (1500, 1999, "fee_band_1500_1999kg"),
+        (2000, 3999, "fee_band_2000_3999kg"),
+        (4000, 99999, "fee_band_4000_plus_kg"),
+    ]
+
+    def __init__(
+        self,
+        directory: Path,
+        filter_ai_generated: bool = True,
+        preferred_language: str = "EN",
+        file_pattern: str = "*.json",
+    ):
+        """
+        Initialize directory source.
+        
+        Args:
+            directory: Directory containing per-airport JSON files
+            filter_ai_generated: Whether to filter out AI-generated reviews
+            preferred_language: Preferred language for reviews
+            file_pattern: Glob pattern for JSON files
+        """
+        self.directory = Path(directory)
+        self.filter_ai_generated = filter_ai_generated
+        self.preferred_language = preferred_language
+        self.file_pattern = file_pattern
+        
+        self._reviews: Optional[List[RawReview]] = None
+        self._reviews_by_icao: Optional[Dict[str, List[RawReview]]] = None
+        self._airport_data: Optional[Dict[str, Dict]] = None
+        self._fee_data: Optional[Dict[str, Dict]] = None
+
+    def _get_fee_band(self, mtow_kg: int) -> str:
+        """Get fee band name for a given MTOW."""
+        for min_kg, max_kg, band_name in self.FEE_BANDS:
+            if min_kg <= mtow_kg <= max_kg:
+                return band_name
+        return "fee_band_4000_plus_kg"
+
+    def _parse_airport_file(self, file_path: Path) -> Optional[Dict]:
+        """Parse a single airport JSON file."""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to parse {file_path}: {e}")
+            return None
+
+    def _load_data(self) -> None:
+        """Load all airport data from directory."""
+        if self._reviews is not None:
+            return
+
+        self._reviews = []
+        self._reviews_by_icao = {}
+        self._airport_data = {}
+        self._fee_data = {}
+
+        if not self.directory.exists():
+            raise FileNotFoundError(f"Directory not found: {self.directory}")
+
+        json_files = list(self.directory.glob(self.file_pattern))
+        logger.info(f"Found {len(json_files)} JSON files in {self.directory}")
+
+        for file_path in json_files:
+            data = self._parse_airport_file(file_path)
+            if not data:
+                continue
+
+            # Get ICAO from airfield data or filename
+            icao = None
+            airfield_data = data.get("airfield", {}).get("data", {})
+            if airfield_data:
+                icao = airfield_data.get("icao", "").upper()
+            
+            if not icao:
+                # Try to get from filename (e.g., EGTF.json)
+                icao = file_path.stem.upper()
+                if len(icao) != 4:
+                    continue
+
+            self._airport_data[icao] = data
+
+            # Parse pireps
+            pireps_data = data.get("pireps", {}).get("data", [])
+            for pirep in pireps_data:
+                # Filter AI-generated reviews if configured
+                if self.filter_ai_generated and pirep.get("ai_generated", False):
+                    continue
+
+                # Get the review text
+                content = pirep.get("content", {})
+                if isinstance(content, str):
+                    text = content
+                else:
+                    # Try preferred language first, then English, then any available
+                    text = content.get(self.preferred_language) or content.get("EN") or ""
+                    if not text and content:
+                        text = next(iter(content.values()), "")
+                
+                text = text.strip()
+                if not text:
+                    continue
+
+                review = RawReview(
+                    icao=icao,
+                    review_text=text,
+                    review_id=pirep.get("id"),
+                    rating=pirep.get("rating"),
+                    timestamp=pirep.get("created_at") or pirep.get("updated_at"),
+                    language=pirep.get("language", self.preferred_language),
+                    ai_generated=pirep.get("ai_generated", False),
+                    source="airfield.directory.json",
+                )
+                
+                self._reviews.append(review)
+                
+                if icao not in self._reviews_by_icao:
+                    self._reviews_by_icao[icao] = []
+                self._reviews_by_icao[icao].append(review)
+
+            # Parse aerops fee data
+            aerops = data.get("aerops") or {}
+            aerops_data = aerops.get("data") or {}
+            if aerops_data:
+                self._parse_fees(icao, aerops_data)
+
+        logger.info(
+            f"Parsed {len(self._reviews)} reviews from {len(self._reviews_by_icao)} airports, "
+            f"{len(self._fee_data)} airports with fee data"
+        )
+
+    def _parse_fees(self, icao: str, aerops_data: Dict) -> None:
+        """Parse fee data and aggregate by fee band."""
+        landing_fees = aerops_data.get("landing_fees", {})
+        if not landing_fees:
+            return
+
+        currency = aerops_data.get("currency", "EUR")
+        fees_last_changed = aerops_data.get("fees_last_changed")
+
+        # Aggregate fees by band
+        fee_bands: Dict[str, List[float]] = {}
+        
+        for aircraft_type, fees in landing_fees.items():
+            aircraft_key = aircraft_type.lower()
+            mtow = self.AIRCRAFT_MTOW_MAP.get(aircraft_key)
+            
+            if mtow is None:
+                logger.debug(f"Unknown aircraft type: {aircraft_type}")
+                continue
+
+            band = self._get_fee_band(mtow)
+            
+            # Get the net price from the fee data
+            if isinstance(fees, list) and fees:
+                fee_entry = fees[0]
+                net_price = fee_entry.get("netPrice") or fee_entry.get("netprice")
+                if net_price:
+                    try:
+                        price = float(net_price)
+                        if band not in fee_bands:
+                            fee_bands[band] = []
+                        fee_bands[band].append(price)
+                    except (ValueError, TypeError):
+                        pass
+
+        # Average fees for each band
+        if fee_bands:
+            self._fee_data[icao] = {
+                "currency": currency,
+                "fees_last_changed": fees_last_changed,
+                "bands": {
+                    band: sum(prices) / len(prices)
+                    for band, prices in fee_bands.items()
+                }
+            }
+
+    def get_reviews(self) -> List[RawReview]:
+        """Get all reviews from the source."""
+        self._load_data()
+        return self._reviews or []
+
+    def get_reviews_for_icao(self, icao: str) -> List[RawReview]:
+        """Get reviews for a specific airport."""
+        self._load_data()
+        return self._reviews_by_icao.get(icao.upper(), [])
+
+    def get_icaos(self) -> Set[str]:
+        """Get all ICAO codes in the source."""
+        self._load_data()
+        return set(self._reviews_by_icao.keys()) if self._reviews_by_icao else set()
+
+    def get_airport_data(self, icao: str) -> Optional[Dict]:
+        """Get full airport data including airfield info and aerops."""
+        self._load_data()
+        return self._airport_data.get(icao.upper())
+
+    def get_fee_data(self, icao: str) -> Optional[Dict]:
+        """
+        Get parsed fee data for an airport.
+        
+        Returns dict with:
+            - currency: Currency code (e.g., "GBP")
+            - fees_last_changed: Date string of last update
+            - bands: Dict mapping band names to average prices
+        """
+        self._load_data()
+        return self._fee_data.get(icao.upper())
+
+    def get_all_fee_data(self) -> Dict[str, Dict]:
+        """Get fee data for all airports."""
+        self._load_data()
+        return self._fee_data or {}
+
+    def get_source_name(self) -> str:
+        """Get the name/identifier of this source."""
+        return "airfield.directory.json"
+
+
 class CompositeReviewSource(ReviewSource):
     """
     Combine multiple review sources.

@@ -132,6 +132,7 @@ from .cache import CachedDataLoader
 from .sources import (
     CSVReviewSource,
     AirfieldDirectorySource,
+    AirportJsonDirectorySource,
     CompositeReviewSource,
 )
 
@@ -215,6 +216,7 @@ __all__ = [
     # Sources
     "CSVReviewSource",
     "AirfieldDirectorySource",
+    "AirportJsonDirectorySource",
     "CompositeReviewSource",
     # Features
     "FeatureMapper",

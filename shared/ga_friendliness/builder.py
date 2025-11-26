@@ -24,7 +24,7 @@ from .models import (
 )
 from .ontology import OntologyManager
 from .personas import PersonaManager
-from .sources import AirfieldDirectorySource
+from .sources import AirfieldDirectorySource, AirportJsonDirectorySource
 from .storage import GAMetaStorage
 
 # Optional imports for NLP components
@@ -323,7 +323,15 @@ class GAFriendlinessBuilder:
         
         # Get fee data if source supports it
         fee_bands: Dict[str, Optional[float]] = {}
-        if isinstance(source, AirfieldDirectorySource):
+        fee_currency = "EUR"  # Default
+        
+        if isinstance(source, AirportJsonDirectorySource):
+            # AirportJsonDirectorySource has pre-aggregated fee data
+            fee_data = source.get_fee_data(icao)
+            if fee_data:
+                fee_bands = fee_data.get("bands", {})
+                fee_currency = fee_data.get("currency", "EUR")
+        elif isinstance(source, AirfieldDirectorySource):
             airport_data = source.get_airport_data(icao)
             if airport_data and "aerops" in airport_data:
                 fee_bands = aggregate_fees_by_band(airport_data["aerops"])
@@ -349,7 +357,7 @@ class GAFriendlinessBuilder:
             fee_band_1500_1999kg=fee_bands.get("fee_band_1500_1999kg"),
             fee_band_2000_3999kg=fee_bands.get("fee_band_2000_3999kg"),
             fee_band_4000_plus_kg=fee_bands.get("fee_band_4000_plus_kg"),
-            fee_currency="EUR",  # Default, would come from source
+            fee_currency=fee_currency,
             mandatory_handling=False,
             ifr_procedure_available=ifr_available,
             night_available=False,
