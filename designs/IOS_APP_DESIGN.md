@@ -108,7 +108,7 @@ Features that may need to be added to RZFlight (enhance library, not app):
 **Why Latest Only:**
 - Use `@Observable` macro (no legacy `ObservableObject`)
 - Native `@Environment` injection
-- SwiftData for caching
+- File-based JSON caching (simple, no SwiftData)
 - Apple Intelligence integration for offline chatbot
 - Modern MapKit with `MapContentBuilder`
 - No backward compatibility complexity
@@ -183,8 +183,8 @@ Features that may need to be added to RZFlight (enhance library, not app):
 ├──────────────────────────────────────────────────────────────────┤
 │                     Core Services                                 │
 │  ┌────────────┐ ┌─────────────┐ ┌──────────────┐ ┌────────────┐ │
-│  │Connectivity│ │ SyncService │ │  SwiftData   │ │Preferences │ │
-│  │  Monitor   │ │             │ │   Cache      │ │            │ │
+│  │Connectivity│ │ SyncService │ │  File Cache  │ │Preferences │ │
+│  │  Monitor   │ │             │ │  (JSON)      │ │            │ │
 │  └────────────┘ └─────────────┘ └──────────────┘ └────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -229,7 +229,7 @@ enum ConnectivityMode: Equatable, Sendable {
 | `@Observable` | AppState - granular UI updates |
 | `@Environment` | Dependency injection |
 | `NavigationStack` | Programmatic navigation |
-| `SwiftData` | Caching API responses |
+| File Cache | JSON-based AIP caching |
 | `async/await` | All async operations |
 | `AsyncStream` | SSE streaming |
 | Apple Intelligence | Offline chatbot |
@@ -430,6 +430,21 @@ final class LocalAirportDataSource: AirportRepositoryProtocol {
         return knownAirports.airportWithExtendedData(icao: icao)
     }
     
+    func airportsNearLocation(center: CLLocationCoordinate2D, radiusNm: Int, filters: FilterConfig) async throws -> [Airport] {
+        // Use KnownAirports KDTree-based spatial query
+        let nearbyAirports = knownAirports.nearest(coord: center, count: 100)
+        
+        // Filter by actual distance (KDTree returns approximate nearest, verify with haversine)
+        let radiusMeters = Double(radiusNm) * 1852.0
+        let filtered = nearbyAirports.filter { airport in
+            let distance = center.distance(to: airport.coord)
+            return distance <= radiusMeters
+        }
+        
+        // Apply additional filters
+        return applyInMemoryFilters(filters, to: filtered)
+    }
+    
     // MARK: - In-Memory Filtering (No DB Access)
     
     func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [Airport] {
@@ -454,7 +469,23 @@ final class LocalAirportDataSource: AirportRepositoryProtocol {
         return result
     }
     
-    // ... other methods
+    // MARK: - Extended Data
+    
+    func countryRules(for countryCode: String) async throws -> CountryRules? {
+        // Load from bundled rules.json or query DB
+        return nil  // TODO: Implement
+    }
+    
+    func availableCountries() async throws -> [String] {
+        // Get unique countries from DB
+        let countries = Set(knownAirports.known.values.compactMap(\.country))
+        return countries.sorted()
+    }
+    
+    func filterMetadata() async throws -> FilterMetadata {
+        // Return filter options available in DB
+        FilterMetadata()  // TODO: Implement
+    }
 }
 ```
 
@@ -678,13 +709,17 @@ extension Runway {
 ### 2.4 Unified Repository
 
 ```swift
+import RZUtilsSwift
+
 /// Main repository that switches between offline/online sources
-final class AirportRepository: AirportRepositoryProtocol, ObservableObject {
-    @Published private(set) var connectivityMode: ConnectivityMode = .offline
+@Observable
+final class AirportRepository: AirportRepositoryProtocol {
+    private(set) var connectivityMode: ConnectivityMode = .offline
     
     private let localDataSource: LocalAirportDataSource
     private let remoteDataSource: RemoteAirportDataSource
     private let connectivityMonitor: ConnectivityMonitor
+    private let log = RZSLog(AirportRepository.self)
     
     private var activeSource: AirportRepositoryProtocol {
         switch connectivityMode {
@@ -694,9 +729,11 @@ final class AirportRepository: AirportRepositoryProtocol, ObservableObject {
     }
     
     func getAirports(filters: FilterConfig, limit: Int) async throws -> [Airport] {
+        log.debug("getAirports: mode=\(connectivityMode), filters=\(filters)")
         do {
             return try await activeSource.getAirports(filters: filters, limit: limit)
         } catch {
+            log.warning("Remote failed, falling back to local: \(error)")
             // Fallback to local on network error (hybrid mode)
             if connectivityMode == .hybrid {
                 return try await localDataSource.getAirports(filters: filters, limit: limit)
@@ -1921,9 +1958,83 @@ final class NavigationDomain {
 }
 ```
 
+#### AppError
+
+```swift
+import Foundation
+
+/// Unified error type for the app
+/// Provides user-friendly messages and logging context
+enum AppError: LocalizedError, Equatable {
+    // Data errors
+    case databaseOpenFailed(path: String)
+    case databaseCorrupted
+    case airportNotFound(icao: String)
+    case syncFailed(reason: String)
+    case incompatibleSchema(server: Int, app: Int)
+    
+    // Network errors
+    case networkUnavailable
+    case serverError(statusCode: Int)
+    case apiDecodingFailed(endpoint: String)
+    case timeout
+    
+    // Chat errors
+    case chatStreamFailed
+    case toolExecutionFailed(tool: String)
+    
+    // General
+    case unknown(message: String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .databaseOpenFailed: return "Could not open airport database"
+        case .databaseCorrupted: return "Airport database is corrupted"
+        case .airportNotFound(let icao): return "Airport \(icao) not found"
+        case .syncFailed(let reason): return "Database sync failed: \(reason)"
+        case .incompatibleSchema: return "Please update the app to use latest database"
+        case .networkUnavailable: return "No internet connection"
+        case .serverError(let code): return "Server error (\(code))"
+        case .apiDecodingFailed: return "Failed to parse server response"
+        case .timeout: return "Request timed out"
+        case .chatStreamFailed: return "Chat connection interrupted"
+        case .toolExecutionFailed(let tool): return "Could not execute \(tool)"
+        case .unknown(let msg): return msg
+        }
+    }
+    
+    var recoverySuggestion: String? {
+        switch self {
+        case .networkUnavailable: return "Check your internet connection and try again"
+        case .serverError, .timeout: return "Try again later"
+        case .syncFailed: return "You can continue using cached data"
+        case .incompatibleSchema: return "Visit the App Store to update"
+        default: return nil
+        }
+    }
+    
+    /// Create from any Error
+    init(from error: Error) {
+        if let appError = error as? AppError {
+            self = appError
+        } else if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet: self = .networkUnavailable
+            case .timedOut: self = .timeout
+            default: self = .unknown(message: urlError.localizedDescription)
+            }
+        } else {
+            self = .unknown(message: error.localizedDescription)
+        }
+    }
+}
+```
+
 #### SystemDomain
 
 ```swift
+import RZUtilsSwift
+
 /// Domain: Connectivity, loading, errors, app-wide concerns
 @Observable
 @MainActor
@@ -1931,6 +2042,7 @@ final class SystemDomain {
     
     // MARK: - Dependencies
     private let connectivityMonitor: ConnectivityMonitor
+    private let log = RZSLog(SystemDomain.self)
     
     // MARK: - State
     var connectivityMode: ConnectivityMode = .offline
@@ -1949,6 +2061,7 @@ final class SystemDomain {
         Task {
             for await mode in connectivityMonitor.modeStream {
                 self.connectivityMode = mode
+                log.info("Connectivity changed: \(mode)")
             }
         }
     }
@@ -1958,7 +2071,13 @@ final class SystemDomain {
     }
     
     func setError(_ error: Error?) {
-        self.error = error.map { AppError(from: $0) }
+        if let error = error {
+            let appError = AppError(from: error)
+            self.error = appError
+            log.error("App error: \(appError.localizedDescription)")
+        } else {
+            self.error = nil
+        }
     }
     
     func clearError() {
@@ -3642,7 +3761,7 @@ struct RegularLayout: View {
 | **AIP Entries** | Local DB | Enrichment source | API may provide newer entries; merge by timestamp |
 | **Country Rules** | Local DB (bundled JSON) | Read-only view | DB wins |
 | **GA Friendliness** | Local DB | Computed on server | Re-compute locally from DB or accept API values |
-| **User Preferences** | App (UserDefaults/SwiftData) | N/A | Local only |
+| **User Preferences** | App (UserDefaults/@AppStorage) | N/A | Local only |
 
 **Why DB is canonical:**
 - `KnownAirports` and RZFlight are built around SQLite
@@ -3764,35 +3883,78 @@ final class SyncService {
 - API data is used for display only, not persisted
 - Exception: AIP entries may be cached (see below)
 
-**AIP Entry Caching:**
+**AIP Entry Caching (File-Based):**
+
+Uses simple JSON file caching instead of SwiftData for simplicity:
+
 ```swift
+import RZUtilsSwift
+
 /// AIP entries from API can be cached for offline access
 /// These supplement (not replace) DB entries
+/// Uses file-based JSON caching (no SwiftData)
 final class AIPCache {
-    private let store: SwiftData.ModelContainer
+    private let cacheDirectory: URL
+    private let knownAirports: KnownAirports
+    private let log = RZSLog(AIPCache.self)
     
-    /// Cache API-fetched AIP entries
-    /// Keyed by airport ICAO + fetch timestamp
+    init(knownAirports: KnownAirports) {
+        self.knownAirports = knownAirports
+        self.cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appending(path: "aip_cache")
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+    }
+    
+    private func cacheURL(for icao: String) -> URL {
+        cacheDirectory.appending(path: "\(icao.uppercased()).json")
+    }
+    
+    /// Cache API-fetched AIP entries as JSON file
     func cache(entries: [AIPEntry], for icao: String) {
         let cached = CachedAIPEntries(
             icao: icao,
             entries: entries,
-            fetchedAt: Date(),
-            source: .api
+            fetchedAt: Date()
         )
-        store.insert(cached)
+        do {
+            let data = try JSONEncoder().encode(cached)
+            try data.write(to: cacheURL(for: icao))
+            log.info("Cached \(entries.count) AIP entries for \(icao)")
+        } catch {
+            log.error("Failed to cache AIP entries for \(icao): \(error)")
+        }
     }
     
     /// Get entries: prefer fresh API cache, fall back to DB
     func entries(for icao: String, maxAge: TimeInterval = 86400) -> [AIPEntry] {
-        // Check cache first (if fresh enough)
-        if let cached = getCached(icao: icao), 
+        // Check file cache first (if fresh enough)
+        if let cached = loadCached(icao: icao),
            cached.fetchedAt.timeIntervalSinceNow > -maxAge {
             return cached.entries
         }
         // Fall back to DB
         return knownAirports.airport(icao: icao)?.aipEntries ?? []
     }
+    
+    private func loadCached(icao: String) -> CachedAIPEntries? {
+        let url = cacheURL(for: icao)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(CachedAIPEntries.self, from: data)
+    }
+    
+    /// Clear all cached entries (for storage management)
+    func clearCache() {
+        try? FileManager.default.removeItem(at: cacheDirectory)
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        log.info("AIP cache cleared")
+    }
+}
+
+/// Cached AIP entries wrapper
+struct CachedAIPEntries: Codable {
+    let icao: String
+    let entries: [AIPEntry]
+    let fetchedAt: Date
 }
 ```
 
@@ -3929,7 +4091,7 @@ Caches (purgeable):
 
 | Platform | Version | Rationale |
 |----------|---------|-----------|
-| **iOS** | 18.0+ | `@Observable`, SwiftData, Apple Intelligence |
+| **iOS** | 18.0+ | `@Observable`, modern MapKit, Apple Intelligence |
 | **iPadOS** | 18.0+ | Same as iOS |
 | **macOS** | 15.0+ | Sequoia, native SwiftUI |
 | **Xcode** | 16.0+ | Swift 6, new concurrency |
@@ -3948,7 +4110,7 @@ Caches (purgeable):
 |-----------|---------|-------------|
 | **SwiftUI** | UI framework | 18.0+ |
 | **Observation** | `@Observable` macro | 17.0+ |
-| **SwiftData** | Caching, persistence | 17.0+ |
+| **OSLog** | Structured logging (via RZUtilsSwift) | 15.0+ |
 | **MapKit** | Map visualization | 18.0+ (new APIs) |
 | **Foundation** | Networking, async/await | 15.0+ |
 | **Apple Intelligence** | Offline chatbot | 18.1+ (device-dependent) |
@@ -3968,7 +4130,335 @@ Using latest Apple frameworks eliminates need for:
 
 ---
 
-## 11. Open Questions
+## 11. Logging & Crash Reporting
+
+### Logging Strategy
+
+Uses **RZUtilsSwift** logging (built on Apple's OSLog):
+
+```swift
+import RZUtilsSwift
+
+final class AirportRepository {
+    private let log = RZSLog(AirportRepository.self)
+    
+    func airports(matching filters: FilterConfig, limit: Int) async throws -> [Airport] {
+        log.info("Fetching airports: filters=\(filters), limit=\(limit)")
+        // ...
+        log.debug("Found \(results.count) airports")
+        return results
+    }
+}
+```
+
+**Log Levels:**
+
+| Level | Usage | Example |
+|-------|-------|---------|
+| `error` | Failures that affect functionality | DB open failed, API error |
+| `warning` | Recoverable issues | Cache miss, fallback used |
+| `info` | Significant events | App launch, sync complete, connectivity change |
+| `debug` | Development diagnostics | Query results, state changes |
+| `trace` | Verbose tracing | Method entry/exit (disabled in release) |
+
+**Log Categories:**
+
+```swift
+// Each component has its own category via RZSLog
+RZSLog(AirportRepository.self)   // "FlyFunEuroAIP.AirportRepository"
+RZSLog(ChatDomain.self)          // "FlyFunEuroAIP.ChatDomain"
+RZSLog(SyncService.self)         // "FlyFunEuroAIP.SyncService"
+```
+
+**Filtering in Console.app:**
+- Subsystem: `FlyFunEuroAIP`
+- Category: Component name
+
+### Crash Reporting
+
+Uses **Apple's native crash reporting** (no third-party SDK):
+
+1. **MetricKit** - Automatic crash and diagnostic collection
+2. **App Store Connect** - Crash reports via Xcode Organizer
+3. **TestFlight** - Crash feedback from beta testers
+
+```swift
+import MetricKit
+
+@main
+struct FlyFunEuroAIPApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
+    var body: some Scene { /* ... */ }
+}
+
+class AppDelegate: NSObject, UIApplicationDelegate, MXMetricManagerSubscriber {
+    
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Subscribe to MetricKit
+        MXMetricManager.shared.add(self)
+        return true
+    }
+    
+    func didReceive(_ payloads: [MXMetricPayload]) {
+        // Payloads include crash diagnostics
+        // These are automatically sent to App Store Connect
+        for payload in payloads {
+            // Optional: Log locally or send to custom analytics
+            RZSLog(AppDelegate.self).info("Received metrics payload: \(payload.timeStampBegin) - \(payload.timeStampEnd)")
+        }
+    }
+    
+    func didReceive(_ payloads: [MXDiagnosticPayload]) {
+        // Detailed crash diagnostics
+        for payload in payloads {
+            if let crashDiagnostics = payload.crashDiagnostics {
+                for crash in crashDiagnostics {
+                    RZSLog(AppDelegate.self).error("Crash: \(crash.terminationReason ?? "unknown")")
+                }
+            }
+        }
+    }
+}
+```
+
+**Why Native Only:**
+- No SDK to maintain/update
+- Privacy-compliant (no third-party data sharing)
+- Automatic symbolication in Xcode
+- Integrated with App Store Connect
+- MetricKit provides battery, memory, and performance metrics too
+
+---
+
+## 12. Map Clustering
+
+### MKClusterAnnotation Strategy
+
+Uses Apple's native `MKClusterAnnotation` for performance with many markers:
+
+```swift
+import MapKit
+
+// MARK: - Annotation Types
+
+/// Custom annotation for airports
+final class AirportAnnotation: NSObject, MKAnnotation, Identifiable {
+    let id: String
+    let airport: Airport
+    
+    var coordinate: CLLocationCoordinate2D { airport.coord }
+    var title: String? { airport.icao }
+    var subtitle: String? { airport.name }
+    
+    // Clustering identifier - same ID means they cluster together
+    var clusteringIdentifier: String { "airport" }
+    
+    init(airport: Airport) {
+        self.id = airport.icao
+        self.airport = airport
+        super.init()
+    }
+}
+
+// MARK: - Map View with Clustering
+
+struct AirportMapView: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        Map(position: $state.airports.mapPosition) {
+            // ForEach over annotations
+            ForEach(airportAnnotations) { annotation in
+                Annotation(annotation.title ?? "", coordinate: annotation.coordinate) {
+                    AirportMarkerView(airport: annotation.airport)
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+        .onMapCameraChange { context in
+            state?.airports.onRegionChange(context.region)
+        }
+    }
+    
+    private var airportAnnotations: [AirportAnnotation] {
+        state?.airports.airports.map { AirportAnnotation(airport: $0) } ?? []
+    }
+}
+
+// MARK: - UIKit Map for Clustering (if SwiftUI Map doesn't support it)
+
+/// Use UIViewRepresentable for full MKClusterAnnotation support
+struct ClusteredMapView: UIViewRepresentable {
+    @Binding var region: MKCoordinateRegion
+    let airports: [Airport]
+    let onSelect: (Airport) -> Void
+    
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        
+        // Register annotation views
+        mapView.register(
+            AirportAnnotationView.self,
+            forAnnotationViewWithReuseIdentifier: MKMapViewDefaultAnnotationViewReuseIdentifier
+        )
+        mapView.register(
+            ClusterAnnotationView.self,
+            forAnnotationViewWithReuseIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier
+        )
+        
+        return mapView
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        // Update region
+        mapView.setRegion(region, animated: false)
+        
+        // Update annotations efficiently
+        let currentICAOs = Set(mapView.annotations.compactMap { ($0 as? AirportAnnotation)?.id })
+        let newICAOs = Set(airports.map(\.icao))
+        
+        // Remove old
+        let toRemove = mapView.annotations.filter { 
+            guard let a = $0 as? AirportAnnotation else { return false }
+            return !newICAOs.contains(a.id)
+        }
+        mapView.removeAnnotations(toRemove)
+        
+        // Add new
+        let toAdd = airports.filter { !currentICAOs.contains($0.icao) }
+            .map { AirportAnnotation(airport: $0) }
+        mapView.addAnnotations(toAdd)
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelect: onSelect)
+    }
+    
+    class Coordinator: NSObject, MKMapViewDelegate {
+        let onSelect: (Airport) -> Void
+        
+        init(onSelect: @escaping (Airport) -> Void) {
+            self.onSelect = onSelect
+        }
+        
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            // Let system handle clusters
+            if annotation is MKClusterAnnotation {
+                return nil  // System will use registered ClusterAnnotationView
+            }
+            return nil  // System will use registered AirportAnnotationView
+        }
+        
+        func mapView(_ mapView: MKMapView, didSelect annotation: MKAnnotation) {
+            if let cluster = annotation as? MKClusterAnnotation {
+                // Zoom to cluster
+                let rect = cluster.memberAnnotations.reduce(MKMapRect.null) { rect, ann in
+                    let point = MKMapPoint(ann.coordinate)
+                    let pointRect = MKMapRect(x: point.x, y: point.y, width: 0.1, height: 0.1)
+                    return rect.union(pointRect)
+                }
+                mapView.setVisibleMapRect(rect, edgePadding: .init(top: 50, left: 50, bottom: 50, right: 50), animated: true)
+            } else if let airport = (annotation as? AirportAnnotation)?.airport {
+                onSelect(airport)
+            }
+        }
+    }
+}
+
+// MARK: - Custom Annotation Views
+
+final class AirportAnnotationView: MKMarkerAnnotationView {
+    override var annotation: MKAnnotation? {
+        didSet { configure() }
+    }
+    
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        clusteringIdentifier = "airport"
+        configure()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError() }
+    
+    private func configure() {
+        guard let airportAnnotation = annotation as? AirportAnnotation else { return }
+        let airport = airportAnnotation.airport
+        
+        // Color by airport type
+        markerTintColor = airport.type.markerColor
+        glyphImage = UIImage(systemName: airport.hasInstrumentProcedures ? "airplane.circle.fill" : "airplane.circle")
+        displayPriority = airport.hasInstrumentProcedures ? .required : .defaultHigh
+    }
+}
+
+final class ClusterAnnotationView: MKAnnotationView {
+    override var annotation: MKAnnotation? {
+        didSet { configure() }
+    }
+    
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        collisionMode = .circle
+        configure()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError() }
+    
+    private func configure() {
+        guard let cluster = annotation as? MKClusterAnnotation else { return }
+        
+        let count = cluster.memberAnnotations.count
+        image = drawClusterImage(count: count)
+        displayPriority = .required
+    }
+    
+    private func drawClusterImage(count: Int) -> UIImage {
+        let size = CGSize(width: 40, height: 40)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            // Draw circle
+            UIColor.systemBlue.setFill()
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+            
+            // Draw count
+            let text = count > 99 ? "99+" : "\(count)"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 14),
+                .foregroundColor: UIColor.white
+            ]
+            let textSize = text.size(withAttributes: attrs)
+            let textRect = CGRect(
+                x: (size.width - textSize.width) / 2,
+                y: (size.height - textSize.height) / 2,
+                width: textSize.width,
+                height: textSize.height
+            )
+            text.draw(in: textRect, withAttributes: attrs)
+        }
+    }
+}
+```
+
+### Clustering Behavior
+
+| Zoom Level | Behavior |
+|------------|----------|
+| Wide (Europe) | Heavy clustering, show counts |
+| Regional (country) | Moderate clustering |
+| Local (city) | Individual markers |
+| Detail | Full markers with labels |
+
+### Performance Considerations
+
+- **Limit initial load**: 500 airports max via `airportsInRegion()`
+- **Progressive loading**: Load more as user zooms
+- **Clustering threshold**: ~20+ annotations start clustering
+- **Animation**: Disable animations during rapid pan/zoom
+
+---
+
+## 13. Open Questions
 
 ### Resolved ✅
 
@@ -4008,7 +4498,7 @@ Using latest Apple frameworks eliminates need for:
 
 ---
 
-## 12. RZFlight Enhancement Proposals
+## 14. RZFlight Enhancement Proposals
 
 When functionality exists in `euro_aip` (Python) but not in RZFlight (Swift), propose enhancements to RZFlight rather than implementing in the app. Track proposals here:
 

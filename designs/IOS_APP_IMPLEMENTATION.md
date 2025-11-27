@@ -12,7 +12,7 @@ This document provides a detailed implementation roadmap for the FlyFun EuroAIP 
 
 | Platform | Version | Rationale |
 |----------|---------|-----------|
-| **iOS** | 18.0+ | `@Observable`, SwiftData, Apple Intelligence |
+| **iOS** | 18.0+ | `@Observable`, modern MapKit, Apple Intelligence |
 | **macOS** | 15.0+ | Native SwiftUI experience |
 | **Xcode** | 16.0+ | Swift 6 support |
 
@@ -82,6 +82,27 @@ class AirportDomain: ObservableObject { @Published var x = 0 }
 @EnvironmentObject var state: AppState
 ```
 
+### 4. Logging & Crash Reporting
+
+**Use RZUtilsSwift for logging:**
+```swift
+import RZUtilsSwift
+
+final class AirportRepository {
+    private let log = RZSLog(AirportRepository.self)
+    
+    func load() async throws {
+        log.info("Loading airports...")
+        // ...
+    }
+}
+```
+
+**Use Apple native crash reporting (MetricKit):**
+- No third-party SDKs
+- Configure `MXMetricManager` in `AppDelegate`
+- Crashes automatically uploaded to App Store Connect
+
 ---
 
 ## Current State Assessment
@@ -106,7 +127,7 @@ class AirportDomain: ObservableObject { @Published var x = 0 }
 
 1. **Remove duplicate Airport model** - Use RZFlight.Airport directly
 2. **Data Layer**: Repository pattern wrapping KnownAirports, remote data source
-3. **FilterConfig**: App-specific filter state with apply() using RZFlight extensions
+3. **FilterConfig**: App-specific filter state (pure data, filtering done by repository)
 4. **Filters**: Connect FilterPanel to FilterConfig → KnownAirports filtering
 5. **Details View**: Airport detail using airport.runways, procedures, aipEntries
 6. **Route Search**: Use KnownAirports.airportsNearRoute()
@@ -182,7 +203,7 @@ import RZFlight
 
 **Deliverables:**
 - Minimal app-specific types only
-- FilterConfig with apply() using RZFlight extensions
+- FilterConfig as pure data struct (filtering done by repository)
 - Unit tests for filter application
 
 ### 1.2 Repository Protocol
@@ -199,7 +220,7 @@ import RZFlight
 
 - [ ] Implement `AirportRepositoryProtocol`
 - [ ] Wrap `KnownAirports` - DO NOT duplicate its logic
-- [ ] Use `FilterConfig.apply()` with RZFlight Array extensions
+- [ ] Implement `applyInMemoryFilters()` using RZFlight Array extensions
 - [ ] Return `RZFlight.Airport` directly (no mapping needed)
 
 **Tasks:**
@@ -247,12 +268,34 @@ func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [A
 - [ ] Distinguish WiFi vs cellular
 
 ```swift
-final class ConnectivityMonitor: ObservableObject {
-    @Published var isConnected: Bool = false
-    @Published var connectionType: ConnectionType = .none
+import Network
+
+@Observable
+final class ConnectivityMonitor {
+    var isConnected: Bool = false
+    var connectionType: ConnectionType = .none
     
-    enum ConnectionType {
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "connectivity")
+    
+    enum ConnectionType: Sendable {
         case none, wifi, cellular
+    }
+    
+    func startMonitoring() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.isConnected = path.status == .satisfied
+                self?.connectionType = self?.mapConnectionType(path) ?? .none
+            }
+        }
+        monitor.start(queue: queue)
+    }
+    
+    private func mapConnectionType(_ path: NWPath) -> ConnectionType {
+        if path.usesInterfaceType(.wifi) { return .wifi }
+        if path.usesInterfaceType(.cellular) { return .cellular }
+        return .none
     }
 }
 ```
@@ -505,7 +548,13 @@ extension EnvironmentValues {
   - [ ] Legend mode-based marker colors
   - [ ] Route polyline rendering
   - [ ] Highlight circles
-  - [ ] MapKit clustering for dense areas
+  - [ ] **MKClusterAnnotation** for dense areas (via UIViewRepresentable if needed)
+
+- [ ] **ClusteredMapView.swift** - UIViewRepresentable for full clustering support
+  - [ ] `AirportAnnotation` with `clusteringIdentifier`
+  - [ ] `AirportAnnotationView` (MKMarkerAnnotationView subclass)
+  - [ ] `ClusterAnnotationView` with count badge
+  - [ ] Zoom to expand cluster on tap
 
 **Map Performance Strategy:**
 ```swift
@@ -952,8 +1001,9 @@ enum ChatbotServiceFactory {
 
 - [ ] Profile and optimize filter queries
 - [ ] Lazy loading for large lists
-- [ ] Map marker clustering
+- [ ] Tune MKClusterAnnotation thresholds
 - [ ] Memory management
+- [ ] Region-based loading performance tuning
 
 ### 7.2 Offline Experience
 
@@ -1653,6 +1703,7 @@ enum TestFixtures {
 app/FlyFunEuroAIP/
 ├── App/
 │   ├── FlyFunEuroAIPApp.swift           # App entry point
+│   ├── AppDelegate.swift                # MetricKit crash reporting
 │   ├── Log.swift                        # Logging setup
 │   │
 │   ├── State/                           # Single source of truth
@@ -1689,7 +1740,7 @@ app/FlyFunEuroAIP/
 │   │   ├── Adapters/
 │   │   │   └── APIAirportAdapter.swift        # API → RZFlight
 │   │   └── Cache/
-│   │       └── AirportCache.swift             # SwiftData cache
+│   │       └── AIPCache.swift                 # File-based JSON cache
 │   │
 │   ├── Networking/
 │   │   ├── APIClient.swift
