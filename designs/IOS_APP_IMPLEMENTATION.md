@@ -35,33 +35,45 @@ let airports: [Airport]  // RZFlight.Airport
 struct AppAirport { ... }  // NO!
 ```
 
-### 2. Single AppState (No Multiple ViewModels)
+### 2. Single AppState with Composed Domains (No Multiple ViewModels)
 
-**DO NOT create separate ViewModels.** Use single `AppState`:
+**DO NOT create separate ViewModels.** Use single `AppState` composed of domain objects:
 
 ```swift
-// ✅ CORRECT
-@Observable
-final class AppState {
-    var airports: [Airport] = []
-    var filters: FilterConfig = .default
-    var chatMessages: [ChatMessage] = []
-    // ALL state in one place
+// ✅ CORRECT - Single store with composed domains
+@Observable final class AppState {
+    let airports: AirportDomain   // Owns airport/filter/map state
+    let chat: ChatDomain          // Owns chat/streaming state
+    let navigation: NavigationDomain  // Owns nav/tabs/sheets
+    let system: SystemDomain      // Owns connectivity/errors
 }
 
-// ❌ WRONG - No separate ViewModels
+@Observable final class AirportDomain {
+    var airports: [Airport] = []
+    var filters: FilterConfig = .default
+    var mapPosition: MapCameraPosition = .automatic
+}
+
+@Observable final class ChatDomain {
+    var messages: [ChatMessage] = []
+    var isStreaming: Bool = false
+}
+
+// ❌ WRONG - Standalone ViewModels
 class AirportMapViewModel: ObservableObject { ... }  // NO!
 class ChatbotViewModel: ObservableObject { ... }  // NO!
 ```
+
+**Why composed?** Prevents God-class anti-pattern. Each domain is 200-400 lines, testable in isolation.
 
 ### 3. Modern SwiftUI Patterns
 
 ```swift
 // ✅ CORRECT - Use @Observable (iOS 17+)
-@Observable final class AppState { }
+@Observable final class AirportDomain { }
 
 // ❌ WRONG - Legacy ObservableObject
-class AppState: ObservableObject { @Published var x = 0 }
+class AirportDomain: ObservableObject { @Published var x = 0 }
 
 // ✅ CORRECT - Environment injection
 @Environment(\.appState) private var state
@@ -147,9 +159,9 @@ import RZFlight
 
 **File:** `App/Models/AppTypes.swift`
 
-- [ ] **FilterConfig.swift** - UI filter configuration (not in RZFlight)
+- [ ] **FilterConfig.swift** - Pure UI filter configuration (no DB dependencies)
   ```swift
-  struct FilterConfig: Codable, Equatable {
+  struct FilterConfig: Codable, Equatable, Sendable {
       var country: String?
       var hasProcedures: Bool?
       var hasHardRunway: Bool?
@@ -157,8 +169,10 @@ import RZFlight
       var minRunwayLengthFt: Int?
       // ...
       
-      /// Apply using RZFlight Array extensions
-      func apply(to airports: [Airport], db: FMDatabase) -> [Airport]
+      var hasActiveFilters: Bool { /* computed */ }
+      
+      // NOTE: No apply() method! 
+      // Filtering is done by the repository.
   }
   ```
 
@@ -198,14 +212,29 @@ import RZFlight
 
 **Key Pattern:**
 ```swift
-func getAirports(filters: FilterConfig, limit: Int) async throws -> [Airport] {
-    // Use KnownAirports directly - returns RZFlight.Airport
-    var airports = knownAirports.airportsWithBorderCrossing()  // or all airports
+func airports(matching filters: FilterConfig, limit: Int) async throws -> [Airport] {
+    var airports: [Airport]
     
-    // Apply filters using RZFlight Array extensions
-    airports = filters.apply(to: airports, db: db)
+    // Use KnownAirports for DB-dependent filters
+    if filters.pointOfEntry == true {
+        airports = knownAirports.airportsWithBorderCrossing()
+    } else {
+        airports = Array(knownAirports.known.values)
+    }
+    
+    // Apply cheap in-memory filters (no DB access)
+    airports = applyInMemoryFilters(filters, to: airports)
     
     return Array(airports.prefix(limit))
+}
+
+// Filtering lives in repository, NOT in FilterConfig
+func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [Airport] {
+    var result = airports
+    if let country = filters.country { result = result.inCountry(country) }
+    if filters.hasHardRunway == true { result = result.withHardRunways() }
+    // ... other in-memory filters
+    return result
 }
 ```
 
@@ -238,73 +267,164 @@ final class ConnectivityMonitor: ObservableObject {
 
 ---
 
-## Phase 2: AppState & Filter Implementation
+## Phase 2: AppState with Composed Domains
 
 **Duration:** 2 weeks  
-**Goal:** Complete AppState with functional filters
+**Goal:** Complete AppState with composed domains and functional filters
 
-### 2.1 AppState Implementation
+### 2.1 Domain Objects
 
-**File:** `App/State/AppState.swift`
+**Note:** AppState composes smaller domain objects. NO monolithic God-class.
 
-**Note:** NO separate ViewModels. All state in one `@Observable` class.
+#### AirportDomain
 
-- [ ] Create `AppState` with `@Observable` macro
-- [ ] Add all airport data state
-- [ ] Add filter state and computed `filteredAirports`
-- [ ] Add map state (region, position, highlights)
-- [ ] Add chat state (messages, streaming)
-- [ ] Add navigation state (path, sheets)
-- [ ] Add UI state (loading, errors)
+**File:** `App/State/Domains/AirportDomain.swift`
+
+- [ ] Create `AirportDomain` with `@Observable` macro
+- [ ] Airport data state (airports, selected, search results)
+- [ ] Filter state (pure data, no DB logic)
+- [ ] Map state (position, legend, highlights, route)
+- [ ] Actions: `load()`, `search()`, `select()`, `applyFilters()`
 
 ```swift
 @Observable
 @MainActor
-final class AppState {
+final class AirportDomain {
     // Dependencies
     private let repository: AirportRepository
     
-    // Airport Data
+    // Airport Data (already filtered by repository)
     var airports: [Airport] = []
     var selectedAirport: Airport?
+    var searchResults: [Airport] = []
+    var isSearching: Bool = false
     
-    // Filters
+    // Filters (pure data, no DB logic)
     var filters: FilterConfig = .default
-    var filteredAirports: [Airport] { /* computed */ }
     
-    // Map
+    // Map State
     var mapPosition: MapCameraPosition = .automatic
     var legendMode: LegendMode = .airportType
     var highlights: [String: MapHighlight] = [:]
     var activeRoute: RouteVisualization?
     
-    // Chat
-    var chatMessages: [ChatMessage] = []
-    var chatInput: String = ""
-    var isStreaming: Bool = false
-    
-    // Navigation
-    var navigationPath = NavigationPath()
-    var showingChat = false
-    var showingFilters = false
-    
-    // UI
-    var isLoading = false
-    var error: AppError?
-    var connectivityMode: ConnectivityMode = .offline
+    // Actions
+    func load() async throws {
+        // Repository handles filtering (including DB-dependent ones)
+        airports = try await repository.airports(matching: filters, limit: 1000)
+    }
+    func search(query: String) async throws { }
+    func select(_ airport: Airport) { }
+    func applyVisualization(_ payload: VisualizationPayload) { }
 }
 ```
 
-### 2.2 AppState Actions
+#### ChatDomain
 
-- [ ] `loadAirports()` - Load from repository
-- [ ] `search(query:)` - Search with route detection
-- [ ] `selectAirport(_:)` - Select and focus
-- [ ] `applyFilters()` - Refresh with current filters
-- [ ] `resetFilters()` - Clear filters
-- [ ] `searchRoute(_:)` - Route search
-- [ ] `sendChatMessage()` - Send to chatbot
-- [ ] `applyVisualization(_:)` - Apply chatbot viz
+**File:** `App/State/Domains/ChatDomain.swift`
+
+- [ ] Create `ChatDomain` with `@Observable` macro
+- [ ] Message state (messages, input, streaming)
+- [ ] Cross-domain callback (`onVisualization`)
+- [ ] Actions: `send()`, `clear()`
+
+```swift
+@Observable
+@MainActor
+final class ChatDomain {
+    // Dependencies
+    private var chatbotService: ChatbotService
+    
+    // State
+    var messages: [ChatMessage] = []
+    var input: String = ""
+    var isStreaming: Bool = false
+    var currentThinking: String?
+    
+    // Cross-domain callback
+    var onVisualization: ((VisualizationPayload) -> Void)?
+    
+    // Actions
+    func send() async { }
+    func clear() { }
+}
+```
+
+#### NavigationDomain
+
+**File:** `App/State/Domains/NavigationDomain.swift`
+
+- [ ] Create `NavigationDomain` with `@Observable` macro
+- [ ] Navigation state (path, tabs, sheets)
+- [ ] Actions: `navigate()`, `pop()`, `showChat()`, `showFilters()`
+
+```swift
+@Observable
+@MainActor
+final class NavigationDomain {
+    var path = NavigationPath()
+    var selectedTab: Tab = .map
+    var showingChat: Bool = false
+    var showingFilters: Bool = false
+    
+    enum Tab: String, CaseIterable { case map, search, chat, settings }
+}
+```
+
+#### SystemDomain
+
+**File:** `App/State/Domains/SystemDomain.swift`
+
+- [ ] Create `SystemDomain` with `@Observable` macro
+- [ ] System state (connectivity, loading, errors)
+- [ ] Actions: `startMonitoring()`, `setLoading()`, `setError()`
+
+```swift
+@Observable
+@MainActor
+final class SystemDomain {
+    var connectivityMode: ConnectivityMode = .offline
+    var isLoading: Bool = false
+    var error: AppError?
+}
+```
+
+### 2.2 AppState (Thin Orchestration)
+
+**File:** `App/State/AppState.swift`
+
+- [ ] Compose all domain objects
+- [ ] Wire cross-domain callbacks
+- [ ] Lifecycle methods (`onAppear`)
+- [ ] Cross-domain orchestration actions
+
+```swift
+@Observable
+@MainActor
+final class AppState {
+    // Composed domains
+    let airports: AirportDomain
+    let chat: ChatDomain
+    let navigation: NavigationDomain
+    let system: SystemDomain
+    
+    init(repository: AirportRepository, chatbotService: ChatbotService, connectivityMonitor: ConnectivityMonitor) {
+        self.airports = AirportDomain(repository: repository)
+        self.chat = ChatDomain(chatbotService: chatbotService)
+        self.navigation = NavigationDomain()
+        self.system = SystemDomain(connectivityMonitor: connectivityMonitor)
+        
+        // Wire cross-domain callbacks
+        chat.onVisualization = { [weak self] payload in
+            self?.airports.applyVisualization(payload)
+        }
+    }
+    
+    // Cross-domain actions
+    func search(query: String) async { }
+    func applyFiltersAndShow() async { }
+}
+```
 
 ### 2.3 Environment Setup
 
@@ -590,14 +710,16 @@ extension Airport {
 - [ ] Stream responses
 - [ ] Handle visualizations
 
-### 5.4 Chatbot ViewModel
+### 5.4 ChatDomain Integration
 
-**File:** `UserInterface/ViewModels/ChatbotViewModel.swift`
+**File:** `App/State/Domains/ChatDomain.swift` (already created in Phase 2)
 
-- [ ] Manage conversation state
-- [ ] Handle streaming updates
-- [ ] Apply visualizations to map
-- [ ] Track thinking state
+- [ ] Wire up `onVisualization` callback to `AirportDomain`
+- [ ] Handle streaming state updates
+- [ ] Manage conversation history
+- [ ] Track thinking state for UI
+
+**Note:** Chat logic lives in `ChatDomain`, NOT a separate ViewModel.
 
 ### 5.5 Chat UI
 
@@ -757,7 +879,7 @@ enum ChatbotServiceFactory {
 
 **Key Changes:**
 - Core models from RZFlight (no duplicates)
-- Single `AppState` (no ViewModels folder)
+- Single `AppState` composed of domain objects (no ViewModels folder)
 - Modern SwiftUI patterns
 
 ```
@@ -767,8 +889,14 @@ app/FlyFunEuroAIP/
 │   ├── Log.swift                        # Logging setup
 │   │
 │   ├── State/                           # Single source of truth
-│   │   ├── AppState.swift               # @Observable AppState
-│   │   └── AppStateEnvironment.swift    # Environment key
+│   │   ├── AppState.swift               # Composes domains, orchestration
+│   │   ├── AppStateEnvironment.swift    # Environment key
+│   │   │
+│   │   └── Domains/                     # Domain objects (~200-400 lines each)
+│   │       ├── AirportDomain.swift      # Airports, filters, map state
+│   │       ├── ChatDomain.swift         # Messages, streaming, LLM
+│   │       ├── NavigationDomain.swift   # Tabs, sheets, path
+│   │       └── SystemDomain.swift       # Connectivity, loading, errors
 │   │
 │   ├── Models/                          # App-specific types ONLY
 │   │   ├── FilterConfig.swift           # Filter state
@@ -856,6 +984,9 @@ app/FlyFunEuroAIP/
 │   │   ├── LoadingView.swift
 │   │   └── ErrorView.swift
 │   │
+│   ├── ViewCoordinators/                # Optional: read-only projections
+│   │   └── MapViewCoordinator.swift     # Complex view-specific computations
+│   │
 │   └── Preview/
 │       └── PreviewHelpers.swift              # Preview providers
 │
@@ -866,10 +997,15 @@ app/FlyFunEuroAIP/
     └── airports_small.db                     # Preview database
 ```
 
+**Architecture Choices:**
+- ✅ `State/Domains/` - Composed domain objects (200-400 lines each)
+- ✅ `AppState.swift` - Thin orchestration layer
+- ✅ `ViewCoordinators/` - Optional read-only projections for complex view logic
+
 **Removed:**
-- ❌ `ViewModels/` folder (use AppState)
-- ❌ `AppModel.swift` (replaced by AppState)
-- ❌ Duplicate model files
+- ❌ `ViewModels/` folder - NO standalone ViewModels
+- ❌ `AppModel.swift` - replaced by AppState
+- ❌ Duplicate model files - use RZFlight
 
 ---
 
@@ -941,10 +1077,10 @@ git clone https://github.com/roznet/rzflight
 | Phase | Duration | Milestone | Key Deliverable |
 |-------|----------|-----------|-----------------|
 | Phase 1 | Week 1-2 | Data layer + RZFlight integration | `AirportRepository` working |
-| Phase 2 | Week 3-4 | `AppState` + Filters | Single source of truth |
+| Phase 2 | Week 3-4 | `AppState` with composed domains | Domain objects + orchestration |
 | Phase 3 | Week 5-7 | UI complete (all platforms) | Adaptive layouts working |
 | Phase 4 | Week 8-9 | Online API integration | Live data + sync |
-| Phase 5 | Week 10-11 | Online chatbot | SSE streaming + viz |
+| Phase 5 | Week 10-11 | Online chatbot | `ChatDomain` + SSE + viz |
 | Phase 6 | Week 12-13 | Offline chatbot | Apple Intelligence |
 | Phase 7 | Week 14-15 | Polish + Testing | App Store ready |
 
@@ -954,7 +1090,7 @@ git clone https://github.com/roznet/rzflight
 
 | Simplification | Time Saved |
 |----------------|------------|
-| No separate ViewModels | 1 week |
+| Composed domains vs monolith | Better testability (not time saved, but quality) |
 | Latest iOS only (no compat) | 1 week |
 | Apple Intelligence vs custom LLM | 2 weeks |
 | Modern SwiftUI patterns | 1 week |
@@ -980,8 +1116,9 @@ git clone https://github.com/roznet/rzflight
 | Decision | Choice |
 |----------|--------|
 | iOS Version | 18.0+ (latest only) |
-| State Management | Single `AppState` with `@Observable` |
-| ViewModels | Eliminated (use AppState directly) |
+| State Management | Single `AppState` composed of domain objects |
+| ViewModels | Eliminated (use domain objects) |
+| Architecture | Redux-style single store, but composed to avoid God-class |
 | Offline Chatbot | Apple Intelligence |
 
 ### Immediate Actions
@@ -995,16 +1132,23 @@ git clone https://github.com/roznet/rzflight
    - Delete local `Airport` struct from `AirportMapViewModel.swift`
    - Use `RZFlight.Airport` directly
 
-3. **Create AppState**
-   - New file: `App/State/AppState.swift`
-   - Add `@Observable` macro
-   - Move all state from existing ViewModels
+3. **Create domain objects**
+   - New folder: `App/State/Domains/`
+   - `AirportDomain.swift` - airports, filters, map state
+   - `ChatDomain.swift` - messages, streaming
+   - `NavigationDomain.swift` - tabs, sheets
+   - `SystemDomain.swift` - connectivity, errors
 
-4. **Setup Environment injection**
+4. **Create AppState (orchestration)**
+   - New file: `App/State/AppState.swift`
+   - Compose domain objects
+   - Wire cross-domain callbacks
+
+5. **Setup Environment injection**
    - Create `AppStateKey`
    - Inject in app entry point
 
-5. **Start Phase 1**
+6. **Start Phase 1**
    - Repository protocol
    - Local data source wrapping KnownAirports
 

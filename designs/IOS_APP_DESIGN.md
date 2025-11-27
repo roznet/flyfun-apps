@@ -135,7 +135,7 @@ Features that may need to be added to RZFlight (enhance library, not app):
 │  │  // Airport Data                                             ││
 │  │  var airports: [Airport]                                     ││
 │  │  var selectedAirport: Airport?                               ││
-│  │  var filteredAirports: [Airport] { computed }                ││
+│  │  var airports: [Airport] // already filtered by repo         ││
 │  │                                                              ││
 │  │  // Filters                                                  ││
 │  │  var filters: FilterConfig                                   ││
@@ -248,24 +248,36 @@ import RZFlight
 
 /// Protocol for airport data access - abstracts offline/online sources
 /// All methods return RZFlight types directly
+/// 
+/// IMPORTANT: Filtering is done HERE, not in FilterConfig.
+/// This keeps FilterConfig pure (no DB dependencies).
 protocol AirportRepositoryProtocol {
     // MARK: - Airport Queries (returns RZFlight.Airport)
-    func getAirports(filters: FilterConfig, limit: Int) async throws -> [Airport]
+    
+    /// Get airports matching filters - repository handles DB-dependent filters
+    func airports(matching filters: FilterConfig, limit: Int) async throws -> [Airport]
+    
+    /// Search airports by query string
     func searchAirports(query: String, limit: Int) async throws -> [Airport]
-    func getAirportDetail(icao: String) async throws -> Airport?  // With extended data loaded
+    
+    /// Get airport with extended data (runways, procedures, AIP entries)
+    func airportDetail(icao: String) async throws -> Airport?
     
     // MARK: - Route & Location (returns RZFlight.Airport)
-    func getAirportsNearRoute(from: String, to: String, distanceNm: Int, filters: FilterConfig) async throws -> RouteResult
-    func getAirportsNearLocation(center: CLLocationCoordinate2D, radiusNm: Int, filters: FilterConfig) async throws -> [Airport]
+    func airportsNearRoute(from: String, to: String, distanceNm: Int, filters: FilterConfig) async throws -> RouteResult
+    func airportsNearLocation(center: CLLocationCoordinate2D, radiusNm: Int, filters: FilterConfig) async throws -> [Airport]
     
-    // MARK: - Extended Data (returns RZFlight types)
-    // Note: Procedures, runways, AIP entries are already on Airport
-    // Use airport.addProcedures(db:) or airportWithExtendedData(icao:) to load
-    func getCountryRules(countryCode: String) async throws -> CountryRules?
+    // MARK: - In-Memory Filtering (for already-loaded airports)
+    /// Apply cheap in-memory filters only (no DB access)
+    /// Used for client-side filtering of already-fetched results
+    func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [Airport]
+    
+    // MARK: - Extended Data
+    func countryRules(for countryCode: String) async throws -> CountryRules?
     
     // MARK: - Metadata
-    func getAvailableCountries() async throws -> [String]
-    func getFilterMetadata() async throws -> FilterMetadata
+    func availableCountries() async throws -> [String]
+    func filterMetadata() async throws -> FilterMetadata
 }
 
 /// Route result wrapper
@@ -285,6 +297,9 @@ import RZFlight
 
 /// Local data source using bundled SQLite database
 /// Returns RZFlight.Airport directly - no conversion needed
+/// 
+/// IMPORTANT: All filtering logic lives HERE, not in FilterConfig.
+/// FilterConfig is pure data; this class knows how to apply it.
 final class LocalAirportDataSource: AirportRepositoryProtocol {
     private let db: FMDatabase
     private let knownAirports: KnownAirports
@@ -295,40 +310,68 @@ final class LocalAirportDataSource: AirportRepositoryProtocol {
         self.knownAirports = KnownAirports(db: db)
     }
     
-    func getAirports(filters: FilterConfig, limit: Int) async throws -> [Airport] {
-        // Start with all airports or filtered subset
+    func airports(matching filters: FilterConfig, limit: Int) async throws -> [Airport] {
         var airports: [Airport]
         
+        // Use KnownAirports methods for DB-dependent filters
         if filters.pointOfEntry == true {
             airports = knownAirports.airportsWithBorderCrossing()
+        } else if let aipField = filters.aipField {
+            airports = knownAirports.airportsWithAIPField(aipField, useStandardized: true)
         } else {
             airports = Array(knownAirports.known.values)
         }
         
-        // Apply filters using RZFlight Array extensions
-        airports = filters.apply(to: airports, db: db)
+        // Apply cheap in-memory filters (no DB access)
+        airports = applyInMemoryFilters(filters, to: airports)
         
         return Array(airports.prefix(limit))
     }
     
     func searchAirports(query: String, limit: Int) async throws -> [Airport] {
-        // Use KnownAirports.matching() - returns RZFlight.Airport directly
         return Array(knownAirports.matching(needle: query).prefix(limit))
     }
     
-    func getAirportsNearRoute(from: String, to: String, distanceNm: Int, filters: FilterConfig) async throws -> RouteResult {
-        // Use KnownAirports.airportsNearRoute() directly
+    func airportsNearRoute(from: String, to: String, distanceNm: Int, filters: FilterConfig) async throws -> RouteResult {
         let routeAirports = knownAirports.airportsNearRoute([from, to], within: Double(distanceNm))
-        let filtered = filters.apply(to: routeAirports, db: db)
+        let filtered = applyInMemoryFilters(filters, to: routeAirports)
         return RouteResult(airports: filtered, departure: from, destination: to)
     }
     
-    func getAirportDetail(icao: String) async throws -> Airport? {
-        // Use airportWithExtendedData to load runways, procedures, AIP entries
+    func airportDetail(icao: String) async throws -> Airport? {
         return knownAirports.airportWithExtendedData(icao: icao)
     }
     
-    // ... other methods leverage KnownAirports directly
+    // MARK: - In-Memory Filtering (No DB Access)
+    
+    /// Apply only the filters that don't require DB access
+    /// Uses RZFlight Array<Airport> extensions
+    func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [Airport] {
+        var result = airports
+        
+        // These use RZFlight extensions - NO DB parameter
+        if let country = filters.country {
+            result = result.inCountry(country)
+        }
+        if filters.hasHardRunway == true {
+            result = result.withHardRunways()
+        }
+        if filters.hasProcedures == true {
+            result = result.withProcedures()
+        }
+        if let minLength = filters.minRunwayLengthFt {
+            result = result.withRunwayLength(minimumFeet: minLength)
+        }
+        if let maxLength = filters.maxRunwayLengthFt {
+            result = result.withRunwayLength(minimumFeet: 0, maximumFeet: maxLength)
+        }
+        // Note: pointOfEntry, hasAvgas, hasJetA, aipField require DB
+        // Those are handled in airports(matching:) above
+        
+        return result
+    }
+    
+    // ... other methods
 }
 ```
 
@@ -633,8 +676,9 @@ Only create app-level types for things NOT in RZFlight:
 ```
 
 ```swift
-/// App-specific: Filter configuration for UI binding (not in RZFlight)
-struct FilterConfig: Codable, Equatable {
+/// App-specific: Filter configuration for UI binding
+/// PURE DATA - no DB dependencies, no apply() method
+struct FilterConfig: Codable, Equatable, Sendable {
     var country: String?
     var hasProcedures: Bool?
     var hasAIPData: Bool?
@@ -649,35 +693,23 @@ struct FilterConfig: Codable, Equatable {
     var aipValue: String?
     var aipOperator: AIPOperator?
     
-    enum AIPOperator: String, Codable {
+    enum AIPOperator: String, Codable, Sendable {
         case contains, equals, notEmpty, startsWith, endsWith
     }
     
     static let `default` = FilterConfig()
     
-    /// Apply filters to airport array using RZFlight extensions
-    func apply(to airports: [Airport], db: FMDatabase) -> [Airport] {
-        var result = airports
-        
-        if let country = country {
-            result = result.inCountry(country)
-        }
-        if pointOfEntry == true {
-            result = result.borderCrossingOnly(db: db)
-        }
-        if hasHardRunway == true {
-            result = result.withHardRunways()
-        }
-        if hasProcedures == true {
-            result = result.withProcedures()
-        }
-        if let minLength = minRunwayLengthFt {
-            result = result.withRunwayLength(minimumFeet: minLength)
-        }
-        // ... additional filters
-        
-        return result
+    /// Check if any filters are active
+    var hasActiveFilters: Bool {
+        country != nil || hasProcedures != nil || hasAIPData != nil ||
+        hasHardRunway != nil || pointOfEntry != nil || hasAvgas != nil ||
+        hasJetA != nil || minRunwayLengthFt != nil || maxRunwayLengthFt != nil ||
+        maxLandingFee != nil || aipField != nil
     }
+    
+    // NOTE: No apply(to:db:) method!
+    // Filtering is done by the repository, not by FilterConfig.
+    // This keeps FilterConfig pure and free of storage dependencies.
 }
 
 /// App-specific: Map visualization highlight
@@ -962,9 +994,9 @@ struct VisualizationPayload: Sendable {
 
 ---
 
-## 5. AppState - Single Source of Truth
+## 5. AppState - Single Source of Truth (Composed)
 
-### 5.1 Why Single AppState?
+### 5.1 Why Single Store, But Composed?
 
 **Problems with Multiple ViewModels:**
 - State synchronization between Map, Detail, and Chat views
@@ -972,37 +1004,74 @@ struct VisualizationPayload: Sendable {
 - Filters affect multiple views
 - Complex coordination for deep linking
 
-**Solution:** One `@Observable` store that all views read from.
+**Problems with Monolithic AppState:**
+- God-class anti-pattern (2,000+ lines handling everything)
+- Hard to test individual domains
+- Hard to reason about side effects
+- Merge conflicts when multiple devs work on state
 
-### 5.2 AppState Implementation
+**Solution:** One `@Observable` store composed of smaller domain objects.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        AppState                                  │
+│                   (Single Source of Truth)                       │
+│                                                                 │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐ │
+│  │AirportDomain │ │  ChatDomain  │ │   NavigationDomain       │ │
+│  │              │ │              │ │                          │ │
+│  │ - airports   │ │ - messages   │ │ - path                   │ │
+│  │ - filters    │ │ - streaming  │ │ - selectedTab            │ │
+│  │ - selected   │ │ - thinking   │ │ - sheets                 │ │
+│  │ - search     │ │ - input      │ │                          │ │
+│  │ - map state  │ │              │ │                          │ │
+│  └──────────────┘ └──────────────┘ └──────────────────────────┘ │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    SystemDomain                           │   │
+│  │                                                          │   │
+│  │  - connectivityMode    - isLoading    - error            │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  // Cross-domain actions (thin orchestration)                   │
+│  func applyVisualization(_ payload: VisualizationPayload)       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Benefits:**
+- Single store guarantee (Redux-style)
+- Each domain ~200-400 lines, not 2,000
+- Unit test domains in isolation
+- Clear ownership of state
+- Easy to add new domains (e.g., `SettingsDomain`)
+
+### 5.2 Domain Objects
+
+Each domain is `@Observable`, owns its state, and has its own actions.
+
+#### AirportDomain
 
 ```swift
 import SwiftUI
 import MapKit
 import RZFlight
 
-/// Single source of truth for all app state
-/// Uses @Observable (iOS 17+) for granular SwiftUI updates
+/// Domain: Airport data, filters, map visualization
 @Observable
 @MainActor
-final class AppState {
+final class AirportDomain {
     
     // MARK: - Dependencies
     private let repository: AirportRepository
-    private let chatbotService: ChatbotService
-    private let connectivityMonitor: ConnectivityMonitor
     
     // MARK: - Airport Data
+    /// Airports already filtered by repository - ready for display
     var airports: [Airport] = []
     var selectedAirport: Airport?
     
     // MARK: - Filters
+    /// Current filter config (pure data, no DB logic)
     var filters: FilterConfig = .default
-    
-    /// Computed: filtered airports based on current filters
-    var filteredAirports: [Airport] {
-        filters.apply(to: airports, db: repository.database)
-    }
     
     // MARK: - Search
     var searchQuery: String = ""
@@ -1010,62 +1079,33 @@ final class AppState {
     var isSearching: Bool = false
     
     // MARK: - Map State
-    var mapRegion: MKCoordinateRegion = .europe
     var mapPosition: MapCameraPosition = .automatic
     var legendMode: LegendMode = .airportType
     var highlights: [String: MapHighlight] = [:]
     var activeRoute: RouteVisualization?
     
-    // MARK: - Chat State
-    var chatMessages: [ChatMessage] = []
-    var chatInput: String = ""
-    var isStreaming: Bool = false
-    var currentThinking: String?
+    // MARK: - Computed
     
-    // MARK: - UI State
-    var isLoading: Bool = false
-    var error: AppError?
-    var connectivityMode: ConnectivityMode = .offline
-    
-    // MARK: - Navigation (Programmatic)
-    var navigationPath = NavigationPath()
-    var showingChat: Bool = false
-    var showingFilters: Bool = false
-    var selectedTab: Tab = .map
-    
-    enum Tab: String, CaseIterable {
-        case map, search, chat, settings
+    /// For display - airports are already filtered by repository
+    /// Use applyInMemoryFilters only for additional client-side refinement
+    var displayAirports: [Airport] {
+        airports  // Already filtered when loaded
     }
     
-    // MARK: - Initialization
+    // MARK: - Init
     
-    init(repository: AirportRepository, chatbotService: ChatbotService, connectivityMonitor: ConnectivityMonitor) {
+    init(repository: AirportRepository) {
         self.repository = repository
-        self.chatbotService = chatbotService
-        self.connectivityMonitor = connectivityMonitor
-        
-        // Observe connectivity changes
-        Task {
-            for await mode in connectivityMonitor.modeStream {
-                self.connectivityMode = mode
-            }
-        }
     }
     
-    // MARK: - Airport Actions
+    // MARK: - Actions
     
-    func loadAirports() async {
-        isLoading = true
-        defer { isLoading = false }
-        
-        do {
-            airports = try await repository.getAirports(filters: filters, limit: 1000)
-        } catch {
-            self.error = AppError(from: error)
-        }
+    func load() async throws {
+        // Repository handles all filtering (including DB-dependent ones)
+        airports = try await repository.airports(matching: filters, limit: 1000)
     }
     
-    func search(query: String) async {
+    func search(query: String) async throws {
         guard !query.isEmpty else {
             searchResults = []
             return
@@ -1074,19 +1114,14 @@ final class AppState {
         isSearching = true
         defer { isSearching = false }
         
-        // Detect route pattern (e.g., "EGTF LFMD")
         if isRouteQuery(query) {
-            await searchRoute(query)
+            try await searchRoute(query)
         } else {
-            do {
-                searchResults = try await repository.searchAirports(query: query, limit: 50)
-            } catch {
-                self.error = AppError(from: error)
-            }
+            searchResults = try await repository.searchAirports(query: query, limit: 50)
         }
     }
     
-    func selectAirport(_ airport: Airport) {
+    func select(_ airport: Airport) {
         selectedAirport = airport
         focusMap(on: airport.coord)
     }
@@ -1100,54 +1135,117 @@ final class AppState {
         }
     }
     
-    // MARK: - Route Actions
-    
-    func searchRoute(_ query: String) async {
+    func searchRoute(_ query: String) async throws {
         let icaos = query.uppercased().split(separator: " ").map(String.init)
-        guard icaos.count >= 2,
-              let from = icaos.first,
-              let to = icaos.last else { return }
+        guard icaos.count >= 2, let from = icaos.first, let to = icaos.last else { return }
         
-        do {
-            let result = try await repository.getAirportsNearRoute(
-                from: from, to: to, distanceNm: 50, filters: filters
-            )
-            airports = result.airports
-            activeRoute = RouteVisualization(
-                coordinates: [/* from coord, to coord */],
-                departure: from,
-                destination: to
-            )
-            fitMapToRoute()
-        } catch {
-            self.error = AppError(from: error)
-        }
+        let result = try await repository.getAirportsNearRoute(
+            from: from, to: to, distanceNm: 50, filters: filters
+        )
+        airports = result.airports
+        activeRoute = RouteVisualization(coordinates: [], departure: from, destination: to)
+        fitMapToRoute()
     }
     
     func clearRoute() {
         activeRoute = nil
-        highlights.removeAll { $0.key.hasPrefix("route-") }
+        highlights = highlights.filter { !$0.key.hasPrefix("route-") }
     }
     
-    // MARK: - Filter Actions
-    
-    func applyFilters() async {
-        await loadAirports()
+    func applyFilters() async throws {
+        try await load()
     }
     
     func resetFilters() {
         filters = .default
-        Task { await loadAirports() }
+        Task { try? await load() }
     }
     
-    // MARK: - Chat Actions
+    /// Apply visualization from chatbot
+    func applyVisualization(_ payload: VisualizationPayload) {
+        switch payload.kind {
+        case .markers:
+            if let airports = payload.airports {
+                self.airports = airports
+                fitMapToAirports()
+            }
+        case .routeWithMarkers:
+            if let route = payload.route { self.activeRoute = route }
+            if let airports = payload.airports { self.airports = airports }
+            payload.airports?.forEach { airport in
+                highlights["chat-\(airport.icao)"] = MapHighlight(
+                    id: "chat-\(airport.icao)",
+                    coordinate: airport.coord,
+                    color: .blue, radius: 15000, popup: airport.name
+                )
+            }
+            fitMapToRoute()
+        case .markerWithDetails:
+            if let airport = payload.airports?.first { select(airport) }
+        case .pointWithMarkers:
+            if let airports = payload.airports {
+                self.airports = airports
+                fitMapToAirports()
+            }
+        }
+        if let filterProfile = payload.filterProfile {
+            self.filters = filterProfile
+        }
+    }
     
-    func sendChatMessage() async {
-        guard !chatInput.isEmpty else { return }
+    // MARK: - Private
+    
+    private func isRouteQuery(_ query: String) -> Bool {
+        let parts = query.uppercased().split(separator: " ")
+        return parts.count >= 2 && parts.allSatisfy { $0.count == 4 && $0.allSatisfy(\.isLetter) }
+    }
+    
+    private func fitMapToAirports() {
+        guard !airports.isEmpty else { return }
+        // Calculate bounding box
+    }
+    
+    private func fitMapToRoute() {
+        guard activeRoute != nil else { return }
+        // Calculate bounding box
+    }
+}
+```
+
+#### ChatDomain
+
+```swift
+/// Domain: Chat messages, streaming, LLM interaction
+@Observable
+@MainActor
+final class ChatDomain {
+    
+    // MARK: - Dependencies
+    private var chatbotService: ChatbotService
+    
+    // MARK: - State
+    var messages: [ChatMessage] = []
+    var input: String = ""
+    var isStreaming: Bool = false
+    var currentThinking: String?
+    
+    // MARK: - Callbacks (for cross-domain communication)
+    var onVisualization: ((VisualizationPayload) -> Void)?
+    
+    // MARK: - Init
+    
+    init(chatbotService: ChatbotService) {
+        self.chatbotService = chatbotService
+    }
+    
+    // MARK: - Actions
+    
+    func send() async {
+        guard !input.isEmpty else { return }
         
-        let userMessage = ChatMessage(role: .user, content: chatInput)
-        chatMessages.append(userMessage)
-        chatInput = ""
+        let userMessage = ChatMessage(role: .user, content: input)
+        messages.append(userMessage)
+        input = ""
         isStreaming = true
         
         var assistantContent = ""
@@ -1157,23 +1255,19 @@ final class AppState {
                 switch event {
                 case .thinking(let thought):
                     currentThinking = thought
-                    
                 case .content(let chunk):
                     assistantContent += chunk
                     updateStreamingMessage(assistantContent)
-                    
                 case .visualization(let payload):
-                    applyVisualization(payload)
-                    
+                    onVisualization?(payload)  // Notify AppState
                 case .done:
                     finalizeMessage(assistantContent)
-                    
                 case .toolCall:
-                    break // Could show tool execution
+                    break
                 }
             }
         } catch {
-            chatMessages.append(ChatMessage(
+            messages.append(ChatMessage(
                 role: .assistant,
                 content: "Sorry, I encountered an error: \(error.localizedDescription)"
             ))
@@ -1183,87 +1277,403 @@ final class AppState {
         currentThinking = nil
     }
     
-    /// Apply chatbot visualization to app state
-    func applyVisualization(_ payload: VisualizationPayload) {
-        switch payload.kind {
-        case .markers:
-            if let airports = payload.airports {
-                self.airports = airports
-                fitMapToAirports()
-            }
-            
-        case .routeWithMarkers:
-            if let route = payload.route {
-                self.activeRoute = route
-            }
-            if let airports = payload.airports {
-                self.airports = airports
-            }
-            // Add highlights for mentioned airports
-            payload.airports?.forEach { airport in
-                highlights["chat-\(airport.icao)"] = MapHighlight(
-                    id: "chat-\(airport.icao)",
-                    coordinate: airport.coord,
-                    color: .blue,
-                    radius: 15000,
-                    popup: airport.name
-                )
-            }
-            fitMapToRoute()
-            
-        case .markerWithDetails:
-            if let airport = payload.airports?.first {
-                selectAirport(airport)
-            }
-            
-        case .pointWithMarkers:
-            if let airports = payload.airports {
-                self.airports = airports
-                fitMapToAirports()
-            }
-        }
-        
-        // Apply filter profile from chatbot
-        if let filterProfile = payload.filterProfile {
-            self.filters = filterProfile
-        }
+    func clear() {
+        messages = []
+        chatbotService.clearHistory()
     }
     
-    // MARK: - Private Helpers
-    
-    private func isRouteQuery(_ query: String) -> Bool {
-        let parts = query.uppercased().split(separator: " ")
-        return parts.count >= 2 && parts.allSatisfy { $0.count == 4 && $0.allSatisfy(\.isLetter) }
+    func updateService(_ service: ChatbotService) {
+        self.chatbotService = service
     }
+    
+    // MARK: - Private
     
     private func updateStreamingMessage(_ content: String) {
-        if let lastIndex = chatMessages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
-            chatMessages[lastIndex].content = content
+        if let lastIndex = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+            messages[lastIndex].content = content
         } else {
-            chatMessages.append(ChatMessage(role: .assistant, content: content, isStreaming: true))
+            messages.append(ChatMessage(role: .assistant, content: content, isStreaming: true))
         }
     }
     
     private func finalizeMessage(_ content: String) {
-        if let lastIndex = chatMessages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
-            chatMessages[lastIndex].content = content
-            chatMessages[lastIndex].isStreaming = false
+        if let lastIndex = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+            messages[lastIndex].content = content
+            messages[lastIndex].isStreaming = false
+        }
+    }
+}
+```
+
+#### NavigationDomain
+
+```swift
+/// Domain: Navigation state, tabs, sheets
+@Observable
+@MainActor
+final class NavigationDomain {
+    
+    // MARK: - State
+    var path = NavigationPath()
+    var selectedTab: Tab = .map
+    var showingChat: Bool = false
+    var showingFilters: Bool = false
+    var showingSettings: Bool = false
+    
+    enum Tab: String, CaseIterable, Identifiable {
+        case map, search, chat, settings
+        var id: String { rawValue }
+    }
+    
+    // MARK: - Actions
+    
+    func navigate(to destination: any Hashable) {
+        path.append(destination)
+    }
+    
+    func pop() {
+        guard !path.isEmpty else { return }
+        path.removeLast()
+    }
+    
+    func popToRoot() {
+        path = NavigationPath()
+    }
+    
+    func showChat() {
+        showingChat = true
+    }
+    
+    func showFilters() {
+        showingFilters = true
+    }
+}
+```
+
+#### SystemDomain
+
+```swift
+/// Domain: Connectivity, loading, errors, app-wide concerns
+@Observable
+@MainActor
+final class SystemDomain {
+    
+    // MARK: - Dependencies
+    private let connectivityMonitor: ConnectivityMonitor
+    
+    // MARK: - State
+    var connectivityMode: ConnectivityMode = .offline
+    var isLoading: Bool = false
+    var error: AppError?
+    
+    // MARK: - Init
+    
+    init(connectivityMonitor: ConnectivityMonitor) {
+        self.connectivityMonitor = connectivityMonitor
+    }
+    
+    // MARK: - Actions
+    
+    func startMonitoring() {
+        Task {
+            for await mode in connectivityMonitor.modeStream {
+                self.connectivityMode = mode
+            }
         }
     }
     
-    private func fitMapToAirports() {
-        guard !filteredAirports.isEmpty else { return }
-        // Calculate bounding box and set map position
+    func setLoading(_ loading: Bool) {
+        isLoading = loading
     }
     
-    private func fitMapToRoute() {
-        guard let route = activeRoute else { return }
-        // Calculate bounding box for route
+    func setError(_ error: Error?) {
+        self.error = error.map { AppError(from: $0) }
+    }
+    
+    func clearError() {
+        error = nil
+    }
+}
+```
+
+### 5.3 AppState (Thin Orchestration Layer)
+
+AppState composes domains and handles cross-domain coordination.
+
+```swift
+import SwiftUI
+import RZFlight
+
+/// Single source of truth - composes domain objects
+/// Handles cross-domain coordination only
+@Observable
+@MainActor
+final class AppState {
+    
+    // MARK: - Domain Objects
+    let airports: AirportDomain
+    let chat: ChatDomain
+    let navigation: NavigationDomain
+    let system: SystemDomain
+    
+    // MARK: - Init
+    
+    init(
+        repository: AirportRepository,
+        chatbotService: ChatbotService,
+        connectivityMonitor: ConnectivityMonitor
+    ) {
+        self.airports = AirportDomain(repository: repository)
+        self.chat = ChatDomain(chatbotService: chatbotService)
+        self.navigation = NavigationDomain()
+        self.system = SystemDomain(connectivityMonitor: connectivityMonitor)
+        
+        // Wire up cross-domain callbacks
+        setupCrossDomainWiring()
+    }
+    
+    // MARK: - Cross-Domain Wiring
+    
+    private func setupCrossDomainWiring() {
+        // Chat visualizations update airport domain
+        chat.onVisualization = { [weak self] payload in
+            self?.airports.applyVisualization(payload)
+        }
+    }
+    
+    // MARK: - Lifecycle
+    
+    func onAppear() async {
+        system.startMonitoring()
+        system.setLoading(true)
+        defer { system.setLoading(false) }
+        
+        do {
+            try await airports.load()
+        } catch {
+            system.setError(error)
+        }
+    }
+    
+    // MARK: - Cross-Domain Actions (Orchestration)
+    
+    /// Search that might involve both airports and navigation
+    func search(query: String) async {
+        do {
+            try await airports.search(query: query)
+            // If single result, navigate to detail
+            if airports.searchResults.count == 1,
+               let airport = airports.searchResults.first {
+                airports.select(airport)
+            }
+        } catch {
+            system.setError(error)
+        }
+    }
+    
+    /// Apply filters and navigate to results
+    func applyFiltersAndShow() async {
+        system.setLoading(true)
+        defer { system.setLoading(false) }
+        
+        do {
+            try await airports.applyFilters()
+            navigation.showingFilters = false
+        } catch {
+            system.setError(error)
+        }
+    }
+    
+    /// Select airport from chat and show on map
+    func selectAirportFromChat(_ airport: Airport) {
+        airports.select(airport)
+        navigation.showingChat = false
+        navigation.selectedTab = .map
+    }
+}
+```
+
+### 5.4 Environment Injection
+
+```swift
+// MARK: - Environment Key
+
+struct AppStateKey: EnvironmentKey {
+    static let defaultValue: AppState? = nil
+}
+
+extension EnvironmentValues {
+    var appState: AppState? {
+        get { self[AppStateKey.self] }
+        set { self[AppStateKey.self] = newValue }
     }
 }
 
-// MARK: - Legend Mode
+// MARK: - App Entry Point
 
+@main
+struct FlyFunEuroAIPApp: App {
+    @State private var appState: AppState
+    
+    init() {
+        let repository = AirportRepository()
+        let chatbot = ChatbotServiceFactory.create()
+        let connectivity = ConnectivityMonitor()
+        
+        _appState = State(initialValue: AppState(
+            repository: repository,
+            chatbotService: chatbot,
+            connectivityMonitor: connectivity
+        ))
+    }
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(\.appState, appState)
+        }
+    }
+}
+```
+
+### 5.5 Usage in Views
+
+Views access domains through AppState:
+
+```swift
+struct AirportMapView: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        // Access airport domain state
+        let airports = state?.airports
+        
+        Map(position: Binding(
+            get: { airports?.mapPosition ?? .automatic },
+            set: { airports?.mapPosition = $0 }
+        )) {
+            if let airports {
+                ForEach(airports.airports) { airport in
+                    Annotation(airport.icao, coordinate: airport.coord) {
+                        AirportMarker(airport: airport, legendMode: airports.legendMode)
+                            .onTapGesture {
+                                airports.select(airport)
+                            }
+                    }
+                }
+                
+                if let route = airports.activeRoute {
+                    MapPolyline(coordinates: route.coordinates)
+                        .stroke(.blue, lineWidth: 3)
+                }
+            }
+        }
+    }
+}
+
+struct ChatView: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        // Access chat domain directly
+        let chat = state?.chat
+        
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack {
+                    ForEach(chat?.messages ?? []) { message in
+                        ChatBubble(message: message)
+                    }
+                }
+            }
+            
+            ChatInputBar(
+                text: Binding(
+                    get: { chat?.input ?? "" },
+                    set: { chat?.input = $0 }
+                ),
+                isStreaming: chat?.isStreaming ?? false,
+                onSend: {
+                    Task { await chat?.send() }
+                }
+            )
+        }
+    }
+}
+```
+
+### 5.6 Benefits of Composed AppState
+
+| Aspect | Monolithic | Composed |
+|--------|------------|----------|
+| **Lines per file** | 2,000+ | 200-400 |
+| **Testability** | Hard (mock everything) | Easy (test domain in isolation) |
+| **Merge conflicts** | Frequent | Rare |
+| **Reasoning** | Complex | Clear ownership |
+| **Adding features** | Edit God-class | Add new domain |
+| **Single source of truth** | ✅ Yes | ✅ Yes |
+| **Cross-domain sync** | Implicit | Explicit callbacks |
+
+### 5.7 When to Add a New Domain
+
+Add a new domain when:
+- You have 5+ related properties
+- Properties have their own actions
+- State is independently testable
+- Logic is reusable
+
+**Examples:**
+- `SettingsDomain` - user preferences, sync settings
+- `CacheDomain` - offline tile management, database sync
+- `AnalyticsDomain` - usage tracking (if needed)
+
+---
+
+## 5a. No ViewModels - Clarification
+
+**Rule:** The app uses `AppState` with composed domains. There are NO standalone ViewModels.
+
+**What this means:**
+- ❌ No `AirportMapViewModel.swift`
+- ❌ No `ChatbotViewModel.swift`  
+- ❌ No `FilterViewModel.swift`
+
+**If you need view-specific logic:**
+
+Option 1: Put it in the domain
+```swift
+// ChatDomain handles all chat logic
+state.chat.send()
+```
+
+Option 2: Use a thin ViewCoordinator (read-only projections)
+```swift
+/// Read-only projection for complex view logic
+/// NEVER holds unique state - just convenience computed properties
+struct MapViewCoordinator {
+    let airports: AirportDomain
+    
+    var visibleAirports: [Airport] {
+        airports.airports.filter { /* visible in region */ }
+    }
+    
+    var markerCount: Int {
+        visibleAirports.count
+    }
+}
+```
+
+**ViewCoordinator rules:**
+1. No `@Observable` - it's a struct
+2. No stored state - only computed properties
+3. Takes domain(s) as input
+4. Used for complex view-specific computations only
+
+---
+
+## 5b. Legend Mode
+
+```swift
 enum LegendMode: String, CaseIterable, Identifiable {
     case airportType = "Airport Type"
     case procedurePrecision = "Procedure Precision"
@@ -1328,9 +1738,9 @@ struct AirportMapView: View {
             set: { state?.mapPosition = $0 }
         )) {
             if let state {
-                ForEach(state.filteredAirports) { airport in
+                ForEach(state.airports.airports) { airport in
                     Annotation(airport.icao, coordinate: airport.coord) {
-                        AirportMarker(airport: airport, legendMode: state.legendMode)
+                        AirportMarker(airport: airport, legendMode: state.airports.legendMode)
                             .onTapGesture {
                                 state.selectAirport(airport)
                             }
@@ -1347,17 +1757,19 @@ struct AirportMapView: View {
 }
 ```
 
-### 5.4 Benefits of Single AppState
+### 5.8 Benefits of Composed AppState
 
 | Aspect | Benefit |
 |--------|---------|
-| **Chat → Map Sync** | Chatbot calls `appState.applyVisualization()` directly |
-| **Filter Changes** | One place updates, all views react |
-| **Deep Linking** | Set `navigationPath` to navigate anywhere |
-| **Testing** | Mock one object, test everything |
-| **Debugging** | All state in one place to inspect |
-| **Persistence** | Easy to serialize entire state |
-| **Undo/Redo** | Possible to snapshot and restore |
+| **Chat → Map Sync** | Chatbot calls `airports.applyVisualization()` via callback |
+| **Filter Changes** | One domain owns filters, all views react |
+| **Deep Linking** | Set `navigation.path` to navigate anywhere |
+| **Testing** | Test each domain in isolation (~200-400 lines) |
+| **Debugging** | Clear domain ownership, inspect specific domain |
+| **Persistence** | Serialize individual domains or all |
+| **Undo/Redo** | Snapshot individual domain state |
+| **Maintainability** | No 2,000-line God-class |
+| **Onboarding** | New devs can understand one domain at a time |
 
 ---
 
@@ -1606,28 +2018,28 @@ struct AirportMapView: View {
     
     var body: some View {
         Map(position: Binding(
-            get: { state?.mapPosition ?? .automatic },
-            set: { state?.mapPosition = $0 }
+            get: { state?.airports.mapPosition ?? .automatic },
+            set: { state?.airports.mapPosition = $0 }
         )) {
             if let state {
-                // Airport markers with clustering
-                ForEach(state.filteredAirports) { airport in
+                // Airport markers - already filtered by repository
+                ForEach(state.airports.airports) { airport in
                     Annotation(airport.icao, coordinate: airport.coord) {
-                        AirportMarker(airport: airport, legendMode: state.legendMode)
+                        AirportMarker(airport: airport, legendMode: state.airports.legendMode)
                             .onTapGesture {
-                                state.selectAirport(airport)
+                                state.airports.select(airport)
                             }
                     }
                 }
                 
                 // Route polyline
-                if let route = state.activeRoute {
+                if let route = state.airports.activeRoute {
                     MapPolyline(coordinates: route.coordinates)
                         .stroke(.blue, lineWidth: 3)
                 }
                 
                 // Highlights (from chatbot)
-                ForEach(Array(state.highlights.values)) { highlight in
+                ForEach(Array(state.airports.highlights.values)) { highlight in
                     MapCircle(center: highlight.coordinate, radius: highlight.radius)
                         .foregroundStyle(highlight.color.opacity(0.3))
                         .stroke(highlight.color, lineWidth: 2)
@@ -2032,45 +2444,52 @@ final class CacheManager {
 
 ### Phase 1: Foundation (2-3 weeks)
 - [ ] Repository pattern with offline/online sources
-- [ ] Core models (Airport, Runway, Procedure, etc.)
+- [ ] Verify RZFlight integration (no duplicate models)
 - [ ] Connectivity monitoring
-- [ ] Enhanced AirportMapViewModel
-- [ ] Basic filter implementation
+- [ ] FilterConfig with apply() using RZFlight extensions
 
-### Phase 2: UI Enhancement (2-3 weeks)
+### Phase 2: AppState with Composed Domains (2 weeks)
+- [ ] `AirportDomain` - airports, filters, map state
+- [ ] `ChatDomain` - messages, streaming
+- [ ] `NavigationDomain` - tabs, sheets, path
+- [ ] `SystemDomain` - connectivity, errors
+- [ ] `AppState` - thin orchestration, cross-domain wiring
+
+### Phase 3: UI Implementation (2-3 weeks)
 - [ ] Adaptive layouts (iPhone/iPad/Mac)
-- [ ] Filter panel with all filters
+- [ ] Filter panel connected to AirportDomain
 - [ ] Airport detail view
 - [ ] Search with route detection
 - [ ] Legend modes
 
-### Phase 3: Online Integration (2 weeks)
+### Phase 4: Online Integration (2 weeks)
 - [ ] API client implementation
-- [ ] Remote data source
+- [ ] Remote data source with RZFlight adapters
 - [ ] Sync service
 - [ ] Cache management
 - [ ] Error handling & fallbacks
 
-### Phase 4: Chatbot - Online (2-3 weeks)
+### Phase 5: Chatbot - Online (2-3 weeks)
 - [ ] SSE streaming client
-- [ ] ChatbotViewModel
+- [ ] Wire ChatDomain to chatbot service
 - [ ] Chat UI (messages, streaming, thinking)
-- [ ] Visualization handling
+- [ ] Visualization handling via cross-domain callback
 - [ ] Filter profile application
 
-### Phase 5: Chatbot - Offline (3-4 weeks)
-- [ ] On-device LLM integration (Core ML / Apple Intelligence)
+### Phase 6: Chatbot - Offline (3-4 weeks)
+- [ ] On-device LLM integration (Apple Intelligence)
 - [ ] Offline tool registry
 - [ ] Simplified planning
 - [ ] Local tool execution
 - [ ] Offline visualization
 
-### Phase 6: Polish & Testing (2 weeks)
+### Phase 7: Polish & Testing (2 weeks)
 - [ ] Performance optimization
 - [ ] Offline map tile caching
 - [ ] Error handling refinement
 - [ ] UI polish and animations
 - [ ] Testing on all platforms
+- [ ] Unit tests for each domain in isolation
 
 ---
 
@@ -2126,9 +2545,11 @@ Using latest Apple frameworks eliminates need for:
 | Question | Decision |
 |----------|----------|
 | Platform version | iOS 18.0+ / macOS 15.0+ (latest only) |
-| State management | Single `AppState` with `@Observable` |
+| State management | Single `AppState` composed of domain objects |
+| God-class risk | Avoided via composed domains (~200-400 lines each) |
 | On-device LLM | Apple Intelligence (device-dependent fallback) |
-| ViewModels | Eliminated - use `AppState` directly via `@Environment` |
+| ViewModels | Eliminated - use domain objects via `@Environment` |
+| Cross-domain sync | Explicit callbacks (e.g., `chat.onVisualization`) |
 
 ### Remaining Questions
 
