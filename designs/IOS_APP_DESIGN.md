@@ -740,11 +740,160 @@ struct APIAirportResponse: Codable {
 
 ## 4. Chatbot Design
 
-### 4.1 Chatbot Architecture
+### 4.1 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      ChatbotService Protocol                     │
+│    sendMessage(_:) -> AsyncThrowingStream<ChatEvent, Error>     │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+              ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────────────┐
+│   OnlineChatbotService  │     │    OfflineChatbotService        │
+│                         │     │                                 │
+│  - SSE from web API     │     │  - LLMBackend (abstracted)      │
+│  - Server does planning │     │  - Local tool execution         │
+│  - Full capabilities    │     │  - Subset of capabilities       │
+└─────────────────────────┘     └────────────────┬────────────────┘
+                                                 │
+                                                 ▼
+                                ┌─────────────────────────────────┐
+                                │      LLMBackend Protocol        │
+                                │  (Swappable AI implementation)  │
+                                ├─────────────────────────────────┤
+                                │ - AppleIntelligenceBackend      │
+                                │ - LlamaBackend (llama.cpp)      │
+                                │ - MLXBackend                    │
+                                │ - KeywordFallbackBackend        │
+                                └─────────────────────────────────┘
+
+                    SHARED ACROSS ONLINE/OFFLINE:
+                    ┌─────────────────────────────────────────┐
+                    │           ToolCatalog                   │
+                    │  - Same tool definitions everywhere     │
+                    │  - Same argument schemas                │
+                    │  - Same visualization output types      │
+                    └─────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+- **Offline AI is POST-1.0** - abstraction exists, implementation deferred
+- **LLM backend is swappable** - can use Apple Intelligence, llama.cpp, MLX, or keyword fallback
+- **Shared tool catalog** - avoid grammar drift between online/offline
+
+### 4.2 Shared Tool Catalog
+
+**Critical:** Online and offline use the **same tool definitions**. The server's tool catalog is the source of truth; the client mirrors it.
+
+```swift
+/// Shared tool definitions - SAME schema as server
+/// Source of truth: shared/aviation_agent/tools.py
+enum ToolCatalog {
+    
+    // MARK: - Tool Definitions
+    
+    static let allTools: [ToolDefinition] = [
+        searchAirports,
+        getAirportInfo,
+        findAirportsNearRoute,
+        findAirportsInCountry,
+        findAirportsNearLocation,
+        getAirportProcedures,
+        getCountryRules
+    ]
+    
+    static let searchAirports = ToolDefinition(
+        name: "search_airports",
+        description: "Search airports by ICAO code, name, or city",
+        parameters: [
+            .init(name: "query", type: .string, required: true,
+                  description: "Search query (ICAO, name, or city)"),
+            .init(name: "limit", type: .integer, required: false,
+                  description: "Max results", defaultValue: 50),
+            .init(name: "filters", type: .object, required: false,
+                  description: "Optional FilterConfig")
+        ],
+        outputType: .airportList,
+        availableOffline: true
+    )
+    
+    static let getAirportInfo = ToolDefinition(
+        name: "get_airport_info",
+        description: "Get detailed information about a specific airport",
+        parameters: [
+            .init(name: "icao", type: .string, required: true,
+                  description: "4-letter ICAO code")
+        ],
+        outputType: .airportDetail,
+        availableOffline: true
+    )
+    
+    static let findAirportsNearRoute = ToolDefinition(
+        name: "find_airports_near_route",
+        description: "Find airports along a route between two points",
+        parameters: [
+            .init(name: "departure", type: .string, required: true,
+                  description: "Departure ICAO"),
+            .init(name: "destination", type: .string, required: true,
+                  description: "Destination ICAO"),
+            .init(name: "distance_nm", type: .integer, required: false,
+                  description: "Distance from route in NM", defaultValue: 50),
+            .init(name: "filters", type: .object, required: false,
+                  description: "Optional FilterConfig")
+        ],
+        outputType: .routeWithAirports,
+        availableOffline: true  // Uses local DB
+    )
+    
+    // ... more tools
+    
+    // MARK: - Offline Availability
+    
+    static var offlineTools: [ToolDefinition] {
+        allTools.filter { $0.availableOffline }
+    }
+}
+
+/// Tool definition matching server schema
+struct ToolDefinition: Codable, Identifiable {
+    let name: String
+    let description: String
+    let parameters: [ParameterDefinition]
+    let outputType: OutputType
+    let availableOffline: Bool
+    
+    var id: String { name }
+    
+    enum OutputType: String, Codable {
+        case airportList
+        case airportDetail
+        case routeWithAirports
+        case countryRules
+        case text
+    }
+}
+
+struct ParameterDefinition: Codable {
+    let name: String
+    let type: ParameterType
+    let required: Bool
+    let description: String
+    let defaultValue: AnyCodable?
+    
+    enum ParameterType: String, Codable {
+        case string, integer, number, boolean, object, array
+    }
+}
+```
+
+### 4.3 ChatbotService Protocol
 
 ```swift
 /// Protocol for chatbot implementations
-protocol ChatbotService {
+protocol ChatbotService: Sendable {
     var isOnline: Bool { get }
     var capabilities: ChatbotCapabilities { get }
     
@@ -753,35 +902,51 @@ protocol ChatbotService {
 }
 
 /// Chatbot capabilities (varies by mode)
-struct ChatbotCapabilities {
+struct ChatbotCapabilities: Sendable {
     let supportsStreaming: Bool
     let supportsToolCalls: Bool
     let supportsVisualization: Bool
-    let supportedFilters: [String]
+    let availableTools: [String]  // Tool names from ToolCatalog
     let maxContextLength: Int
+    
+    static let online = ChatbotCapabilities(
+        supportsStreaming: true,
+        supportsToolCalls: true,
+        supportsVisualization: true,
+        availableTools: ToolCatalog.allTools.map(\.name),
+        maxContextLength: 128_000
+    )
+    
+    static let offline = ChatbotCapabilities(
+        supportsStreaming: true,
+        supportsToolCalls: true,
+        supportsVisualization: true,
+        availableTools: ToolCatalog.offlineTools.map(\.name),
+        maxContextLength: 8_192
+    )
+    
+    static let fallback = ChatbotCapabilities(
+        supportsStreaming: false,
+        supportsToolCalls: true,
+        supportsVisualization: true,
+        availableTools: ToolCatalog.offlineTools.map(\.name),
+        maxContextLength: 0  // No LLM
+    )
 }
 ```
 
-### 4.2 Online Chatbot (Full Functionality)
+### 4.4 Online Chatbot (Full Functionality)
 
 ```swift
 /// Online chatbot using web API (SSE streaming)
+/// Server handles all planning and tool execution
 final class OnlineChatbotService: ChatbotService {
     private let apiClient: APIClient
     private var sessionId: String?
     private var conversationHistory: [ChatMessage] = []
     
     var isOnline: Bool { true }
-    
-    var capabilities: ChatbotCapabilities {
-        ChatbotCapabilities(
-            supportsStreaming: true,
-            supportsToolCalls: true,
-            supportsVisualization: true,
-            supportedFilters: FilterConfig.allFilterNames,
-            maxContextLength: 128_000
-        )
-    }
+    var capabilities: ChatbotCapabilities { .online }
     
     func sendMessage(_ message: String) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -808,67 +973,281 @@ final class OnlineChatbotService: ChatbotService {
             }
         }
     }
+    
+    func clearHistory() {
+        conversationHistory = []
+        sessionId = nil
+    }
 }
 ```
 
-### 4.3 Offline Chatbot (Apple Intelligence - iOS 18+)
+### 4.5 LLM Backend Abstraction (For Future Offline AI)
+
+**This is the key abstraction for swappable AI backends.**
 
 ```swift
-import Foundation
+/// Protocol for on-device LLM backends
+/// Implementations: AppleIntelligence, llama.cpp, MLX, keyword fallback
+protocol LLMBackend: Sendable {
+    /// Check if this backend is available on current device
+    static var isAvailable: Bool { get }
+    
+    /// Human-readable name for UI
+    var name: String { get }
+    
+    /// Generate a streaming response
+    func generate(
+        prompt: String,
+        systemPrompt: String?,
+        maxTokens: Int
+    ) -> AsyncThrowingStream<String, Error>
+    
+    /// Classify user intent (for tool selection)
+    func classifyIntent(
+        message: String,
+        availableTools: [ToolDefinition]
+    ) async throws -> IntentClassification
+    
+    /// Extract tool arguments from user message
+    func extractArguments(
+        message: String,
+        tool: ToolDefinition
+    ) async throws -> [String: Any]
+}
 
-/// Offline chatbot using Apple Intelligence (iOS 18+)
-/// Falls back to keyword-based responses if Apple Intelligence unavailable
-@available(iOS 18.0, macOS 15.0, *)
+/// Result of intent classification
+struct IntentClassification {
+    let suggestedTool: String?
+    let confidence: Double
+    let reasoning: String?
+}
+
+// MARK: - Backend Implementations
+
+/// Apple Intelligence backend (iOS 18.1+, device-gated)
+/// POST-1.0: Implementation deferred
+@available(iOS 18.1, macOS 15.1, *)
+final class AppleIntelligenceBackend: LLMBackend {
+    static var isAvailable: Bool {
+        // Check device capability
+        // Apple Intelligence is not available on all devices
+        false  // TODO: Check actual API availability
+    }
+    
+    var name: String { "Apple Intelligence" }
+    
+    func generate(prompt: String, systemPrompt: String?, maxTokens: Int) -> AsyncThrowingStream<String, Error> {
+        // TODO: Implement when Apple Intelligence API is stable
+        fatalError("Not implemented - POST-1.0")
+    }
+    
+    func classifyIntent(message: String, availableTools: [ToolDefinition]) async throws -> IntentClassification {
+        fatalError("Not implemented - POST-1.0")
+    }
+    
+    func extractArguments(message: String, tool: ToolDefinition) async throws -> [String: Any] {
+        fatalError("Not implemented - POST-1.0")
+    }
+}
+
+/// llama.cpp backend (future option)
+/// Could use small models like Llama 3.2 1B, Phi-3 mini, etc.
+final class LlamaCppBackend: LLMBackend {
+    static var isAvailable: Bool {
+        // Check if model file exists in app bundle or downloaded
+        false  // TODO: Implement
+    }
+    
+    var name: String { "Local LLM (llama.cpp)" }
+    
+    // TODO: Implement using llama.cpp Swift bindings
+    func generate(prompt: String, systemPrompt: String?, maxTokens: Int) -> AsyncThrowingStream<String, Error> {
+        fatalError("Not implemented - POST-1.0")
+    }
+    
+    func classifyIntent(message: String, availableTools: [ToolDefinition]) async throws -> IntentClassification {
+        fatalError("Not implemented - POST-1.0")
+    }
+    
+    func extractArguments(message: String, tool: ToolDefinition) async throws -> [String: Any] {
+        fatalError("Not implemented - POST-1.0")
+    }
+}
+
+/// Keyword-based fallback (always available, no AI)
+/// This is the 1.0 offline implementation
+final class KeywordFallbackBackend: LLMBackend {
+    static var isAvailable: Bool { true }  // Always available
+    
+    var name: String { "Basic (No AI)" }
+    
+    func generate(prompt: String, systemPrompt: String?, maxTokens: Int) -> AsyncThrowingStream<String, Error> {
+        // No generation capability - return empty stream
+        AsyncThrowingStream { $0.finish() }
+    }
+    
+    func classifyIntent(message: String, availableTools: [ToolDefinition]) async throws -> IntentClassification {
+        // Pattern matching for common queries
+        let lower = message.lowercased()
+        
+        if lower.contains("between") || lower.contains("route") || 
+           lower.contains("from") && lower.contains("to") {
+            return IntentClassification(
+                suggestedTool: "find_airports_near_route",
+                confidence: 0.8,
+                reasoning: "Detected route keywords"
+            )
+        }
+        
+        // Check for ICAO code pattern
+        let icaoPattern = try! NSRegularExpression(pattern: "\\b[A-Z]{4}\\b")
+        let range = NSRange(message.startIndex..., in: message)
+        if icaoPattern.firstMatch(in: message.uppercased(), range: range) != nil {
+            return IntentClassification(
+                suggestedTool: "get_airport_info",
+                confidence: 0.9,
+                reasoning: "Detected ICAO code"
+            )
+        }
+        
+        if lower.contains("search") || lower.contains("find") || lower.contains("airports") {
+            return IntentClassification(
+                suggestedTool: "search_airports",
+                confidence: 0.7,
+                reasoning: "Detected search intent"
+            )
+        }
+        
+        return IntentClassification(
+            suggestedTool: nil,
+            confidence: 0.0,
+            reasoning: "No pattern matched"
+        )
+    }
+    
+    func extractArguments(message: String, tool: ToolDefinition) async throws -> [String: Any] {
+        // Simple extraction based on tool type
+        switch tool.name {
+        case "get_airport_info":
+            // Extract ICAO code
+            let pattern = try! NSRegularExpression(pattern: "\\b([A-Z]{4})\\b")
+            let range = NSRange(message.startIndex..., in: message)
+            if let match = pattern.firstMatch(in: message.uppercased(), range: range),
+               let icaoRange = Range(match.range(at: 1), in: message.uppercased()) {
+                return ["icao": String(message.uppercased()[icaoRange])]
+            }
+            
+        case "find_airports_near_route":
+            // Extract two ICAO codes
+            let pattern = try! NSRegularExpression(pattern: "\\b([A-Z]{4})\\b")
+            let range = NSRange(message.startIndex..., in: message)
+            let matches = pattern.matches(in: message.uppercased(), range: range)
+            if matches.count >= 2,
+               let dep = Range(matches[0].range(at: 1), in: message.uppercased()),
+               let dest = Range(matches[1].range(at: 1), in: message.uppercased()) {
+                return [
+                    "departure": String(message.uppercased()[dep]),
+                    "destination": String(message.uppercased()[dest])
+                ]
+            }
+            
+        case "search_airports":
+            // Use entire message as query (minus common words)
+            let cleaned = message
+                .replacingOccurrences(of: "search", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "find", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "airports", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespaces)
+            return ["query": cleaned.isEmpty ? message : cleaned]
+            
+        default:
+            break
+        }
+        
+        return [:]
+    }
+}
+```
+
+### 4.6 Offline Chatbot Service
+
+```swift
+/// Offline chatbot - uses LLMBackend abstraction
+/// 1.0: Uses KeywordFallbackBackend
+/// Future: Can swap in AppleIntelligence, llama.cpp, etc.
 final class OfflineChatbotService: ChatbotService {
-    private let toolRegistry: OfflineToolRegistry
+    private let backend: any LLMBackend
+    private let toolExecutor: ToolExecutor
     private var conversationHistory: [ChatMessage] = []
     
     var isOnline: Bool { false }
-    
     var capabilities: ChatbotCapabilities {
-        ChatbotCapabilities(
-            supportsStreaming: true,
-            supportsToolCalls: true,
-            supportsVisualization: true,
-            supportedFilters: ["country", "hasProcedures", "pointOfEntry", "hasHardRunway"],
-            maxContextLength: 8_192
-        )
+        backend is KeywordFallbackBackend ? .fallback : .offline
+    }
+    
+    init(backend: any LLMBackend, repository: AirportRepositoryProtocol) {
+        self.backend = backend
+        self.toolExecutor = ToolExecutor(repository: repository)
     }
     
     func sendMessage(_ message: String) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    // 1. Use Apple Intelligence for intent understanding
-                    let intent = try await understandIntent(message)
-                    continuation.yield(.thinking("Understanding: \(intent.description)"))
+                    // 1. Classify intent using backend
+                    let intent = try await backend.classifyIntent(
+                        message: message,
+                        availableTools: ToolCatalog.offlineTools
+                    )
                     
-                    // 2. Execute tool locally
-                    if let tool = intent.suggestedTool {
-                        let result = try await toolRegistry.execute(tool, arguments: intent.arguments)
-                        continuation.yield(.toolCall(name: tool, args: intent.arguments))
+                    if let reasoning = intent.reasoning {
+                        continuation.yield(.thinking(reasoning))
+                    }
+                    
+                    // 2. Execute tool if suggested
+                    if let toolName = intent.suggestedTool,
+                       let tool = ToolCatalog.offlineTools.first(where: { $0.name == toolName }) {
                         
-                        // 3. Generate response using Apple Intelligence
-                        let response = try await generateResponse(
-                            intent: intent,
-                            toolResult: result,
-                            context: conversationHistory
-                        )
+                        // Extract arguments
+                        let args = try await backend.extractArguments(message: message, tool: tool)
+                        continuation.yield(.toolCall(name: toolName, args: args))
                         
-                        // Stream response token by token
-                        for await token in response.tokens {
-                            continuation.yield(.content(token))
+                        // Execute tool
+                        let result = try await toolExecutor.execute(tool: tool, arguments: args)
+                        
+                        // Generate response (if backend supports it)
+                        if !(backend is KeywordFallbackBackend) {
+                            let prompt = buildResponsePrompt(toolResult: result, originalMessage: message)
+                            for try await token in backend.generate(prompt: prompt, systemPrompt: nil, maxTokens: 500) {
+                                continuation.yield(.content(token))
+                            }
+                        } else {
+                            // Keyword fallback: template response
+                            let response = buildTemplateResponse(toolResult: result, tool: tool)
+                            continuation.yield(.content(response))
                         }
                         
-                        // 4. Generate visualization
+                        // Emit visualization
                         if let viz = result.visualization {
                             continuation.yield(.visualization(viz))
                         }
                     } else {
-                        // Direct answer without tool
-                        let response = try await generateDirectResponse(message)
-                        for await token in response.tokens {
-                            continuation.yield(.content(token))
+                        // No tool matched
+                        if backend is KeywordFallbackBackend {
+                            continuation.yield(.content(
+                                "I can help you search for airports, get airport information, " +
+                                "or find airports along a route. Try asking about a specific " +
+                                "ICAO code like EGLL or search for airports in a country."
+                            ))
+                        } else {
+                            // Let LLM generate a response
+                            for try await token in backend.generate(
+                                prompt: message,
+                                systemPrompt: "You are an aviation assistant.",
+                                maxTokens: 500
+                            ) {
+                                continuation.yield(.content(token))
+                            }
                         }
                     }
                     
@@ -881,89 +1260,141 @@ final class OfflineChatbotService: ChatbotService {
         }
     }
     
-    /// Use Apple Intelligence to understand user intent
-    private func understandIntent(_ message: String) async throws -> ChatIntent {
-        // Apple Intelligence API for intent classification
-        // Falls back to keyword matching if unavailable
-        
-        // Detect common patterns
-        if message.lowercased().contains("near") || message.lowercased().contains("between") {
-            return ChatIntent(type: .routeSearch, suggestedTool: "find_airports_near_route")
-        }
-        if message.uppercased().range(of: "[A-Z]{4}", options: .regularExpression) != nil {
-            return ChatIntent(type: .airportInfo, suggestedTool: "get_airport_info")
-        }
-        if message.lowercased().contains("filter") || message.lowercased().contains("with") {
-            return ChatIntent(type: .filterSearch, suggestedTool: "search_airports")
-        }
-        
-        return ChatIntent(type: .general, suggestedTool: nil)
-    }
-}
-
-/// Chat intent understood from user message
-struct ChatIntent {
-    enum IntentType {
-        case routeSearch
-        case airportInfo
-        case filterSearch
-        case general
+    func clearHistory() {
+        conversationHistory = []
     }
     
-    let type: IntentType
-    let suggestedTool: String?
-    var arguments: [String: Any] = [:]
-    
-    var description: String {
-        switch type {
-        case .routeSearch: return "Finding airports along route"
-        case .airportInfo: return "Getting airport information"
-        case .filterSearch: return "Searching with filters"
-        case .general: return "General question"
+    private func buildTemplateResponse(toolResult: ToolResult, tool: ToolDefinition) -> String {
+        switch tool.outputType {
+        case .airportList:
+            let count = toolResult.airports?.count ?? 0
+            return "Found \(count) airport\(count == 1 ? "" : "s")."
+        case .airportDetail:
+            if let airport = toolResult.airport {
+                return "**\(airport.name)** (\(airport.icao))\n" +
+                       "Location: \(airport.city), \(airport.country)\n" +
+                       "Elevation: \(airport.elevation_ft) ft"
+            }
+            return "Airport not found."
+        case .routeWithAirports:
+            let count = toolResult.airports?.count ?? 0
+            return "Found \(count) airport\(count == 1 ? "" : "s") along the route."
+        default:
+            return "Done."
         }
     }
 }
 ```
 
-### 4.4 Offline Tool Registry
+### 4.7 Tool Executor (Shared)
 
 ```swift
-/// Tools available offline
-final class OfflineToolRegistry {
-    private let airportRepository: LocalAirportDataSource
+/// Executes tools locally using repository
+/// Used by OfflineChatbotService
+final class ToolExecutor {
+    private let repository: AirportRepositoryProtocol
     
-    /// Available offline tools (subset of online)
-    enum OfflineTool: String, CaseIterable {
-        case searchAirports = "search_airports"
-        case getAirportInfo = "get_airport_info"
-        case findAirportsInCountry = "find_airports_in_country"
-        case findAirportsNearLocation = "find_airports_near_location"
-        // Note: Route search, AIP queries, etc. may be limited offline
+    init(repository: AirportRepositoryProtocol) {
+        self.repository = repository
     }
     
-    func execute(_ tool: String, arguments: [String: Any]) async throws -> ToolResult {
-        guard let offlineTool = OfflineTool(rawValue: tool) else {
-            throw ToolError.notAvailableOffline(tool)
-        }
-        
-        switch offlineTool {
-        case .searchAirports:
+    func execute(tool: ToolDefinition, arguments: [String: Any]) async throws -> ToolResult {
+        switch tool.name {
+        case "search_airports":
             let query = arguments["query"] as? String ?? ""
-            let airports = try await airportRepository.searchAirports(query: query, limit: 50)
-            return ToolResult(airports: airports)
+            let limit = arguments["limit"] as? Int ?? 50
+            let airports = try await repository.searchAirports(query: query, limit: limit)
+            return ToolResult(
+                airports: airports,
+                visualization: .markers(airports: airports)
+            )
             
-        case .getAirportInfo:
+        case "get_airport_info":
             let icao = arguments["icao"] as? String ?? ""
-            let detail = try await airportRepository.getAirportDetail(icao: icao)
-            return ToolResult(airportDetail: detail)
+            let airport = try await repository.airportDetail(icao: icao)
+            return ToolResult(
+                airport: airport,
+                visualization: airport.map { .markerWithDetails(airport: $0) }
+            )
             
-        // ... other tools
+        case "find_airports_near_route":
+            let departure = arguments["departure"] as? String ?? ""
+            let destination = arguments["destination"] as? String ?? ""
+            let distance = arguments["distance_nm"] as? Int ?? 50
+            let result = try await repository.airportsNearRoute(
+                from: departure, to: destination, distanceNm: distance, filters: .default
+            )
+            return ToolResult(
+                airports: result.airports,
+                visualization: .routeWithMarkers(
+                    route: RouteVisualization(
+                        coordinates: [],  // Would need to compute
+                        departure: departure,
+                        destination: destination
+                    ),
+                    airports: result.airports
+                )
+            )
+            
+        default:
+            throw ToolError.unknownTool(tool.name)
         }
+    }
+}
+
+/// Result of tool execution
+struct ToolResult {
+    let airports: [Airport]?
+    let airport: Airport?
+    let visualization: VisualizationPayload?
+    
+    init(airports: [Airport]? = nil, airport: Airport? = nil, visualization: VisualizationPayload? = nil) {
+        self.airports = airports
+        self.airport = airport
+        self.visualization = visualization
     }
 }
 ```
 
-### 4.5 Chatbot Events
+### 4.8 Chatbot Service Factory
+
+```swift
+/// Factory for creating appropriate chatbot service
+enum ChatbotServiceFactory {
+    
+    static func create(
+        connectivity: ConnectivityMode,
+        repository: AirportRepositoryProtocol,
+        apiClient: APIClient
+    ) -> any ChatbotService {
+        switch connectivity {
+        case .online, .hybrid:
+            return OnlineChatbotService(apiClient: apiClient)
+            
+        case .offline:
+            let backend = selectBestOfflineBackend()
+            return OfflineChatbotService(backend: backend, repository: repository)
+        }
+    }
+    
+    /// Select best available offline backend
+    /// Priority: AppleIntelligence > llama.cpp > MLX > Keyword fallback
+    private static func selectBestOfflineBackend() -> any LLMBackend {
+        // POST-1.0: Check for AI backends
+        // if #available(iOS 18.1, *), AppleIntelligenceBackend.isAvailable {
+        //     return AppleIntelligenceBackend()
+        // }
+        // if LlamaCppBackend.isAvailable {
+        //     return LlamaCppBackend()
+        // }
+        
+        // 1.0: Always use keyword fallback
+        return KeywordFallbackBackend()
+    }
+}
+```
+
+### 4.9 Chatbot Events
 
 ```swift
 /// Events streamed from chatbot
@@ -983,14 +1414,47 @@ struct VisualizationPayload: Sendable {
     let point: PointVisualization?
     let filterProfile: FilterConfig?
     
-    enum VisualizationKind: String {
+    enum VisualizationKind: String, Sendable {
         case markers
         case routeWithMarkers = "route_with_markers"
         case markerWithDetails = "marker_with_details"
         case pointWithMarkers = "point_with_markers"
     }
+    
+    static func markers(airports: [Airport]) -> VisualizationPayload {
+        VisualizationPayload(kind: .markers, airports: airports, route: nil, point: nil, filterProfile: nil)
+    }
+    
+    static func markerWithDetails(airport: Airport) -> VisualizationPayload {
+        VisualizationPayload(kind: .markerWithDetails, airports: [airport], route: nil, point: nil, filterProfile: nil)
+    }
+    
+    static func routeWithMarkers(route: RouteVisualization, airports: [Airport]) -> VisualizationPayload {
+        VisualizationPayload(kind: .routeWithMarkers, airports: airports, route: route, point: nil, filterProfile: nil)
+    }
 }
 ```
+
+### 4.10 Offline AI Roadmap
+
+**1.0 Release:**
+- ✅ `OnlineChatbotService` - Full functionality via API
+- ✅ `KeywordFallbackBackend` - Pattern matching, no AI
+- ✅ `ToolCatalog` - Shared tool definitions
+- ✅ `LLMBackend` protocol - Abstraction ready
+
+**Post-1.0 (When Stable):**
+- ⏳ `AppleIntelligenceBackend` - When API is mature and widely available
+- ⏳ `LlamaCppBackend` - Small models (Llama 3.2 1B, Phi-3 mini)
+- ⏳ `MLXBackend` - Apple Silicon optimized inference
+- ⏳ Model download manager - For bundled vs downloaded models
+
+**Decision Criteria for Shipping AI Backend:**
+1. API is stable (not changing every iOS point release)
+2. Works on >50% of target devices
+3. Response quality is acceptable (no worse than keyword fallback)
+4. Battery/thermal impact is acceptable
+5. Model size is reasonable for app download
 
 ---
 
@@ -2358,85 +2822,244 @@ struct ChatBubble: View {
 
 ---
 
-## 8. Data Sync Strategy
+## 8. Data Sync & Cache Policy
 
-### 8.1 Sync Architecture
+### 8.1 Canonical Data Sources
 
+**Core Principle:** The local SQLite database is the **canonical source of truth** for airport data. The API provides a view over the same data, potentially with enrichments, but never with schema conflicts.
+
+| Data Type | Canonical Source | API Role | Conflict Resolution |
+|-----------|-----------------|----------|---------------------|
+| **Airports** | Local DB | Read-only view | DB wins; API cannot add/modify airports |
+| **Runways** | Local DB | Read-only view | DB wins |
+| **Procedures** | Local DB | Read-only view | DB wins |
+| **AIP Entries** | Local DB | Enrichment source | API may provide newer entries; merge by timestamp |
+| **Country Rules** | Local DB (bundled JSON) | Read-only view | DB wins |
+| **GA Friendliness** | Local DB | Computed on server | Re-compute locally from DB or accept API values |
+| **User Preferences** | App (UserDefaults/SwiftData) | N/A | Local only |
+
+**Why DB is canonical:**
+- `KnownAirports` and RZFlight are built around SQLite
+- Offline-first requires local data to be authoritative
+- Spatial indexing (KDTree) is built from local DB
+- API is just a REST wrapper over the same database
+
+### 8.2 Database Versioning
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Database Version Hierarchy                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   BUNDLED DB (v1.0)          App ships with this                │
+│        │                     Location: Bundle.main              │
+│        │                     Read-only                          │
+│        ▼                                                        │
+│   ACTIVE DB (v1.2)           Copied to Documents on first run   │
+│        │                     Location: Documents/airports.db    │
+│        │                     Writable, replaced on sync         │
+│        ▼                                                        │
+│   SERVER DB (v1.3)           Source for updates                 │
+│                              Downloaded as full replacement     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Version Format:** `YYYYMMDD.N` (e.g., `20250115.1`)
+- Date component: when DB was generated
+- Sequence component: multiple builds per day
+
+**Version Storage:**
 ```swift
-/// Manages database synchronization
-final class SyncService: ObservableObject {
-    @Published var lastSyncDate: Date?
-    @Published var syncStatus: SyncStatus = .idle
-    @Published var downloadProgress: Double = 0
+struct DatabaseVersion: Codable, Comparable {
+    let date: Date        // 2025-01-15
+    let sequence: Int     // 1
+    let schemaVersion: Int // 3 (for migrations)
     
-    enum SyncStatus {
-        case idle
-        case checking
-        case downloading(progress: Double)
-        case applying
-        case complete
-        case failed(Error)
+    var versionString: String { /* "20250115.1" */ }
+    
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        (lhs.date, lhs.sequence) < (rhs.date, rhs.sequence)
     }
+}
+
+// Stored in DB metadata table and UserDefaults
+// SELECT value FROM metadata WHERE key = 'db_version'
+```
+
+### 8.3 Sync Strategy
+
+**Update Policy:** Full database replacement (no delta/patch)
+
+**Rationale:**
+- Database is ~20-50MB compressed - acceptable for periodic download
+- Delta patching is complex and error-prone with SQLite
+- Full replacement guarantees consistency
+- KDTree re-indexes automatically on `KnownAirports` init
+
+**Sync Triggers:**
+1. **App launch** (if last sync > 7 days ago)
+2. **Background refresh** (weekly, iOS BackgroundTasks)
+3. **User-initiated** (pull-to-refresh or settings)
+4. **API returns newer version** (opportunistic check)
+
+**Sync Flow:**
+```swift
+final class SyncService {
+    private let bundledVersion: DatabaseVersion
+    private var activeVersion: DatabaseVersion
     
-    /// Check for updates and sync if needed
     func syncIfNeeded() async throws {
-        syncStatus = .checking
+        // 1. Check server version
+        let serverVersion = try await api.getDatabaseVersion()
         
-        // Check server for latest database version
-        let serverVersion = try await apiClient.getDatabaseVersion()
-        
-        guard serverVersion > localDatabaseVersion else {
-            syncStatus = .complete
-            return
+        guard serverVersion > activeVersion else {
+            return // Already up to date
         }
         
-        // Download incremental updates or full database
-        syncStatus = .downloading(progress: 0)
+        // 2. Download new DB to temp location
+        let tempURL = try await api.downloadDatabase(version: serverVersion)
         
-        if let deltaURL = try await apiClient.getDeltaUpdate(from: localDatabaseVersion) {
-            // Apply incremental update
-            try await applyDelta(deltaURL)
-        } else {
-            // Download full database
-            try await downloadFullDatabase()
+        // 3. Validate downloaded DB
+        guard try validateDatabase(at: tempURL) else {
+            throw SyncError.validationFailed
         }
         
-        syncStatus = .complete
-        lastSyncDate = Date()
+        // 4. Atomic replacement
+        try replaceActiveDatabase(with: tempURL, version: serverVersion)
+        
+        // 5. Notify app to reload KnownAirports
+        NotificationCenter.default.post(name: .databaseUpdated, object: nil)
+    }
+    
+    private func replaceActiveDatabase(with newDB: URL, version: DatabaseVersion) throws {
+        let activeURL = documentsURL.appending(path: "airports.db")
+        let backupURL = documentsURL.appending(path: "airports.db.backup")
+        
+        // Backup current (in case rollback needed)
+        try? FileManager.default.removeItem(at: backupURL)
+        try? FileManager.default.copyItem(at: activeURL, to: backupURL)
+        
+        // Replace atomically
+        _ = try FileManager.default.replaceItemAt(activeURL, withItemAt: newDB)
+        
+        // Update version
+        activeVersion = version
+        UserDefaults.standard.set(version.versionString, forKey: "activeDBVersion")
     }
 }
 ```
 
-### 8.2 Caching Strategy
+### 8.4 API Data Handling
+
+**When Online:**
+- API responses are converted to RZFlight models (via adapters)
+- **Do NOT write API data back to local DB** (avoids conflicts)
+- API data is used for display only, not persisted
+- Exception: AIP entries may be cached (see below)
+
+**AIP Entry Caching:**
+```swift
+/// AIP entries from API can be cached for offline access
+/// These supplement (not replace) DB entries
+final class AIPCache {
+    private let store: SwiftData.ModelContainer
+    
+    /// Cache API-fetched AIP entries
+    /// Keyed by airport ICAO + fetch timestamp
+    func cache(entries: [AIPEntry], for icao: String) {
+        let cached = CachedAIPEntries(
+            icao: icao,
+            entries: entries,
+            fetchedAt: Date(),
+            source: .api
+        )
+        store.insert(cached)
+    }
+    
+    /// Get entries: prefer fresh API cache, fall back to DB
+    func entries(for icao: String, maxAge: TimeInterval = 86400) -> [AIPEntry] {
+        // Check cache first (if fresh enough)
+        if let cached = getCached(icao: icao), 
+           cached.fetchedAt.timeIntervalSinceNow > -maxAge {
+            return cached.entries
+        }
+        // Fall back to DB
+        return knownAirports.airport(icao: icao)?.aipEntries ?? []
+    }
+}
+```
+
+### 8.5 Schema Migration
+
+**When schema changes:**
+
+1. **Increment `schemaVersion`** in `DatabaseVersion`
+2. **Server generates new DB** with updated schema
+3. **App checks schema compatibility** before replacing:
 
 ```swift
-/// Cache manager for AIP entries and other data
-final class CacheManager {
-    private let cache: URLCache
-    private let fileManager: FileManager
+func validateDatabase(at url: URL) throws -> Bool {
+    let db = FMDatabase(path: url.path)
+    guard db.open() else { return false }
+    defer { db.close() }
     
-    /// Cache AIP entries for offline access
-    func cacheAIPEntries(for icao: String, entries: [AIPEntry]) {
-        let data = try? JSONEncoder().encode(entries)
-        let key = "aip-\(icao)"
-        UserDefaults.standard.set(data, forKey: key)
+    // Check required tables exist
+    let requiredTables = ["airports", "runways", "procedures", "aip"]
+    for table in requiredTables {
+        guard db.tableExists(table) else { return false }
     }
     
-    /// Get cached AIP entries
-    func getCachedAIPEntries(for icao: String) -> [AIPEntry]? {
-        guard let data = UserDefaults.standard.data(forKey: "aip-\(icao)"),
-              let entries = try? JSONDecoder().decode([AIPEntry].self, from: data) else {
-            return nil
-        }
-        return entries
+    // Check schema version is compatible
+    let serverSchema = db.intForQuery("SELECT value FROM metadata WHERE key = 'schema_version'")
+    guard serverSchema >= minSupportedSchema && serverSchema <= maxSupportedSchema else {
+        // Incompatible schema - need app update
+        throw SyncError.incompatibleSchema(server: serverSchema, app: currentSchemaVersion)
     }
     
-    /// Cache map tiles for offline regions
-    func cacheMapTiles(for region: MKCoordinateRegion) async {
-        // Pre-cache tiles for specified region
-    }
+    return true
 }
 ```
+
+**Schema Compatibility Matrix:**
+
+| App Version | Min Schema | Max Schema | Notes |
+|-------------|------------|------------|-------|
+| 1.0.x | 1 | 1 | Initial release |
+| 1.1.x | 1 | 2 | Added GA friendliness columns |
+| 2.0.x | 2 | 3 | Breaking: new AIP structure |
+
+### 8.6 Failure Handling
+
+| Failure | Behavior |
+|---------|----------|
+| Download fails | Keep current DB, retry later, show banner |
+| Validation fails | Keep current DB, log error, don't retry same version |
+| Replacement fails | Restore from backup, log error |
+| Incompatible schema | Keep current DB, prompt user to update app |
+| No network | Use bundled/active DB, no sync attempt |
+
+### 8.7 Storage Locations
+
+```
+App Bundle (read-only):
+└── airports.db              # Bundled DB (fallback)
+
+Documents (writable):
+├── airports.db              # Active DB (synced)
+├── airports.db.backup       # Backup during sync
+└── db_version.json          # Version metadata
+
+Caches (purgeable):
+├── aip_cache/               # Cached AIP entries from API
+├── map_tiles/               # Offline map tiles
+└── api_cache/               # HTTP response cache
+```
+
+**Cleanup Policy:**
+- `Caches/` can be purged by iOS at any time
+- App should handle missing cache gracefully
+- `Documents/airports.db` is backed up to iCloud (user data)
 
 ---
 
@@ -2476,12 +3099,13 @@ final class CacheManager {
 - [ ] Visualization handling via cross-domain callback
 - [ ] Filter profile application
 
-### Phase 6: Chatbot - Offline (3-4 weeks)
-- [ ] On-device LLM integration (Apple Intelligence)
-- [ ] Offline tool registry
-- [ ] Simplified planning
-- [ ] Local tool execution
-- [ ] Offline visualization
+### Phase 6: Chatbot - Offline Fallback (1-2 weeks)
+- [ ] ToolCatalog (shared with server)
+- [ ] KeywordFallbackBackend (pattern matching)
+- [ ] ToolExecutor (local tool execution)
+- [ ] LLMBackend protocol (abstraction for future)
+- [ ] Template-based responses
+- [ ] Clear "Limited offline mode" UX
 
 ### Phase 7: Polish & Testing (2 weeks)
 - [ ] Performance optimization
@@ -2547,9 +3171,12 @@ Using latest Apple frameworks eliminates need for:
 | Platform version | iOS 18.0+ / macOS 15.0+ (latest only) |
 | State management | Single `AppState` composed of domain objects |
 | God-class risk | Avoided via composed domains (~200-400 lines each) |
-| On-device LLM | Apple Intelligence (device-dependent fallback) |
+| On-device LLM | **POST-1.0** - abstraction ready, keyword fallback for 1.0 |
+| LLM backend | Swappable via `LLMBackend` protocol (Apple Intelligence / llama.cpp / MLX) |
+| Tool catalog | Shared between online/offline to avoid grammar drift |
 | ViewModels | Eliminated - use domain objects via `@Environment` |
 | Cross-domain sync | Explicit callbacks (e.g., `chat.onVisualization`) |
+| DB canonical | Local SQLite is source of truth; API is read-only view |
 
 ### Remaining Questions
 

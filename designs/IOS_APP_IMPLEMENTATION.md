@@ -733,73 +733,79 @@ extension Airport {
 
 ---
 
-## Phase 6: Offline Chatbot (Apple Intelligence)
+## Phase 6: Offline Chatbot - Keyword Fallback (1.0)
 
-**Duration:** 2-3 weeks  
-**Goal:** On-device chatbot using Apple Intelligence
+**Duration:** 1-2 weeks  
+**Goal:** Functional offline chatbot with keyword pattern matching (AI deferred to post-1.0)
 
-### 6.1 Apple Intelligence Integration
+### 6.1 Shared Tool Catalog
 
-**Approach:** Use Apple Intelligence APIs (iOS 18.1+) for:
-- Intent understanding
-- Response generation
-- Token streaming
+**File:** `App/Services/Chatbot/ToolCatalog.swift`
 
-**Fallback:** Keyword-based matching when Apple Intelligence unavailable
+**Critical:** Same tool definitions as server to avoid grammar drift.
 
-### 6.2 Offline Tool Registry
-
-**File:** `App/Services/Chatbot/OfflineToolRegistry.swift`
-
-- [ ] Define available offline tools
-- [ ] `search_airports` - Local search
-- [ ] `get_airport_info` - Airport details
-- [ ] `find_airports_near_route` - Route search
-- [ ] `find_airports_in_country` - Country filter
-- [ ] Map tool results to visualizations
+- [ ] Define `ToolCatalog` with all tool definitions
+- [ ] Mirror server's `shared/aviation_agent/tools.py` schema
+- [ ] Mark which tools are `availableOffline`
+- [ ] Define parameter schemas for argument extraction
 
 ```swift
-final class OfflineToolRegistry {
-    private let repository: LocalAirportDataSource
+enum ToolCatalog {
+    static let allTools: [ToolDefinition] = [
+        searchAirports,
+        getAirportInfo,
+        findAirportsNearRoute,
+        // ... mirrors server
+    ]
     
-    enum Tool: String, CaseIterable {
-        case searchAirports = "search_airports"
-        case getAirportInfo = "get_airport_info"
-        case findAirportsNearRoute = "find_airports_near_route"
-        case findAirportsInCountry = "find_airports_in_country"
+    static var offlineTools: [ToolDefinition] {
+        allTools.filter { $0.availableOffline }
     }
-    
-    func execute(_ tool: Tool, arguments: [String: Any]) async throws -> ToolResult
 }
 ```
 
-### 6.3 Offline Chatbot Service
+### 6.2 LLM Backend Protocol (Abstraction for Future)
+
+**File:** `App/Services/Chatbot/LLMBackend.swift`
+
+- [ ] Define `LLMBackend` protocol (swappable AI implementations)
+- [ ] Implement `KeywordFallbackBackend` (pattern matching, no AI)
+- [ ] Stub `AppleIntelligenceBackend` (POST-1.0)
+- [ ] Stub `LlamaCppBackend` (POST-1.0, for small local models)
+
+```swift
+protocol LLMBackend: Sendable {
+    static var isAvailable: Bool { get }
+    func classifyIntent(message: String, availableTools: [ToolDefinition]) async throws -> IntentClassification
+    func extractArguments(message: String, tool: ToolDefinition) async throws -> [String: Any]
+}
+
+// 1.0: This is the only implementation
+final class KeywordFallbackBackend: LLMBackend {
+    static var isAvailable: Bool { true }
+    // Pattern matching for ICAO codes, route queries, etc.
+}
+```
+
+### 6.3 Tool Executor
+
+**File:** `App/Services/Chatbot/ToolExecutor.swift`
+
+- [ ] Execute tools using repository
+- [ ] Build `ToolResult` with visualization
+- [ ] Handle all `ToolCatalog.offlineTools`
+
+### 6.4 Offline Chatbot Service
 
 **File:** `App/Services/Chatbot/OfflineChatbotService.swift`
 
 - [ ] Implement `ChatbotService` protocol
-- [ ] Use Apple Intelligence for intent classification
-- [ ] Execute local tools
-- [ ] Generate responses with context
-- [ ] Stream tokens to UI
+- [ ] Use `LLMBackend` for intent classification
+- [ ] Execute tools via `ToolExecutor`
+- [ ] Generate template-based responses (1.0)
+- [ ] Emit visualizations
 
-### 6.4 Intent Understanding
-
-- [ ] Route queries: "airports between EGTF and LFMD"
-- [ ] Airport info: "tell me about EGKB"
-- [ ] Filter queries: "airports with ILS in France"
-- [ ] General questions: answered from cached knowledge
-
-### 6.5 Fallback Mode (No Apple Intelligence)
-
-**File:** `App/Services/Chatbot/KeywordChatbotService.swift`
-
-- [ ] Pattern matching for common queries
-- [ ] Direct tool execution
-- [ ] Template-based responses
-- [ ] Clear "Limited offline mode" UX
-
-### 6.6 Chatbot Service Factory
+### 6.5 Chatbot Service Factory
 
 **File:** `App/Services/Chatbot/ChatbotServiceFactory.swift`
 
@@ -807,21 +813,47 @@ final class OfflineToolRegistry {
 enum ChatbotServiceFactory {
     static func create(
         connectivity: ConnectivityMode,
-        repository: AirportRepository
-    ) -> ChatbotService {
+        repository: AirportRepository,
+        apiClient: APIClient
+    ) -> any ChatbotService {
         switch connectivity {
         case .online, .hybrid:
-            return OnlineChatbotService(...)
+            return OnlineChatbotService(apiClient: apiClient)
         case .offline:
-            if AppleIntelligence.isAvailable {
-                return OfflineChatbotService(...)
-            } else {
-                return KeywordChatbotService(...)
-            }
+            let backend = selectBestOfflineBackend()  // 1.0: Always KeywordFallbackBackend
+            return OfflineChatbotService(backend: backend, repository: repository)
         }
+    }
+    
+    private static func selectBestOfflineBackend() -> any LLMBackend {
+        // POST-1.0: Check AppleIntelligence, llama.cpp, etc.
+        return KeywordFallbackBackend()  // 1.0: Always this
     }
 }
 ```
+
+### 6.6 "Limited Offline Mode" UX
+
+- [ ] Banner showing "Offline - Limited AI"
+- [ ] Help text explaining what queries work
+- [ ] Example prompts for pattern-matched queries
+- [ ] Graceful handling of unrecognized queries
+
+### 6.7 POST-1.0: AI Backend Implementation
+
+**Not in 1.0 scope** - abstraction ready, implementation deferred:
+
+| Backend | When to Add | Notes |
+|---------|-------------|-------|
+| `AppleIntelligenceBackend` | When API is stable + widely available | Device-gated |
+| `LlamaCppBackend` | If we want consistent cross-device AI | Requires model download |
+| `MLXBackend` | For Apple Silicon optimization | macOS focused |
+
+**Decision criteria for shipping AI backend:**
+1. API is stable (not changing every iOS release)
+2. Works on >50% of target devices
+3. Quality >= keyword fallback
+4. Acceptable battery/thermal impact
 
 ---
 
@@ -937,9 +969,15 @@ app/FlyFunEuroAIP/
 │   │   └── Chatbot/
 │   │       ├── ChatbotService.swift          # Protocol
 │   │       ├── OnlineChatbotService.swift    # SSE streaming
-│   │       ├── OfflineChatbotService.swift   # Apple Intelligence
-│   │       ├── OfflineToolRegistry.swift     # Local tools
-│   │       └── ChatbotServiceFactory.swift   # Factory
+│   │       ├── OfflineChatbotService.swift   # Uses LLMBackend
+│   │       ├── ToolCatalog.swift             # Shared tool definitions
+│   │       ├── ToolExecutor.swift            # Local tool execution
+│   │       ├── ChatbotServiceFactory.swift   # Factory
+│   │       └── LLMBackends/
+│   │           ├── LLMBackend.swift          # Protocol (swappable)
+│   │           ├── KeywordFallbackBackend.swift  # 1.0: Pattern matching
+│   │           ├── AppleIntelligenceBackend.swift # POST-1.0: Stub
+│   │           └── LlamaCppBackend.swift     # POST-1.0: Stub
 │   │
 │   └── Helpers/
 │       ├── FilterBindings.swift              # Binding helpers
@@ -1081,10 +1119,18 @@ git clone https://github.com/roznet/rzflight
 | Phase 3 | Week 5-7 | UI complete (all platforms) | Adaptive layouts working |
 | Phase 4 | Week 8-9 | Online API integration | Live data + sync |
 | Phase 5 | Week 10-11 | Online chatbot | `ChatDomain` + SSE + viz |
-| Phase 6 | Week 12-13 | Offline chatbot | Apple Intelligence |
-| Phase 7 | Week 14-15 | Polish + Testing | App Store ready |
+| Phase 6 | Week 12 | Offline chatbot (keyword fallback) | Pattern matching + tool execution |
+| Phase 7 | Week 13-14 | Polish + Testing | App Store ready |
 
-**Total: ~15 weeks (4 months)**
+**Total: ~14 weeks (3.5 months)**
+
+### POST-1.0 Roadmap
+
+| Feature | When | Dependency |
+|---------|------|------------|
+| Apple Intelligence backend | iOS 18.x stable | API maturity |
+| llama.cpp / local LLM | User demand | Model download UX |
+| Advanced offline AI | Both above | User testing |
 
 ### Reduced Timeline Rationale
 
