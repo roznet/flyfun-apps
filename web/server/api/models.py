@@ -15,6 +15,33 @@ from euro_aip.models.aip_entry import AIPEntry
 from euro_aip.models.runway import Runway
 
 
+class GAFriendlySummary(BaseModel):
+    """
+    GA Friendliness data - isolated from airport structure.
+    
+    Contains all raw feature scores and pre-computed persona scores,
+    enabling instant persona switching in the UI without additional API calls.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    
+    # Raw feature scores (0-1 normalized) - for UI breakdown display
+    features: Dict[str, Optional[float]]
+    # e.g., {"ga_cost_score": 0.7, "ga_review_score": 0.85, ...}
+    
+    # Pre-computed scores for ALL personas - enables instant UI toggle
+    persona_scores: Dict[str, Optional[float]]
+    # e.g., {"ifr_touring_sr22": 0.72, "vfr_budget_flyer": 0.65, ...}
+    
+    # Review metadata
+    review_count: int = 0
+    last_review_utc: Optional[str] = None
+    
+    # Optional enrichment (for detail view)
+    tags: Optional[List[str]] = None
+    summary_text: Optional[str] = None
+    notification_hassle: Optional[str] = None
+
+
 class AirportSummary(BaseModel):
     """Pydantic model for airport summary responses."""
     model_config = ConfigDict(from_attributes=True)
@@ -39,8 +66,11 @@ class AirportSummary(BaseModel):
     runway_count: int
     aip_entry_count: int
     
+    # GA Friendliness data - optional, populated when include_ga=True
+    ga: Optional[GAFriendlySummary] = None
+    
     @classmethod
-    def from_airport(cls, airport: Airport):
+    def from_airport(cls, airport: Airport, ga_summary: Optional[GAFriendlySummary] = None):
         """Create AirportSummary from Airport domain model."""
         return cls(
             ident=airport.ident,
@@ -61,7 +91,8 @@ class AirportSummary(BaseModel):
             longest_runway_length_ft=airport.longest_runway_length_ft,
             procedure_count=len(airport.procedures),
             runway_count=len(airport.runways),
-            aip_entry_count=len(airport.aip_entries)
+            aip_entry_count=len(airport.aip_entries),
+            ga=ga_summary
         )
 
 

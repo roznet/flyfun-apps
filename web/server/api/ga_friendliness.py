@@ -17,6 +17,8 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .models import GAFriendlySummary
+
 # Import GA friendliness library
 from shared.ga_friendliness import (
     GAMetaStorage,
@@ -225,6 +227,77 @@ class GAFriendlinessService:
                     icao=icao.upper(),
                     has_data=False
                 )
+        
+        return results
+    
+    def get_summaries_batch(
+        self,
+        icaos: List[str]
+    ) -> Dict[str, GAFriendlySummary]:
+        """
+        Get GA summaries for multiple airports with ALL persona scores pre-computed.
+        
+        This is the primary method for the airports API integration.
+        Returns data that enables instant persona switching in the UI.
+        
+        Args:
+            icaos: List of ICAO codes
+            
+        Returns:
+            Dict mapping ICAO -> GAFriendlySummary (only for airports with data)
+        """
+        if not self._enabled or not self.storage or not self.persona_manager:
+            return {}
+        
+        # Get all persona IDs for pre-computing scores
+        persona_ids = self.persona_manager.list_persona_ids()
+        
+        results = {}
+        for icao in icaos:
+            try:
+                stats = self.storage.get_airfield_stats(icao.upper())
+                if not stats:
+                    continue  # Skip airports without GA data
+                
+                # Build feature scores dict
+                features_dict = {
+                    name: getattr(stats, name)
+                    for name in FEATURE_NAMES
+                }
+                
+                # Build AirportFeatureScores for persona scoring
+                features = AirportFeatureScores(
+                    icao=stats.icao,
+                    ga_cost_score=stats.ga_cost_score,
+                    ga_review_score=stats.ga_review_score,
+                    ga_hassle_score=stats.ga_hassle_score,
+                    ga_ops_ifr_score=stats.ga_ops_ifr_score,
+                    ga_ops_vfr_score=stats.ga_ops_vfr_score,
+                    ga_access_score=stats.ga_access_score,
+                    ga_fun_score=stats.ga_fun_score,
+                    ga_hospitality_score=stats.ga_hospitality_score,
+                )
+                
+                # Pre-compute scores for ALL personas
+                persona_scores = {}
+                for persona_id in persona_ids:
+                    score = self.persona_manager.compute_score(persona_id, features)
+                    persona_scores[persona_id] = score
+                
+                results[icao.upper()] = GAFriendlySummary(
+                    features=features_dict,
+                    persona_scores=persona_scores,
+                    review_count=stats.rating_count or 0,
+                    last_review_utc=stats.last_review_utc,
+                    # Optional enrichment - available in detail view via get_summary
+                    tags=None,
+                    summary_text=None,
+                    notification_hassle=None
+                )
+                
+            except Exception as e:
+                logger.warning(f"Error getting GA summary for {icao}: {e}")
+                # Skip this airport
         
         return results
     

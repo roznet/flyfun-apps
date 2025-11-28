@@ -3,7 +3,9 @@
  * Reactive to Zustand store changes, manages Leaflet map layers
  */
 
-import type { Airport, LegendMode, Highlight, RouteState } from '../store/types';
+import type { Airport, LegendMode, Highlight, RouteState, AirportGAScore, QuartileThresholds, RelevanceBucketConfig } from '../store/types';
+import { getRelevanceBucket, getRelevanceBucketColor, DEFAULT_BUCKET_CONFIGS } from '../utils/relevance';
+import { useStore } from '../store/store';
 
 // Leaflet types (will be imported when Leaflet is available)
 declare const L: any;
@@ -219,6 +221,12 @@ export class VisualizationEngine {
         // Transparent markers, procedure lines shown separately
         color = 'rgba(128, 128, 128, 0.3)';
         radius = 6;
+        break;
+        
+      case 'relevance':
+        // Color based on GA friendliness score
+        color = this.getRelevanceColor(airport.ident);
+        radius = 7;
         break;
     }
     
@@ -529,6 +537,20 @@ export class VisualizationEngine {
       case 'non-precision': return '#ffffff'; // White for VOR/NDB
       default: return '#ffffff';
     }
+  }
+  
+  /**
+   * Get relevance color for an airport based on GA score and computed quartiles.
+   */
+  private getRelevanceColor(icao: string): string {
+    const state = useStore.getState();
+    const gaScore = state.ga.scores.get(icao);
+    const quartiles = state.ga.computedQuartiles;
+    const bucketConfigs = state.ga.config?.relevance_buckets ?? DEFAULT_BUCKET_CONFIGS;
+    
+    const score = gaScore?.has_data ? gaScore.score : null;
+    const bucket = getRelevanceBucket(score, quartiles);
+    return getRelevanceBucketColor(bucket, bucketConfigs);
   }
   
   /**

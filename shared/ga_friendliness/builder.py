@@ -196,7 +196,8 @@ class GAFriendlinessBuilder:
             failure_mode = FailureMode(self.settings.failure_mode)
             
             with self.storage:
-                for icao in airports_to_process_list:
+                for idx, icao in enumerate(airports_to_process_list, 1):
+                    logger.info(f"Processing {icao} ({idx}/{len(airports_to_process_list)})")
                     try:
                         # Get reviews for this airport
                         reviews = review_source.get_reviews_for_icao(icao)

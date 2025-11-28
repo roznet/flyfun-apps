@@ -41,7 +41,11 @@ export class UIManager {
         selectedAirport: state.selectedAirport?.ident,
         loading: state.ui.loading,
         error: state.ui.error,
-        filteredCount: state.filteredAirports.length
+        filteredCount: state.filteredAirports.length,
+        // GA state for relevance legend updates
+        gaScoresCount: state.ga.scores.size,
+        gaIsLoading: state.ga.isLoading,
+        gaSelectedPersona: state.ga.selectedPersona
       });
       
       // Only update if state actually changed
@@ -117,42 +121,48 @@ export class UIManager {
   
   /**
    * Update persona selector visibility based on legend mode.
+   * Note: The global persona selector in header is always visible.
+   * The legend persona selector container is shown only in relevance mode.
    */
   private updatePersonaSelectorVisibility(legendMode: LegendMode): void {
-    const container = document.getElementById('persona-selector-container');
-    if (container) {
-      container.style.display = legendMode === 'relevance' ? 'block' : 'none';
+    const legendContainer = document.getElementById('persona-selector-container');
+    if (legendContainer) {
+      // Hide legend persona selector since we now have a global one in the header
+      legendContainer.style.display = 'none';
     }
   }
   
   /**
    * Populate persona selector with personas from GA config.
+   * Supports both global (header) and legend selectors.
    */
   populatePersonaSelector(): void {
-    const selector = document.getElementById('persona-selector') as HTMLSelectElement;
-    if (!selector) return;
+    // Populate both global and legend selectors
+    const globalSelector = document.getElementById('global-persona') as HTMLSelectElement;
+    const legendSelector = document.getElementById('persona-selector') as HTMLSelectElement;
+    
+    const selectors = [globalSelector, legendSelector].filter(s => s !== null) as HTMLSelectElement[];
+    if (selectors.length === 0) return;
     
     const state = this.store.getState();
     const config = state.ga?.config;
     
+    // Build options HTML once
+    let optionsHtml = '';
     if (!config || !config.personas) {
-      selector.innerHTML = '<option value="ifr_touring_sr22">IFR Touring (SR22)</option>';
-      return;
+      optionsHtml = '<option value="ifr_touring_sr22">IFR Touring (SR22)</option>';
+    } else {
+      config.personas.forEach(persona => {
+        optionsHtml += `<option value="${persona.id}">${persona.label}</option>`;
+      });
     }
     
-    selector.innerHTML = '';
-    config.personas.forEach(persona => {
-      const option = document.createElement('option');
-      option.value = persona.id;
-      option.textContent = persona.label;
-      selector.appendChild(option);
-    });
-    
-    // Select the current persona
-    const currentPersona = state.ga?.selectedPersona || config.default_persona;
-    if (currentPersona) {
+    // Apply to all selectors
+    const currentPersona = state.ga?.selectedPersona || config?.default_persona || 'ifr_touring_sr22';
+    selectors.forEach(selector => {
+      selector.innerHTML = optionsHtml;
       selector.value = currentPersona;
-    }
+    });
   }
   
   /**
@@ -535,18 +545,28 @@ export class UIManager {
       });
     }
     
-    // Persona selector
-    const personaSelector = document.getElementById('persona-selector');
-    if (personaSelector) {
-      personaSelector.addEventListener('change', (e) => {
-        const target = e.target as HTMLSelectElement;
-        // Use window.personaManager directly since it's exposed globally
-        if ((window as any).personaManager) {
-          (window as any).personaManager.selectPersona(target.value);
-          // Reload GA scores for visible airports
-          this.triggerGAScoresLoad();
-        }
-      });
+    // Persona selectors (global in header and legacy in legend)
+    const globalPersonaSelector = document.getElementById('global-persona');
+    const legendPersonaSelector = document.getElementById('persona-selector');
+    
+    const handlePersonaChange = (e: Event) => {
+      const target = e.target as HTMLSelectElement;
+      // Use window.personaManager directly since it's exposed globally
+      if ((window as any).personaManager) {
+        (window as any).personaManager.selectPersona(target.value);
+        // Sync both selectors
+        if (globalPersonaSelector) (globalPersonaSelector as HTMLSelectElement).value = target.value;
+        if (legendPersonaSelector) (legendPersonaSelector as HTMLSelectElement).value = target.value;
+        // Reload GA scores for visible airports
+        this.triggerGAScoresLoad();
+      }
+    };
+    
+    if (globalPersonaSelector) {
+      globalPersonaSelector.addEventListener('change', handlePersonaChange);
+    }
+    if (legendPersonaSelector) {
+      legendPersonaSelector.addEventListener('change', handlePersonaChange);
     }
     
     // Apply filters button
@@ -759,6 +779,43 @@ export class UIManager {
           </div>
         `;
         break;
+        
+      case 'relevance': {
+        // Get bucket configs from store or use defaults
+        const gaState = this.store.getState();
+        const buckets = gaState.ga.config?.relevance_buckets ?? [
+          { id: 'top-quartile', label: 'Top Quartile', color: '#27ae60' },
+          { id: 'second-quartile', label: 'Second Quartile', color: '#3498db' },
+          { id: 'third-quartile', label: 'Third Quartile', color: '#f39c12' },
+          { id: 'bottom-quartile', label: 'Bottom Quartile', color: '#e74c3c' },
+          { id: 'unknown', label: 'Unknown', color: '#95a5a6' },
+        ];
+        
+        // Show score loading status
+        const scoresLoaded = gaState.ga.scores.size > 0;
+        const isLoading = gaState.ga.isLoading;
+        const personaLabel = gaState.ga.config?.personas.find(p => p.id === gaState.ga.selectedPersona)?.label || gaState.ga.selectedPersona;
+        
+        if (isLoading) {
+          html = `<div class="legend-loading"><i class="fas fa-spinner fa-spin"></i> Loading scores...</div>`;
+        } else if (!scoresLoaded) {
+          html = `<div class="legend-info text-muted small">Apply filters to load GA scores</div>`;
+        }
+        
+        // Add bucket legend items
+        buckets.forEach(bucket => {
+          html += `
+            <div class="legend-item">
+              <div class="legend-color" style="background-color: ${bucket.color};"></div>
+              <span>${bucket.label}</span>
+            </div>
+          `;
+        });
+        
+        // Add persona info
+        html += `<div class="legend-info text-muted small mt-2">Persona: ${personaLabel}</div>`;
+        break;
+      }
     }
     
     legendContent.innerHTML = html;

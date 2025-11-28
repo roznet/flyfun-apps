@@ -230,11 +230,16 @@ export class PersonaManager {
   
   /**
    * Populate the persona selector dropdown in the UI.
+   * Supports both the global selector (header) and legend selector.
    */
   private populatePersonaSelector(): void {
-    const selector = document.getElementById('persona-selector') as HTMLSelectElement;
+    // Try global selector first (in header), fallback to legend selector
+    const globalSelector = document.getElementById('global-persona') as HTMLSelectElement;
+    const legendSelector = document.getElementById('persona-selector') as HTMLSelectElement;
+    const selector = globalSelector || legendSelector;
+    
     if (!selector) {
-      console.log('[PersonaManager] Persona selector not found in DOM');
+      console.log('[PersonaManager] No persona selector found in DOM');
       return;
     }
     

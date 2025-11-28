@@ -607,6 +607,31 @@
             margin-right: 8px;
         }
         
+        /* Global Controls (Header) */
+        #global-controls {
+            flex-shrink: 0;
+        }
+        
+        #global-persona-selector {
+            background: rgba(102, 126, 234, 0.1);
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+        
+        #global-persona-selector label {
+            white-space: nowrap;
+        }
+        
+        #global-persona {
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+        
+        #global-persona:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
         .legend-line {
             width: 30px;
             height: 4px;
@@ -1077,13 +1102,28 @@
         <!-- Header -->
         <div class="row mt-2 align-items-center">
             <div class="col-12">
-                <div class="d-flex justify-content-center align-items-center mb-2 position-relative" style="padding: 0 15px;">
+                <div class="d-flex justify-content-between align-items-center mb-2" style="padding: 0 15px;">
+                    <!-- Left: Title -->
                     <h2 class="mb-0">
                         <i class="fas fa-plane"></i> FlyFun
                         <button class="btn btn-outline-primary btn-sm ms-2" id="share-button" title="Copy shareable URL">
                             <i class="fas fa-share-alt"></i> Share
                         </button>
                     </h2>
+                    
+                    <!-- Right: Global Controls -->
+                    <div class="d-flex align-items-center gap-3" id="global-controls">
+                        <!-- Persona Selector (Global) -->
+                        <div class="d-flex align-items-center gap-2" id="global-persona-selector">
+                            <label class="text-muted small mb-0" for="global-persona">
+                                <i class="fas fa-user-pilot"></i> Persona:
+                            </label>
+                            <select class="form-select form-select-sm" id="global-persona" style="width: auto; min-width: 160px;">
+                                <option value="ifr_touring_sr22">IFR touring (SR22)</option>
+                            </select>
+                        </div>
+                        <!-- Future: Login/Settings buttons will go here -->
+                    </div>
                 </div>
                 <p class="text-center text-muted mb-2">Your intelligent aviation assistant - Interactive map with European airports, AIP data, and empirical flying rules</p>
             </div>

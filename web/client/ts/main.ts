@@ -152,6 +152,7 @@ class Application {
     let lastRouteHash: string = '';
     let lastLocateHash: string = '';
     let lastProcedureLinesHash: string = ''; // Track loaded procedure lines
+    let lastGAScoresCount: number = 0; // Track GA scores for relevance mode updates
     
     // Zustand's subscribe - listens to all state changes
     // Use debounce to prevent infinite loops
@@ -171,11 +172,17 @@ class Application {
           const airportsChanged = currentAirportsHash !== lastAirportsHash;
           const legendModeChanged = state.visualization.legendMode !== lastLegendMode;
           
+          // Check if GA scores changed (for relevance mode marker updates)
+          const currentGAScoresCount = state.ga.scores.size;
+          const gaScoresChanged = currentGAScoresCount !== lastGAScoresCount;
+          const isRelevanceMode = state.visualization.legendMode === 'relevance';
+          
           // Capture previous legend mode BEFORE updating it (needed for procedure lines clearing)
           const wasProcedurePrecision = lastLegendMode === 'procedure-precision';
           const isProcedurePrecision = state.visualization.legendMode === 'procedure-precision';
           
-          if (airportsChanged || legendModeChanged) {
+          // Update markers when airports/legend change, OR when scores change in relevance mode
+          if (airportsChanged || legendModeChanged || (isRelevanceMode && gaScoresChanged)) {
             console.log('Store subscription: Updating markers', {
               airportCount: state.filteredAirports.length,
               legendMode: state.visualization.legendMode,
@@ -192,6 +199,7 @@ class Application {
             
             lastAirports = [...state.filteredAirports]; // Copy array for comparison
             lastLegendMode = state.visualization.legendMode;
+            lastGAScoresCount = currentGAScoresCount;
           }
           
           // Build reference point highlights from route/locate state

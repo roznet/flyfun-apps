@@ -7,7 +7,8 @@ import logging
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.airport import Airport
 from euro_aip.models.navpoint import NavPoint
-from .models import AirportSummary, AirportDetail, AIPEntryResponse
+from .models import AirportSummary, AirportDetail, AIPEntryResponse, GAFriendlySummary
+from .ga_friendliness import get_service as get_ga_service
 from shared.airport_tools import ToolContext, find_airports_near_location
 
 # Type alias for route airports (can be ICAO codes or NavPoint objects)
@@ -94,7 +95,9 @@ async def get_airports(
     aip_value: Optional[str] = Query(None, description="Value to search for in the AIP field", max_length=200),
     aip_operator: str = Query("contains", description="Operator for AIP field filtering: contains, equals, not_empty, starts_with, ends_with", max_length=20),
     limit: int = Query(1000, description="Maximum number of airports to return", ge=1, le=10000),
-    offset: int = Query(0, description="Number of airports to skip", ge=0, le=100000)
+    offset: int = Query(0, description="Number of airports to skip", ge=0, le=100000),
+    # GA Friendliness integration
+    include_ga: bool = Query(True, description="Include GA friendliness scores (all personas pre-computed)")
 ):
     """Get a list of airports with optional filtering."""
     if not model:
@@ -133,8 +136,19 @@ async def get_airports(
     # Apply pagination
     airports = airports[offset:offset + limit]
     
+    # Get GA data if requested and service is available
+    ga_data: Dict[str, GAFriendlySummary] = {}
+    if include_ga:
+        ga_service = get_ga_service()
+        if ga_service and ga_service.enabled:
+            icaos = [a.ident for a in airports]
+            ga_data = ga_service.get_summaries_batch(icaos)
+    
     # Convert to response format using factory methods
-    return [AirportSummary.from_airport(airport) for airport in airports]
+    return [
+        AirportSummary.from_airport(airport, ga_data.get(airport.ident))
+        for airport in airports
+    ]
 
 @router.get("/route-search")
 async def get_airports_near_route(
@@ -155,7 +169,9 @@ async def get_airports_near_route(
     # New AIP field filters
     aip_field: Optional[str] = Query(None, description="AIP standardized field name to filter by", max_length=100),
     aip_value: Optional[str] = Query(None, description="Value to search for in the AIP field", max_length=200),
-    aip_operator: str = Query("contains", description="Operator for AIP field filtering: contains, equals, not_empty, starts_with, ends_with", max_length=20)
+    aip_operator: str = Query("contains", description="Operator for AIP field filtering: contains, equals, not_empty, starts_with, ends_with", max_length=20),
+    # GA Friendliness integration
+    include_ga: bool = Query(True, description="Include GA friendliness scores (all personas pre-computed)")
 ):
     """Find airports within a specified distance from a route defined by airport ICAO codes, with optional filtering."""
     if not model:
@@ -240,14 +256,23 @@ async def get_airports_near_route(
         # Airport passed all filters
         filtered_airports.append(item)
     
+    # Get GA data if requested and service is available
+    ga_data: Dict[str, GAFriendlySummary] = {}
+    if include_ga:
+        ga_service = get_ga_service()
+        if ga_service and ga_service.enabled:
+            icaos = [item['airport'].ident for item in filtered_airports]
+            ga_data = ga_service.get_summaries_batch(icaos)
+    
     # Convert to response format
     result = []
     for item in filtered_airports:
         airport = item['airport']
-        airport_summary = AirportSummary.from_airport(airport)
+        ga_summary = ga_data.get(airport.ident)
+        airport_summary = AirportSummary.from_airport(airport, ga_summary)
         
         result.append({
-            'airport': airport_summary.dict(),
+            'airport': airport_summary.model_dump(),
             'segment_distance_nm': item.get('segment_distance_nm'),
             'enroute_distance_nm': item.get('enroute_distance_nm'),
             'closest_segment': item.get('closest_segment')
@@ -283,7 +308,9 @@ async def locate_airports(
     has_procedures: Optional[bool] = Query(None, description="Filter airports with procedures"),
     has_aip_data: Optional[bool] = Query(None, description="Filter airports with AIP data"),
     has_hard_runway: Optional[bool] = Query(None, description="Filter airports with hard runways"),
-    point_of_entry: Optional[bool] = Query(None, description="Filter border crossing airports")
+    point_of_entry: Optional[bool] = Query(None, description="Filter border crossing airports"),
+    # GA Friendliness integration
+    include_ga: bool = Query(True, description="Include GA friendliness scores (all personas pre-computed)")
 ):
     """
     Locate airports near a free-text location, leveraging Geoapify geocoding via shared tool.
@@ -333,11 +360,20 @@ async def locate_airports(
 
         # Sort by distance
         filtered_airports.sort(key=lambda x: x[1])
+        
+        # Get GA data if requested and service is available
+        ga_data: Dict[str, GAFriendlySummary] = {}
+        if include_ga:
+            ga_service = get_ga_service()
+            if ga_service and ga_service.enabled:
+                icaos = [a.ident for a, _ in filtered_airports]
+                ga_data = ga_service.get_summaries_batch(icaos)
 
         # Build response
         airports_resp = []
         for a, d_nm in filtered_airports:
-            summary = AirportSummary.from_airport(a).dict()
+            ga_summary = ga_data.get(a.ident)
+            summary = AirportSummary.from_airport(a, ga_summary).model_dump()
             summary["distance_nm"] = round(d_nm, 2)
             airports_resp.append(summary)
 
