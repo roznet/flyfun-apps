@@ -13,11 +13,32 @@ import RZFlight
 // MARK: - Bounding Box
 
 /// Geographic bounding box for region-based queries
-struct BoundingBox: Sendable, Equatable, Codable {
-    let minLatitude: Double
-    let maxLatitude: Double
-    let minLongitude: Double
-    let maxLongitude: Double
+struct BoundingBox: Sendable, Equatable {
+    /// Southwest corner (minimum latitude and longitude)
+    let minCoord: CLLocationCoordinate2D
+    /// Northeast corner (maximum latitude and longitude)
+    let maxCoord: CLLocationCoordinate2D
+    
+    // MARK: - Convenience Accessors
+    
+    var minLatitude: Double { minCoord.latitude }
+    var maxLatitude: Double { maxCoord.latitude }
+    var minLongitude: Double { minCoord.longitude }
+    var maxLongitude: Double { maxCoord.longitude }
+    
+    // MARK: - Initializers
+    
+    init(minCoord: CLLocationCoordinate2D, maxCoord: CLLocationCoordinate2D) {
+        self.minCoord = minCoord
+        self.maxCoord = maxCoord
+    }
+    
+    init(minLatitude: Double, maxLatitude: Double, minLongitude: Double, maxLongitude: Double) {
+        self.minCoord = CLLocationCoordinate2D(latitude: minLatitude, longitude: minLongitude)
+        self.maxCoord = CLLocationCoordinate2D(latitude: maxLatitude, longitude: maxLongitude)
+    }
+    
+    // MARK: - Queries
     
     /// Check if a coordinate is within this bounding box
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
@@ -39,10 +60,14 @@ extension MKCoordinateRegion {
     /// Convert region to bounding box
     var boundingBox: BoundingBox {
         BoundingBox(
-            minLatitude: center.latitude - span.latitudeDelta / 2,
-            maxLatitude: center.latitude + span.latitudeDelta / 2,
-            minLongitude: center.longitude - span.longitudeDelta / 2,
-            maxLongitude: center.longitude + span.longitudeDelta / 2
+            minCoord: CLLocationCoordinate2D(
+                latitude: center.latitude - span.latitudeDelta / 2,
+                longitude: center.longitude - span.longitudeDelta / 2
+            ),
+            maxCoord: CLLocationCoordinate2D(
+                latitude: center.latitude + span.latitudeDelta / 2,
+                longitude: center.longitude + span.longitudeDelta / 2
+            )
         )
     }
     

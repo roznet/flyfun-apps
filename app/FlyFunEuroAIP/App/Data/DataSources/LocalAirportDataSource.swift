@@ -30,7 +30,7 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
             throw AppError.databaseOpenFailed(path: databasePath)
         }
         self.db = db
-        self.knownAirports = KnownAirports(db: db)
+        self.knownAirports = KnownAirports(db: db, where: "LENGTH(icao_code) = 4 and ISO_COUNTRY != 'RU'")
         Logger.app.info("LocalAirportDataSource initialized")
     }
     
@@ -49,25 +49,8 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
     ) async throws -> [RZFlight.Airport] {
         // Filter airports in the bounding box
         // Use matching with empty string to get all, then filter by region
-        let allAirports = knownAirports.matching(needle: "")
-        let regionAirports = allAirports.filter { airport in
-            boundingBox.contains(airport.coord)
-        }
-        
-        // Apply DB-dependent filters first (if any)
-        var filtered: [RZFlight.Airport]
-        if filters.pointOfEntry == true {
-            // Intersection: in region AND is border crossing
-            let borderCrossings = Set(knownAirports.airportsWithBorderCrossing().map(\.icao))
-            filtered = regionAirports.filter { borderCrossings.contains($0.icao) }
-        } else {
-            filtered = Array(regionAirports)
-        }
-        
-        // Apply in-memory filters
-        filtered = applyInMemoryFilters(filters, to: filtered)
-        
-        return Array(filtered.prefix(limit))
+        let regionAirports = knownAirports.airportsWithinBox(minCoord: boundingBox.minCoord, maxCoord: boundingBox.maxCoord)
+        return Array(regionAirports.prefix(limit))
     }
     
     // MARK: - General Queries

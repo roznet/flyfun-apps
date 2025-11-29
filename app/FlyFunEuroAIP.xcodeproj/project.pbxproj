@@ -31,6 +31,7 @@
 		420ECDFC2EAE0D0A009FE6CE /* FlyFunEuroAIP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlyFunEuroAIP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE092EAE0D0B009FE6CE /* FlyFunEuroAIPTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE132EAE0D0B009FE6CE /* FlyFunEuroAIPUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		424573BB2EDB2B8D004E4BF9 /* rzflight */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = rzflight; path = /Users/brice/Developer/public/rzflight; sourceTree = "<absolute>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -85,6 +86,7 @@
 				420ECE162EAE0D0B009FE6CE /* FlyFunEuroAIPUITests */,
 				42FE37D62EBEF175005C2EB9 /* Frameworks */,
 				420ECDFD2EAE0D0A009FE6CE /* Products */,
+				424573BB2EDB2B8D004E4BF9 /* rzflight */,
 			);
 			sourceTree = "<group>";
 		};
