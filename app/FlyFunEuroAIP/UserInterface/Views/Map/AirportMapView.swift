@@ -15,6 +15,8 @@ struct AirportMapView: View {
     @State private var selectedAirportID: String?
     
     var body: some View {
+        let currentLegendMode = state?.airports.legendMode ?? .airportType
+        
         Map(
             position: mapPosition,
             selection: $selectedAirportID
@@ -24,7 +26,7 @@ struct AirportMapView: View {
                 Annotation(airport.icao, coordinate: airport.coord) {
                     AirportMarkerView(
                         airport: airport,
-                        legendMode: legendMode,
+                        legendMode: currentLegendMode,
                         isSelected: airport.icao == state?.airports.selectedAirport?.icao
                     )
                 }
@@ -44,6 +46,7 @@ struct AirportMapView: View {
                     .stroke(highlightColor(highlight.color), lineWidth: 2)
             }
         }
+        .id(currentLegendMode) // Force map to re-render when legend changes
         .mapStyle(.standard(elevation: .realistic))
         .mapControls {
             MapCompass()
