@@ -496,16 +496,22 @@ export class ChatbotManager {
   private formatMessage(text: string): string {
     // Escape HTML first
     let html = this.escapeHtml(text);
-    
+
+    // Process headers BEFORE converting newlines (headers end with \n)
+    // Headers: ### Header (h3), ## Header (h2), # Header (h1)
+    html = html.replace(/^###\s+(.+?)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^##\s+(.+?)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^#\s+(.+?)$/gm, '<h1>$1</h1>');
+
     // Convert newlines to <br>
     html = html.replace(/\n/g, '<br>');
-    
+
     // Bold: **text**
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    
+
     // Code: `code`
     html = html.replace(/`(.+?)`/g, '<code>$1</code>');
-    
+
     return html;
   }
   
