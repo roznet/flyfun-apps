@@ -14,183 +14,386 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Map layer
-            mapLayer
-                .ignoresSafeArea()
-            
-            // Adaptive overlay layout
-            GeometryReader { proxy in
-                if isRegular(proxy) {
-                    RegularLayoutNew(proxy: proxy)
-                } else {
-                    CompactLayoutNew()
-                }
+        Group {
+            if isRegularWidth {
+                RegularLayout()
+            } else {
+                CompactLayout()
             }
-            
+        }
+        .sheet(isPresented: filterSheetBinding) {
+            FilterPanelView()
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: detailSheetBinding) {
+            if let airport = state?.airports.selectedAirport {
+                NavigationStack {
+                    AirportDetailView(airport: airport)
+                }
+                .presentationDetents([.medium, .large])
+            }
+        }
+        .overlay {
             // Error banner
             if let error = state?.system.error {
-                errorBanner(error)
+                VStack {
+                    ErrorBanner(error: error) {
+                        state?.system.clearError()
+                    }
+                    Spacer()
+                }
             }
             
             // Offline banner
             if state?.system.connectivityMode == .offline && state?.settings.showOfflineBanner == true {
-                offlineBanner
-            }
-        }
-        .animation(.snappy, value: state?.navigation.showingFilters)
-        .animation(.snappy, value: state?.navigation.showingChat)
-    }
-    
-    // MARK: - Map Layer
-    
-    private var mapLayer: some View {
-        Map(position: mapPosition) {
-            if let airports = state?.airports.airports {
-                ForEach(airports, id: \.icao) { airport in
-                    Annotation(airport.icao, coordinate: airport.coord) {
-                        AirportMarkerView(
-                            airport: airport,
-                            legendMode: state?.airports.legendMode ?? .airportType,
-                            isSelected: airport.icao == state?.airports.selectedAirport?.icao
-                        )
-                        .onTapGesture {
-                            state?.airports.select(airport)
-                        }
-                    }
+                VStack {
+                    OfflineBanner()
+                    Spacer()
                 }
+                .padding(.top, 50)  // Below error banner if both showing
             }
-            
-            // Route polyline
-            if let route = state?.airports.activeRoute {
-                MapPolyline(coordinates: route.coordinates)
-                    .stroke(.blue, lineWidth: 3)
-            }
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .onMapCameraChange(frequency: .onEnd) { context in
-            state?.airports.onRegionChange(context.region)
         }
     }
     
     // MARK: - Computed Properties
     
-    private var mapPosition: Binding<MapCameraPosition> {
+    private var isRegularWidth: Bool {
+        sizeClass == .regular
+    }
+    
+    private var filterSheetBinding: Binding<Bool> {
         Binding(
-            get: { state?.airports.mapPosition ?? .automatic },
-            set: { state?.airports.mapPosition = $0 }
+            get: { state?.navigation.showingFilters ?? false },
+            set: { state?.navigation.showingFilters = $0 }
         )
     }
     
-    // MARK: - Helper Views
-    
-    private func errorBanner(_ error: AppError) -> some View {
-        VStack {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
-                Text(error.localizedDescription)
-                    .font(.caption)
-                Spacer()
-                Button {
-                    state?.system.clearError()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-            }
-            .padding()
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .padding()
-            
-            Spacer()
-        }
-    }
-    
-    private var offlineBanner: some View {
-        VStack {
-            HStack {
-                Image(systemName: "wifi.slash")
-                    .foregroundStyle(.orange)
-                Text("Offline Mode")
-                    .font(.caption)
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            
-            Spacer()
-        }
-    }
-    
-    // MARK: - Helpers
-    
-    private func isRegular(_ proxy: GeometryProxy) -> Bool {
-        sizeClass == .regular || proxy.size.width >= 700
+    private var detailSheetBinding: Binding<Bool> {
+        Binding(
+            get: { state?.navigation.showingAirportDetail ?? false },
+            set: { state?.navigation.showingAirportDetail = $0 }
+        )
     }
 }
 
-// MARK: - Airport Marker View
+// MARK: - Regular Layout (iPad/Mac)
 
-struct AirportMarkerView: View {
-    let airport: RZFlight.Airport
-    let legendMode: LegendMode
-    let isSelected: Bool
+struct RegularLayout: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        NavigationSplitView {
+            // Sidebar
+            SidebarView()
+                #if os(macOS)
+                .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 400)
+                #endif
+        } detail: {
+            // Map + Detail
+            HSplitViewOrHStack {
+                // Map
+                AirportMapView()
+                
+                // Detail panel (when airport selected)
+                if let airport = state?.airports.selectedAirport {
+                    AirportDetailView(airport: airport)
+                        .frame(minWidth: 350, idealWidth: 400, maxWidth: 500)
+                }
+            }
+        }
+        #if os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    state?.navigation.toggleFilters()
+                } label: {
+                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
+                }
+            }
+        }
+        #endif
+    }
+}
+
+// MARK: - Compact Layout (iPhone)
+
+struct CompactLayout: View {
+    @Environment(\.appState) private var state
     
     var body: some View {
         ZStack {
-            Circle()
-                .fill(markerColor.opacity(0.9))
-                .frame(width: isSelected ? 32 : 24, height: isSelected ? 32 : 24)
+            // Map as background
+            AirportMapView()
+                .ignoresSafeArea()
             
-            if isSelected {
-                Circle()
-                    .stroke(.white, lineWidth: 2)
-                    .frame(width: 32, height: 32)
+            // Floating search bar
+            VStack {
+                FloatingSearchBar()
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                
+                Spacer()
+                
+                // Bottom toolbar
+                CompactToolbar()
             }
-            
-            Text(airport.icao.prefix(4))
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
         }
-        .padding(4)
-        .background(.ultraThinMaterial, in: Capsule())
-    }
-    
-    private var markerColor: Color {
-        switch legendMode {
-        case .airportType:
-            return airportTypeColor
-        case .runwayLength:
-            return runwayLengthColor
-        case .procedures:
-            return airport.hasInstrumentProcedures ? .blue : .gray
-        case .country:
-            return .blue  // Could use country-specific colors
-        }
-    }
-    
-    private var airportTypeColor: Color {
-        // Simple color based on whether airport has procedures
-        if airport.hasInstrumentProcedures {
-            return .blue
-        } else {
-            return .orange
-        }
-    }
-    
-    private var runwayLengthColor: Color {
-        // Use runways from airport - get max runway length
-        let maxLength = airport.maxRunwayLength
-        if maxLength >= 8000 { return .green }
-        if maxLength >= 5000 { return .blue }
-        if maxLength >= 3000 { return .orange }
-        return .red
     }
 }
 
-// MARK: - RZFlight Airport Extensions
+// MARK: - Sidebar View
+
+struct SidebarView: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        SearchView()
+            .navigationTitle("Airports")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.large)
+            #endif
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        state?.navigation.toggleFilters()
+                    } label: {
+                        Label("Filters", systemImage: filterIcon)
+                    }
+                }
+                #endif
+            }
+    }
+    
+    private var filterIcon: String {
+        state?.airports.filters.hasActiveFilters == true
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle"
+    }
+}
+
+// MARK: - Floating Search Bar (Compact)
+
+struct FloatingSearchBar: View {
+    @Environment(\.appState) private var state
+    @State private var searchText = ""
+    @State private var isExpanded = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Search field
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                
+                TextField("Search airports...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        Task {
+                            try? await state?.airports.search(query: searchText)
+                            isExpanded = true
+                        }
+                    }
+                
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        state?.airports.searchResults = []
+                        isExpanded = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Button {
+                    state?.navigation.toggleFilters()
+                } label: {
+                    Image(systemName: filterIcon)
+                        .foregroundStyle(state?.airports.filters.hasActiveFilters == true ? .blue : .secondary)
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            
+            // Expanded results
+            if isExpanded && !searchResults.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(searchResults.prefix(10), id: \.icao) { airport in
+                            Button {
+                                state?.airports.select(airport)
+                                isExpanded = false
+                            } label: {
+                                CompactSearchRow(airport: airport)
+                            }
+                            .foregroundStyle(.primary)
+                            
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.top, 4)
+            }
+        }
+    }
+    
+    private var filterIcon: String {
+        state?.airports.filters.hasActiveFilters == true
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle"
+    }
+    
+    private var searchResults: [RZFlight.Airport] {
+        state?.airports.searchResults ?? []
+    }
+}
+
+struct CompactSearchRow: View {
+    let airport: RZFlight.Airport
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(airport.icao)
+                    .font(.headline.monospaced())
+                Text(airport.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.tertiary)
+        }
+        .padding()
+    }
+}
+
+// MARK: - Compact Toolbar
+
+struct CompactToolbar: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        HStack(spacing: 20) {
+            // Legend mode
+            Menu {
+                Picker("Legend", selection: legendModeBinding) {
+                    ForEach(LegendMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "paintpalette")
+                    Text("Legend")
+                        .font(.caption2)
+                }
+            }
+            
+            // Filters
+            Button {
+                state?.navigation.toggleFilters()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: filterIcon)
+                    Text("Filters")
+                        .font(.caption2)
+                }
+            }
+            
+            // Clear route (if active)
+            if state?.airports.activeRoute != nil {
+                Button {
+                    state?.airports.clearRoute()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "xmark.circle")
+                        Text("Clear")
+                            .font(.caption2)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding()
+    }
+    
+    private var filterIcon: String {
+        state?.airports.filters.hasActiveFilters == true
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle"
+    }
+    
+    private var legendModeBinding: Binding<LegendMode> {
+        Binding(
+            get: { state?.airports.legendMode ?? .airportType },
+            set: { state?.airports.legendMode = $0 }
+        )
+    }
+}
+
+// MARK: - Error & Offline Banners
+
+struct ErrorBanner: View {
+    let error: AppError
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text(error.localizedDescription)
+                .font(.caption)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+            }
+        }
+        .padding()
+        .background(.red.opacity(0.9))
+        .foregroundStyle(.white)
+    }
+}
+
+struct OfflineBanner: View {
+    var body: some View {
+        HStack {
+            Image(systemName: "wifi.slash")
+            Text("Offline Mode - Using cached data")
+                .font(.caption)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.9))
+        .foregroundStyle(.white)
+        .clipShape(Capsule())
+    }
+}
+
+// MARK: - HSplitView Helper
+
+struct HSplitViewOrHStack<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    
+    var body: some View {
+        #if os(macOS)
+        HSplitView {
+            content()
+        }
+        #else
+        HStack(spacing: 0) {
+            content()
+        }
+        #endif
+    }
+}
+
+// MARK: - RZFlight Extensions
 
 extension RZFlight.Airport {
     var hasInstrumentProcedures: Bool {
@@ -199,165 +402,18 @@ extension RZFlight.Airport {
     
     var maxRunwayLength: Int {
         // TODO: Access actual runway length from RZFlight
-        // For now, return 0 which will show as "short runway" color
-        // Need to check RZFlight API for correct property access
         0
-    }
-}
-
-// MARK: - Placeholder Layouts (will be updated)
-
-struct RegularLayoutNew: View {
-    let proxy: GeometryProxy
-    @Environment(\.appState) private var state
-    
-    var body: some View {
-        HStack(spacing: 0) {
-            // Sidebar
-            VStack {
-                SearchBarNew()
-                
-                if state?.navigation.showingFilters == true {
-                    FilterPanelNew()
-                }
-                
-                SearchResultsListNew()
-                
-                Spacer()
-            }
-            .frame(width: min(350, proxy.size.width * 0.3))
-            .background(.ultraThinMaterial)
-            
-            Spacer()
-        }
-    }
-}
-
-struct CompactLayoutNew: View {
-    @Environment(\.appState) private var state
-    
-    var body: some View {
-        VStack {
-            SearchBarNew()
-                .padding()
-            
-            Spacer()
-        }
-    }
-}
-
-// MARK: - Placeholder Components (will be updated)
-
-struct SearchBarNew: View {
-    @Environment(\.appState) private var state
-    @State private var searchText = ""
-    
-    var body: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            
-            TextField("Search airports...", text: $searchText)
-                .textFieldStyle(.plain)
-                .onSubmit {
-                    Task {
-                        try? await state?.airports.search(query: searchText)
-                    }
-                }
-            
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                    state?.airports.searchResults = []
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Button {
-                state?.navigation.toggleFilters()
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .foregroundStyle(state?.airports.filters.hasActiveFilters == true ? .blue : .secondary)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct FilterPanelNew: View {
-    @Environment(\.appState) private var state
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Filters")
-                .font(.headline)
-            
-            Toggle("IFR Procedures", isOn: Binding(
-                get: { state?.airports.filters.hasProcedures ?? false },
-                set: { state?.airports.filters.hasProcedures = $0 ? true : nil }
-            ))
-            
-            Toggle("Border Crossing", isOn: Binding(
-                get: { state?.airports.filters.pointOfEntry ?? false },
-                set: { state?.airports.filters.pointOfEntry = $0 ? true : nil }
-            ))
-            
-            Toggle("Hard Runway", isOn: Binding(
-                get: { state?.airports.filters.hasHardRunway ?? false },
-                set: { state?.airports.filters.hasHardRunway = $0 ? true : nil }
-            ))
-            
-            HStack {
-                Button("Reset") {
-                    state?.airports.resetFilters()
-                }
-                .buttonStyle(.bordered)
-                
-                Button("Apply") {
-                    Task {
-                        try? await state?.airports.applyFilters()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct SearchResultsListNew: View {
-    @Environment(\.appState) private var state
-    
-    var body: some View {
-        List {
-            if let results = state?.airports.searchResults, !results.isEmpty {
-                ForEach(results, id: \.icao) { airport in
-                    Button {
-                        state?.airports.select(airport)
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(airport.icao)
-                                .font(.headline)
-                            Text(airport.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            } else if state?.airports.isSearching == true {
-                ProgressView()
-            }
-        }
-        .listStyle(.plain)
     }
 }
 
 // MARK: - Preview
 
-#Preview {
+#Preview("Regular") {
     ContentView()
+        .environment(\.horizontalSizeClass, .regular)
+}
+
+#Preview("Compact") {
+    ContentView()
+        .environment(\.horizontalSizeClass, .compact)
 }

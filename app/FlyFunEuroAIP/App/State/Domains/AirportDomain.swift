@@ -18,7 +18,8 @@ import RZUtilsSwift
 @MainActor
 final class AirportDomain {
     // MARK: - Dependencies
-    private let repository: AirportRepositoryProtocol
+    /// Exposed for views that need to call repository methods directly (e.g., CountryPicker)
+    let repository: AirportRepositoryProtocol
     
     // MARK: - Airport Data (already filtered by repository)
     var airports: [RZFlight.Airport] = []
@@ -246,6 +247,18 @@ final class AirportDomain {
         filters.reset()
         Task {
             try? await applyFilters()
+        }
+    }
+    
+    // MARK: - Metadata Loading
+    
+    /// Load available countries from the repository
+    func loadAvailableCountries() async -> [String] {
+        do {
+            return try await repository.availableCountries()
+        } catch {
+            Logger.app.error("Failed to load countries: \(error.localizedDescription)")
+            return []
         }
     }
 }
