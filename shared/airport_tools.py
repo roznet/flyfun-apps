@@ -95,7 +95,21 @@ def search_airports(
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "cost_optimized",
 ) -> Dict[str, Any]:
-    """Search for airports by name, ICAO code, IATA code, or city name with optional filters (country, procedures, runway, fuel, fees). Returns matching airports sorted by priority."""
+    """
+    Search for airports by ICAO code, IATA code, airport name, or city name with optional filters (country, procedures, runway, fuel, fees).
+
+    **USE THIS TOOL for direct name/code searches**, not for proximity searches.
+
+    Examples:
+    - "LFPG" → use this tool (ICAO code search)
+    - "Charles de Gaulle" → use this tool (airport name search)
+    - "Paris airports" → use this tool (searches airports with "Paris" in name/city)
+    - "CDG" → use this tool (IATA code search)
+
+    **DO NOT use this tool for "near" queries** - use find_airports_near_location instead for proximity searches.
+
+    Returns matching airports sorted by priority.
+    """
     q = query.upper().strip()
     matches: List[Airport] = []
 
@@ -177,15 +191,74 @@ def search_airports(
 
 def find_airports_near_route(
     ctx: ToolContext,
-    from_icao: str,
-    to_icao: str,
+    from_location: str,
+    to_location: str,
     max_distance_nm: float = 50.0,
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "cost_optimized",
 ) -> Dict[str, Any]:
-    """List airports within a specified distance from a direct route between two airports, with optional airport filters. IMPORTANT: When user mentions fuel (e.g., AVGAS, Jet-A), customs/border crossing, runway type (paved/hard), IFR procedures, or country, you MUST include the corresponding filter: has_avgas=True for AVGAS, has_jet_a=True for Jet-A, point_of_entry=True for customs, has_hard_runway=True for paved runways, has_procedures=True for IFR, country='XX' for specific country. Useful for finding fuel stops, alternates, or customs stops."""
+    """
+    List airports within a specified distance from a direct route between two locations, with optional airport filters.
+
+    **USE THIS TOOL when user asks about airports "between" two locations.**
+
+    **IMPORTANT - Pass location names exactly as user provides them, INCLUDING country/region context:**
+    - Pass ICAO codes as-is (e.g., "LFPO", "EGKB", "EDDM")
+    - Pass location names WITH COUNTRY if user mentions it - DO NOT strip country context
+    - The tool will automatically geocode location names and find the nearest airport
+    - Examples:
+      - "between LFPO and Bromley" → from_location="LFPO", to_location="Bromley"
+      - "between Paris and Vik in Iceland" → from_location="Paris", to_location="Vik, Iceland"
+      - "Vik, Iceland" or "Vik in Iceland" → to_location="Vik, Iceland" (INCLUDE COUNTRY!)
+      - "between LFPO and EDDM" → from_location="LFPO", to_location="EDDM"
+
+    **Filters:**
+    When user mentions fuel (e.g., AVGAS, Jet-A), customs/border crossing, runway type (paved/hard), IFR procedures, or country, you MUST include the corresponding filter:
+    - has_avgas=True for AVGAS
+    - has_jet_a=True for Jet-A
+    - point_of_entry=True for customs
+    - has_hard_runway=True for paved runways
+    - has_procedures=True for IFR
+    - country='XX' for specific country
+
+    Useful for finding fuel stops, alternates, or customs stops along a route.
+    """
+    # Try to resolve both locations (with fallback to nearest airport via geocoding)
+    from_result = _find_nearest_airport_in_db(ctx, from_location)
+    to_result = _find_nearest_airport_in_db(ctx, to_location)
+
+    if not from_result:
+        return {
+            "found": False,
+            "error": f"Could not find or geocode departure location '{from_location}'. Please verify the ICAO code or location name.",
+            "pretty": f"Could not find airport or location '{from_location}'."
+        }
+
+    if not to_result:
+        return {
+            "found": False,
+            "error": f"Could not find or geocode destination location '{to_location}'. Please verify the ICAO code or location name.",
+            "pretty": f"Could not find airport or location '{to_location}'."
+        }
+
+    from_airport = from_result["airport"]
+    to_airport = to_result["airport"]
+
+    # Build substitution notes if geocoding was used
+    substitution_notes = []
+    if from_result["was_geocoded"]:
+        substitution_notes.append(
+            f"Note: '{from_result['original_query']}' was geocoded to {from_result['geocoded_location']}. "
+            f"Using nearest airport {from_airport.ident} ({from_airport.name}), {from_result['distance_nm']}nm away."
+        )
+    if to_result["was_geocoded"]:
+        substitution_notes.append(
+            f"Note: '{to_result['original_query']}' was geocoded to {to_result['geocoded_location']}. "
+            f"Using nearest airport {to_airport.ident} ({to_airport.name}), {to_result['distance_nm']}nm away."
+        )
+
     results = ctx.model.find_airports_near_route(
-        [from_icao.upper(), to_icao.upper()],
+        [from_airport.ident, to_airport.ident],
         max_distance_nm
     )
 
@@ -223,14 +296,15 @@ def find_airports_near_route(
             summary["enroute_distance_nm"] = enroute_distances[airport.ident]
         airports.append(summary)
 
-    from_airport = ctx.model.get_airport(from_icao.upper())
-    to_airport = ctx.model.get_airport(to_icao.upper())
-
     pretty = (
-        f"Found {len(airports)} airports within {max_distance_nm}nm of route {from_icao.upper()} to {to_icao.upper()}."
+        f"Found {len(airports)} airports within {max_distance_nm}nm of route {from_airport.ident} to {to_airport.ident}."
         if airports else
-        f"No airports within {max_distance_nm}nm of {from_icao.upper()}->{to_icao.upper()}."
+        f"No airports within {max_distance_nm}nm of {from_airport.ident}->{to_airport.ident}."
     )
+
+    # Add substitution notes if any airports were geocoded
+    if substitution_notes:
+        pretty = "\n".join(substitution_notes) + "\n\n" + pretty
 
     # Limit airports sent to LLM to save tokens (keep all for visualization)
     # For route planning, top 20 airports sorted by priority is sufficient
@@ -268,18 +342,34 @@ def find_airports_near_route(
         "airports": airports_for_llm,  # Limited for LLM
         "pretty": pretty,
         "filter_profile": filter_profile,  # Filter settings for UI sync
+        "substitutions": {
+            "from": {
+                "original": from_location,
+                "resolved": from_airport.ident,
+                "was_geocoded": from_result["was_geocoded"],
+                "geocoded_location": from_result.get("geocoded_location"),
+                "distance_nm": from_result.get("distance_nm", 0.0)
+            } if from_result["was_geocoded"] else None,
+            "to": {
+                "original": to_location,
+                "resolved": to_airport.ident,
+                "was_geocoded": to_result["was_geocoded"],
+                "geocoded_location": to_result.get("geocoded_location"),
+                "distance_nm": to_result.get("distance_nm", 0.0)
+            } if to_result["was_geocoded"] else None,
+        },
         "visualization": {
             "type": "route_with_markers",
             "route": {
                 "from": {
-                    "icao": from_icao.upper(),
-                    "lat": getattr(from_airport, "latitude_deg", None) if from_airport else None,
-                    "lon": getattr(from_airport, "longitude_deg", None) if from_airport else None,
+                    "icao": from_airport.ident,
+                    "lat": getattr(from_airport, "latitude_deg", None),
+                    "lon": getattr(from_airport, "longitude_deg", None),
                 },
                 "to": {
-                    "icao": to_icao.upper(),
-                    "lat": getattr(to_airport, "latitude_deg", None) if to_airport else None,
-                    "lon": getattr(to_airport, "longitude_deg", None) if to_airport else None,
+                    "icao": to_airport.ident,
+                    "lat": getattr(to_airport, "latitude_deg", None),
+                    "lon": getattr(to_airport, "longitude_deg", None),
                 }
             },
             "markers": airports  # Include ALL airports for map visualization (not just LLM-limited subset)
@@ -806,9 +896,100 @@ def _geoapify_geocode(query: str) -> Optional[Dict[str, Any]]:
                 "lat": float(lat),
                 "lon": float(lon),
                 "formatted": top.get("formatted") or query,
+                "country_code": top.get("country_code"),  # ISO-2 country code (e.g., "IS", "GB")
             }
     except Exception:
         return None
+
+
+def _find_nearest_airport_in_db(
+    ctx: ToolContext,
+    icao_or_location: str,
+    max_search_radius_nm: float = 100.0
+) -> Optional[Dict[str, Any]]:
+    """
+    Try to find the nearest airport in the database for a given ICAO code or location name.
+
+    1. First checks if the ICAO code exists in the database
+    2. If not found, tries to geocode it as a location name
+    3. Finds the nearest airport in the database to those coordinates
+       - Prefers airports in the same country as the geocoded location
+       - Falls back to nearest airport if none in same country
+
+    Returns dict with 'airport' object, 'original_query', 'was_geocoded', 'distance_nm', 'geocoded_location'
+    or None if nothing found.
+    """
+    icao = icao_or_location.strip().upper()
+
+    # First try direct ICAO lookup
+    airport = ctx.model.get_airport(icao)
+    if airport:
+        return {
+            "airport": airport,
+            "original_query": icao_or_location,
+            "was_geocoded": False,
+            "distance_nm": 0.0,
+            "geocoded_location": None
+        }
+
+    # Not found as ICAO - try geocoding as location name
+    geocode = _geoapify_geocode(icao_or_location)
+
+    if not geocode:
+        return None
+
+    center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
+    geocode_country = geocode.get("country_code")  # ISO-2 country code from Geoapify
+
+    # Find airports within radius, tracking both same-country and any-country nearest
+    nearest_same_country = None
+    nearest_same_country_distance = float('inf')
+    nearest_any = None
+    nearest_any_distance = float('inf')
+
+    for apt in ctx.model.airports.values():
+        if not getattr(apt, "navpoint", None):
+            continue
+        try:
+            _, distance_nm = apt.navpoint.haversine_distance(center_point)
+        except Exception:
+            continue
+
+        if distance_nm > max_search_radius_nm:
+            continue
+
+        # Track nearest airport overall
+        if distance_nm < nearest_any_distance:
+            nearest_any_distance = distance_nm
+            nearest_any = apt
+
+        # Track nearest airport in same country (if country known)
+        if geocode_country and getattr(apt, "iso_country", None):
+            if apt.iso_country.upper() == geocode_country.upper():
+                if distance_nm < nearest_same_country_distance:
+                    nearest_same_country_distance = distance_nm
+                    nearest_same_country = apt
+
+    # Prefer same-country airport if found, otherwise use nearest any
+    if nearest_same_country:
+        return {
+            "airport": nearest_same_country,
+            "original_query": icao_or_location,
+            "was_geocoded": True,
+            "distance_nm": round(nearest_same_country_distance, 1),
+            "geocoded_location": geocode["formatted"]
+        }
+
+    if nearest_any:
+        return {
+            "airport": nearest_any,
+            "original_query": icao_or_location,
+            "was_geocoded": True,
+            "distance_nm": round(nearest_any_distance, 1),
+            "geocoded_location": geocode["formatted"]
+        }
+
+    return None
 
 
 def find_airports_near_location(
@@ -819,10 +1000,22 @@ def find_airports_near_location(
     priority_strategy: str = "cost_optimized",
 ) -> Dict[str, Any]:
     """
-    Find airports near a geographic location (free-text) within a specified distance.
+    Find airports near a geographic location (free-text location name, city, landmark, or coordinates) within a specified distance.
+
+    **USE THIS TOOL when user asks about airports "near", "around", "close to" a location that is NOT an ICAO code.**
+
+    Examples:
+    - "airports near Paris" → use this tool with location_query="Paris"
+    - "airports around Lake Geneva" → use this tool with location_query="Lake Geneva"
+    - "airports close to Zurich" → use this tool with location_query="Zurich"
+    - "airports near 48.8584, 2.2945" → use this tool with location_query="48.8584, 2.2945"
+
+    Process:
     1) Geocodes the location via Geoapify to get coordinates
     2) Computes distance from each airport to that point and filters by max_distance_nm
-    3) Applies optional filters and priority sorting similar to find_airports_near_route
+    3) Applies optional filters (fuel, customs, runway, etc.) and priority sorting
+
+    **DO NOT use this tool if user provides ICAO codes** - use find_airports_near_route instead for route-based searches.
     """
     geocode = _geoapify_geocode(location_query)
     if not geocode:
@@ -976,7 +1169,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                     "properties": {
                         "location_query": {
                             "type": "string",
-                            "description": "Free-text location (e.g., 'Paris', 'Nice, France', '48.8584, 2.2945').",
+                            "description": "Free-text location: city name (e.g., 'Paris', 'Zurich'), landmark (e.g., 'Lake Geneva'), address (e.g., 'Nice, France'), or coordinates (e.g., '48.8584, 2.2945'). DO NOT use ICAO codes here - use find_airports_near_route for ICAO-based route searches.",
                         },
                         "max_distance_nm": {
                             "type": "number",
@@ -1007,13 +1200,13 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "from_icao": {
+                        "from_location": {
                             "type": "string",
-                            "description": "Departure airport ICAO code (e.g., EGTF).",
+                            "description": "Departure location - pass EXACTLY as user provides it INCLUDING any country/region context. Can be ICAO code (e.g., 'LFPO') OR location name with country (e.g., 'Bromley, UK', 'Paris, France', 'Vik, Iceland'). DO NOT convert location names to ICAO codes. ALWAYS include country if user mentions it.",
                         },
-                        "to_icao": {
+                        "to_location": {
                             "type": "string",
-                            "description": "Destination airport ICAO code (e.g., LFMD).",
+                            "description": "Destination location - pass EXACTLY as user provides it INCLUDING any country/region context. Can be ICAO code (e.g., 'EDDM') OR location name with country (e.g., 'Vik, Iceland', 'Nice, France'). DO NOT convert location names to ICAO codes. ALWAYS include country if user mentions it.",
                         },
                         "max_distance_nm": {
                             "type": "number",
@@ -1030,7 +1223,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                             "default": "cost_optimized",
                         },
                     },
-                    "required": ["from_icao", "to_icao"],
+                    "required": ["from_location", "to_location"],
                 },
                 "expose_to_llm": True,
             },
