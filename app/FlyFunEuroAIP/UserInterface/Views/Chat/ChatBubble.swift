@@ -34,6 +34,11 @@ struct ChatBubble: View {
                     .foregroundStyle(isUser ? .white : .primary)
                     .clipShape(BubbleShape(isUser: isUser))
                 
+                // Tools used footer (for assistant messages)
+                if !isUser && !message.toolsUsed.isEmpty {
+                    ToolsUsedView(tools: message.toolsUsed)
+                }
+                
                 // Timestamp
                 Text(message.timestamp, style: .time)
                     .font(.caption2)
@@ -70,6 +75,44 @@ struct ChatBubble: View {
             #else
             Color(nsColor: .controlBackgroundColor)
             #endif
+        }
+    }
+}
+
+// MARK: - Tools Used View
+
+struct ToolsUsedView: View {
+    let tools: [String]
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.caption2)
+            Text(formattedTools)
+                .font(.caption2)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.1))
+        .clipShape(Capsule())
+    }
+    
+    private var formattedTools: String {
+        tools.map { formatToolName($0) }.joined(separator: ", ")
+    }
+    
+    private func formatToolName(_ tool: String) -> String {
+        // Convert snake_case to readable format
+        switch tool {
+        case "search_airports": return "Search"
+        case "get_airport_info": return "Info"
+        case "find_airports_near_route": return "Route"
+        case "get_airport_procedures": return "Procedures"
+        case "get_airport_runways": return "Runways"
+        case "get_airports_near": return "Nearby"
+        default:
+            return tool.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 }
@@ -197,7 +240,8 @@ struct BubbleShape: Shape {
         
         ChatBubble(message: ChatMessage(
             role: .assistant,
-            content: "I found several airports with ILS approaches near London. Here are the top results:\n\n• EGLL - London Heathrow\n• EGKK - London Gatwick\n• EGLC - London City"
+            content: "I found several airports with ILS approaches near London. Here are the top results:\n\n• EGLL - London Heathrow\n• EGKK - London Gatwick\n• EGLC - London City",
+            toolsUsed: ["search_airports", "get_airport_info"]
         ))
         
         ChatBubble(message: ChatMessage(

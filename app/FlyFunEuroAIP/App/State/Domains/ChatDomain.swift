@@ -22,6 +22,9 @@ final class ChatDomain {
     var currentToolCall: String?
     var error: String?
     
+    /// Tools used during current streaming session
+    private var toolsUsed: [String] = []
+    
     // MARK: - Cross-Domain Callback
     /// Called when chat produces a visualization payload
     /// AppState wires this to AirportDomain.applyVisualization
@@ -61,6 +64,7 @@ final class ChatDomain {
         isStreaming = true
         currentThinking = nil
         currentToolCall = nil
+        toolsUsed = []  // Reset tools for new message
         
         Logger.app.info("Sending chat message: \(userMessage)")
         
@@ -103,6 +107,10 @@ final class ChatDomain {
             
         case .toolCallStart(let name, _):
             currentToolCall = name
+            // Track all tools used (avoid duplicates)
+            if !toolsUsed.contains(name) {
+                toolsUsed.append(name)
+            }
             Logger.app.info("Tool call: \(name)")
             
         case .toolCallEnd(let name, _):
@@ -193,10 +201,16 @@ final class ChatDomain {
     /// Finish streaming for the last message
     func finishStreaming() {
         guard let lastIndex = messages.lastIndex(where: { $0.role == .assistant }) else { return }
-        var message = messages[lastIndex]
-        message = ChatMessage(role: message.role, content: message.content, isStreaming: false)
-        messages[lastIndex] = message
+        let message = messages[lastIndex]
+        // Create final message with tools used
+        messages[lastIndex] = ChatMessage(
+            role: message.role,
+            content: message.content,
+            isStreaming: false,
+            toolsUsed: toolsUsed
+        )
         isStreaming = false
+        Logger.app.info("Finished streaming. Tools used: \(toolsUsed)")
     }
 }
 
@@ -208,6 +222,7 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
     let content: String
     let timestamp: Date
     let isStreaming: Bool
+    let toolsUsed: [String]
     
     enum Role: String, Sendable {
         case user
@@ -220,13 +235,15 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
         role: Role,
         content: String,
         timestamp: Date = Date(),
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        toolsUsed: [String] = []
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
         self.isStreaming = isStreaming
+        self.toolsUsed = toolsUsed
     }
 }
 
