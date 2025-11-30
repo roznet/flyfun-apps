@@ -147,8 +147,8 @@ def search_airports(
 
 @mcp.tool(name="find_airports_near_route", description=_desc(shared_find_airports_near_route))
 def find_airports_near_route(
-    from_icao: str,
-    to_icao: str,
+    from_location: str,
+    to_location: str,
     max_distance_nm: float = 50.0,
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "cost_optimized",
@@ -157,8 +157,8 @@ def find_airports_near_route(
     context = _require_tool_context()
     result = shared_find_airports_near_route(
         context,
-        from_icao,
-        to_icao,
+        from_location,
+        to_location,
         max_distance_nm,
         filters=filters,
         priority_strategy=priority_strategy,

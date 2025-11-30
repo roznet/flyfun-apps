@@ -3,8 +3,8 @@
     "question": "Find airports along the route from EGTF to LFMD that have customs facilities",
     "expected_tool": "find_airports_near_route",
     "expected_arguments": {
-      "from_icao": "EGTF",
-      "to_icao": "LFMD",
+      "from_location": "EGTF",
+      "to_location": "LFMD",
       "filters": {
         "point_of_entry": true
       }

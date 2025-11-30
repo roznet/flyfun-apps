@@ -247,8 +247,16 @@ def build_ui_payload(plan: AviationPlan, tool_result: dict | None) -> dict | Non
 
     # Add kind-specific metadata
     if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
-        base_payload["departure"] = plan.arguments.get("from_icao") or plan.arguments.get("departure")
-        base_payload["destination"] = plan.arguments.get("to_icao") or plan.arguments.get("destination")
+        base_payload["departure"] = (
+            plan.arguments.get("from_location") or
+            plan.arguments.get("from_icao") or
+            plan.arguments.get("departure")
+        )
+        base_payload["destination"] = (
+            plan.arguments.get("to_location") or
+            plan.arguments.get("to_icao") or
+            plan.arguments.get("destination")
+        )
         if plan.arguments.get("ifr") is not None:
             base_payload["ifr"] = plan.arguments.get("ifr")
 
@@ -404,7 +412,7 @@ The shared code centralizes every MCP tool signature in `shared/airport_tools.py
 | --- | --- | --- | --- | --- |
 | `search_airports` | `query` | `max_results`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='markers'` |
 | `find_airports_near_location` | `location_query` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `center`, `airports`, `filter_profile`, `visualization.type='point_with_markers'` |
-| `find_airports_near_route` | `from_icao`, `to_icao` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='route_with_markers'` |
+| `find_airports_near_route` | `from_location`, `to_location` | `max_distance_nm`, `filters`, `priority_strategy` | `route` | `airports`, `filter_profile`, `visualization.type='route_with_markers'`, `substitutions` |
 | `get_airport_details` | `icao_code` | – | `airport` | `airport`, `runways`, `visualization.type='marker_with_details'` |
 | `get_border_crossing_airports` | – | `country` | `airport` | `airports`, `by_country`, `filter_profile`, `visualization.style='customs'` |
 | `get_airport_statistics` | – | `country` | `airport` | `stats` |

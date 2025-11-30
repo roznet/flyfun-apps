@@ -17,8 +17,8 @@ def test_server_search_airports(server_module):
 def test_server_find_airports_near_route(server_module):
     result = _call_tool_fn(
         server_module.find_airports_near_route,
-        from_icao="EGLL",
-        to_icao="LFPG",
+        from_location="EGLL",
+        to_location="LFPG",
         max_distance_nm=40,
     )
 
