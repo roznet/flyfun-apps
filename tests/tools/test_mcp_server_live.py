@@ -131,7 +131,7 @@ def test_live_http_find_airports_near_route(live_mcp_server):
     payload = _call_tool_sync(
         live_mcp_server,
         "find_airports_near_route",
-        {"from_icao": "EGLL", "to_icao": "LFPG", "max_distance_nm": 40},
+        {"from_location": "EGLL", "to_location": "LFPG", "max_distance_nm": 40},
     )
 
     assert payload["count"] >= 1

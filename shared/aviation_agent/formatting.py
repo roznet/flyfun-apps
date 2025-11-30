@@ -92,8 +92,16 @@ def build_ui_payload(plan: AviationPlan, tool_result: Dict[str, Any] | None) -> 
 
     # Add kind-specific metadata
     if plan.selected_tool in {"search_airports", "find_airports_near_route", "find_airports_near_location"}:
-        base_payload["departure"] = plan.arguments.get("from_icao") or plan.arguments.get("departure")
-        base_payload["destination"] = plan.arguments.get("to_icao") or plan.arguments.get("destination")
+        base_payload["departure"] = (
+            plan.arguments.get("from_location") or
+            plan.arguments.get("from_icao") or
+            plan.arguments.get("departure")
+        )
+        base_payload["destination"] = (
+            plan.arguments.get("to_location") or
+            plan.arguments.get("to_icao") or
+            plan.arguments.get("destination")
+        )
         if plan.arguments.get("ifr") is not None:
             base_payload["ifr"] = plan.arguments.get("ifr")
 

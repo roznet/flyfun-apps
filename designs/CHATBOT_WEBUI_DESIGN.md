@@ -418,7 +418,7 @@ See `designs/UI_FILTER_STATE_DESIGN.md` for complete tool-to-visualization mappi
   "tool_calls": [
     {
       "name": "find_airports_near_route",
-      "arguments": {"from_icao": "EGTF", "to_icao": "LFMD"},
+      "arguments": {"from_location": "EGTF", "to_location": "LFMD"},
       "result": {...}
     }
   ],

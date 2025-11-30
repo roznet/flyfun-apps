@@ -6,15 +6,10 @@
 //
 
 import Foundation
-import RZUtilsSwift
 
+/// Legacy Settings struct - use SettingsDomain instead
+/// Kept for API configuration constants
 public struct Settings {
-    static let service = "flyfun-euro-aip.ro-z.net"
-    static let shared = Settings()
-    
-    
-    init(){
-        let model = AirportMapViewModel.sample()
-        print(model)
-    }
+    static let apiBaseURL = "https://maps.flyfun.aero/api"
+    static let bundleIdentifier = Bundle.main.bundleIdentifier ?? "net.ro-z.flyfun.euroaip"
 }
