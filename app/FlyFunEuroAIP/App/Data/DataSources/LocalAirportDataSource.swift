@@ -31,7 +31,12 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
         }
         self.db = db
         self.knownAirports = KnownAirports(db: db, where: "LENGTH(icao_code) = 4 and ISO_COUNTRY != 'RU'")
-        Logger.app.info("LocalAirportDataSource initialized")
+        
+        // Bulk load all extended data upfront for efficient legend rendering
+        // This is faster than loading per-airport: 4 queries vs ~16,000
+        Logger.app.info("Loading extended airport data...")
+        knownAirports.loadAllExtendedData()
+        Logger.app.info("LocalAirportDataSource initialized with \(knownAirports.matching(needle: "").count) airports")
     }
     
     /// Initialize from an existing KnownAirports instance
