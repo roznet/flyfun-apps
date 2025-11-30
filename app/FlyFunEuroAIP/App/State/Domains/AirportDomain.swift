@@ -238,19 +238,31 @@ final class AirportDomain {
             
             // Handle route
             if let route = viz.route {
-                // Create route visualization if we have enough data
-                if let departure = route.departure,
-                   let destination = route.destination {
-                    // Find airports in current list
-                    if let depAirport = airports.first(where: { $0.icao == departure }),
-                       let destAirport = airports.first(where: { $0.icao == destination }) {
-                        activeRoute = RouteVisualization(
-                            coordinates: [depAirport.coord, destAirport.coord],
-                            departure: departure,
-                            destination: destination
-                        )
-                        fitMapToRoute()
-                    }
+                // Prefer using coordinates directly from the payload
+                if let depCoord = route.departureCoord,
+                   let destCoord = route.destinationCoord {
+                    activeRoute = RouteVisualization(
+                        coordinates: [depCoord.clLocationCoordinate, destCoord.clLocationCoordinate],
+                        departure: route.departure ?? "DEP",
+                        destination: route.destination ?? "DEST"
+                    )
+                    Logger.app.info("Route created from coordinates: \(route.departure ?? "?") to \(route.destination ?? "?")")
+                    fitMapToRoute()
+                }
+                // Fallback: try to find airports in current list
+                else if let departure = route.departure,
+                        let destination = route.destination,
+                        let depAirport = airports.first(where: { $0.icao == departure }),
+                        let destAirport = airports.first(where: { $0.icao == destination }) {
+                    activeRoute = RouteVisualization(
+                        coordinates: [depAirport.coord, destAirport.coord],
+                        departure: departure,
+                        destination: destination
+                    )
+                    Logger.app.info("Route created from airport lookup: \(departure) to \(destination)")
+                    fitMapToRoute()
+                } else {
+                    Logger.app.warning("Could not create route - no coordinates and airports not found")
                 }
             }
             

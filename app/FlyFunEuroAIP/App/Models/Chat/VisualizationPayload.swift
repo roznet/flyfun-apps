@@ -159,12 +159,40 @@ struct MapMarker: Sendable, Identifiable {
 struct RouteData: Sendable {
     let departure: String?
     let destination: String?
+    let departureCoord: Coordinate?
+    let destinationCoord: Coordinate?
     let waypoints: [String]?
     let coordinates: [Coordinate]?
     
     init(from dict: [String: Any]) {
-        self.departure = dict["departure"] as? String ?? dict["from"] as? String
-        self.destination = dict["destination"] as? String ?? dict["to"] as? String
+        // Parse departure - can be string or object with icao/lat/lon
+        if let fromDict = dict["from"] as? [String: Any] {
+            self.departure = fromDict["icao"] as? String
+            if let lat = fromDict["lat"] as? Double ?? fromDict["latitude"] as? Double,
+               let lon = fromDict["lon"] as? Double ?? fromDict["longitude"] as? Double {
+                self.departureCoord = Coordinate(latitude: lat, longitude: lon)
+            } else {
+                self.departureCoord = nil
+            }
+        } else {
+            self.departure = dict["departure"] as? String ?? dict["from"] as? String
+            self.departureCoord = nil
+        }
+        
+        // Parse destination - can be string or object with icao/lat/lon
+        if let toDict = dict["to"] as? [String: Any] {
+            self.destination = toDict["icao"] as? String
+            if let lat = toDict["lat"] as? Double ?? toDict["latitude"] as? Double,
+               let lon = toDict["lon"] as? Double ?? toDict["longitude"] as? Double {
+                self.destinationCoord = Coordinate(latitude: lat, longitude: lon)
+            } else {
+                self.destinationCoord = nil
+            }
+        } else {
+            self.destination = dict["destination"] as? String ?? dict["to"] as? String
+            self.destinationCoord = nil
+        }
+        
         self.waypoints = dict["waypoints"] as? [String]
         
         if let coordsArray = dict["coordinates"] as? [[Double]] {
