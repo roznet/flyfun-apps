@@ -62,18 +62,35 @@ protocol AirportRepositoryProtocol: Sendable {
     func borderCrossingICAOs() async throws -> Set<String>
 }
 
+// MARK: - Data Source Strategy
+
+/// Strategy for choosing data source based on connectivity
+enum DataSourceStrategy: String, Sendable {
+    case localOnly      // Always use local (offline mode)
+    case remotePreferred  // Try remote first, fallback to local
+    case localPreferred   // Try local first, use remote for missing data
+}
+
 // MARK: - Unified Repository
 
 /// Main repository that switches between offline/online sources
+/// Uses strategy pattern for flexible data source selection
 @Observable
 @MainActor
 final class AirportRepository: AirportRepositoryProtocol {
     // MARK: - State
     private(set) var connectivityMode: ConnectivityMode = .offline
+    private(set) var strategy: DataSourceStrategy = .localOnly
     
     // MARK: - Dependencies
     private let localDataSource: LocalAirportDataSource
+    private var remoteDataSource: RemoteAirportDataSource?
     private let connectivityMonitor: ConnectivityMonitor
+    
+    // MARK: - Configuration
+    
+    /// Base URL for the API (configurable)
+    static var apiBaseURL: String = "https://maps.flyfun.aero"
     
     // MARK: - Init
     
@@ -82,14 +99,56 @@ final class AirportRepository: AirportRepositoryProtocol {
         self.connectivityMonitor = connectivityMonitor
     }
     
+    // MARK: - Remote Setup
+    
+    /// Initialize the remote data source (call when online)
+    func setupRemoteDataSource() {
+        guard remoteDataSource == nil else { return }
+        
+        do {
+            remoteDataSource = try RemoteAirportDataSource(baseURLString: Self.apiBaseURL)
+            Logger.app.info("Remote data source initialized")
+        } catch {
+            Logger.app.error("Failed to initialize remote data source: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Update strategy based on connectivity and user preference
+    func updateStrategy(preferRemote: Bool = false) {
+        switch connectivityMode {
+        case .offline:
+            strategy = .localOnly
+        case .online, .hybrid:
+            strategy = preferRemote ? .remotePreferred : .localPreferred
+            // Lazily initialize remote data source when we go online
+            if strategy != .localOnly {
+                setupRemoteDataSource()
+            }
+        }
+        Logger.app.info("Repository strategy: \(strategy.rawValue)")
+    }
+    
     // MARK: - Connectivity Observation
     
     func startObservingConnectivity() {
         Task {
             for await mode in connectivityMonitor.modeStream {
                 self.connectivityMode = mode
+                self.updateStrategy()
                 Logger.sync.info("Repository connectivity: \(mode.rawValue)")
             }
+        }
+    }
+    
+    // MARK: - Active Data Source
+    
+    /// Get the active data source based on current strategy
+    private var activeDataSource: AirportRepositoryProtocol {
+        switch strategy {
+        case .localOnly, .localPreferred:
+            return localDataSource
+        case .remotePreferred:
+            return remoteDataSource ?? localDataSource
         }
     }
     
@@ -100,7 +159,7 @@ final class AirportRepository: AirportRepositoryProtocol {
         filters: FilterConfig,
         limit: Int
     ) async throws -> [RZFlight.Airport] {
-        // For now, always use local. Later: check connectivityMode for API
+        // Always use local for region queries (faster, works offline)
         return try await localDataSource.airportsInRegion(boundingBox: boundingBox, filters: filters, limit: limit)
     }
     
@@ -113,6 +172,7 @@ final class AirportRepository: AirportRepositoryProtocol {
     }
     
     nonisolated func airportDetail(icao: String) async throws -> RZFlight.Airport? {
+        // Use local for detail - it has full data loaded
         return try await localDataSource.airportDetail(icao: icao)
     }
     
@@ -125,7 +185,6 @@ final class AirportRepository: AirportRepositoryProtocol {
     }
     
     nonisolated func applyInMemoryFilters(_ filters: FilterConfig, to airports: [RZFlight.Airport]) -> [RZFlight.Airport] {
-        // Apply in-memory filters directly without going through LocalAirportDataSource
         var result = airports
         
         if let country = filters.country {
@@ -161,6 +220,18 @@ final class AirportRepository: AirportRepositoryProtocol {
     
     nonisolated func borderCrossingICAOs() async throws -> Set<String> {
         return try await localDataSource.borderCrossingICAOs()
+    }
+    
+    // MARK: - Remote-Only Methods
+    
+    /// Check if remote API is available
+    func checkAPIAvailability() async -> Bool {
+        guard let remote = remoteDataSource else {
+            setupRemoteDataSource()
+            guard let remote = remoteDataSource else { return false }
+            return await remote.isAPIAvailable()
+        }
+        return await remote.isAPIAvailable()
     }
 }
 
