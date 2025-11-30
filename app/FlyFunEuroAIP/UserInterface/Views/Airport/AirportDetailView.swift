@@ -205,8 +205,13 @@ struct AirportDetailView: View {
             Text("AIP Information")
                 .font(.headline)
             
-            ForEach(airport.aipEntries, id: \.ident) { entry in
-                AIPEntryRow(entry: entry)
+            // Group by section for better organization
+            let grouped = Dictionary(grouping: airport.aipEntries) { $0.section }
+            
+            ForEach(Array(grouped.keys.sorted(by: { $0.rawValue < $1.rawValue })), id: \.self) { section in
+                if let entries = grouped[section] {
+                    AIPSectionGroup(section: section, entries: entries)
+                }
             }
         }
     }
@@ -374,6 +379,24 @@ struct ProcedureRow: View {
     }
 }
 
+struct AIPSectionGroup: View {
+    let section: RZFlight.AIPEntry.Section
+    let entries: [RZFlight.AIPEntry]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(section.displayName)
+                .font(.subheadline.bold())
+                .foregroundStyle(.secondary)
+            
+            // Use enumerated to get unique IDs since entry.ident is airport ICAO
+            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                AIPEntryRow(entry: entry)
+            }
+        }
+    }
+}
+
 struct AIPEntryRow: View {
     let entry: RZFlight.AIPEntry
     
@@ -385,10 +408,12 @@ struct AIPEntryRow: View {
             
             Text(entry.effectiveValue)
                 .font(.subheadline)
+                .textSelection(.enabled)
         }
         .padding(.vertical, 4)
     }
 }
+
 
 // MARK: - RZFlight Extensions
 
