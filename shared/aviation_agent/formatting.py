@@ -26,7 +26,9 @@ def build_formatter_chain(llm: Runnable) -> Runnable:
                 (
                     "You are an aviation assistant. Use the tool findings to answer the pilot's question.\n"
                     "Always cite operational caveats when data may be outdated. Prefer concise Markdown.\n"
-                    "Provide clear, helpful information with references to map visualization when applicable."
+                    "IMPORTANT: Do NOT generate any URLs, links, or image markdown. The map visualization is handled "
+                    "automatically by the UI - just describe the airports/results in your text response.\n"
+                    "Simply mention 'The results are shown on the map' if relevant, but never create fake URLs."
                 ),
             ),
             MessagesPlaceholder(variable_name="messages"),

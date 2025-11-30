@@ -14,8 +14,10 @@ Or set environment variable:
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -25,6 +27,10 @@ from langchain_openai import ChatOpenAI
 
 from shared.aviation_agent.planning import build_planner_runnable
 from shared.aviation_agent.tools import AviationToolClient
+
+
+# Global list to collect test results for CSV export
+_test_results: list[Dict[str, Any]] = []
 
 
 def _load_test_cases() -> list[Dict[str, Any]]:
@@ -44,12 +50,12 @@ def live_planner_llm():
     """Create a live LLM for planner tests (only if explicitly enabled)."""
     if not _should_run_behavior_tests():
         pytest.skip("Behavioral tests require RUN_PLANNER_BEHAVIOR_TESTS=1")
-    
+
     model = os.getenv("AVIATION_AGENT_PLANNER_MODEL", "gpt-4o-mini")
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         pytest.skip("OPENAI_API_KEY not set")
-    
+
     return ChatOpenAI(model=model, temperature=0, api_key=api_key)
 
 
@@ -60,8 +66,43 @@ def behavior_tool_client(agent_settings):
     return AviationToolClient(agent_settings.build_tool_context())
 
 
+def _save_results_to_csv():
+    """Save collected test results to CSV file."""
+    if not _test_results:
+        return
+
+    output_dir = Path(__file__).parent / "results"
+    output_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = output_dir / f"planner_test_results_{timestamp}.csv"
+
+    fieldnames = [
+        "test_case", "question", "description", "status",
+        "expected_tool", "actual_tool", "tool_match",
+        "expected_args", "actual_args", "args_match"
+    ]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(_test_results)
+
+    print(f"\n{'='*60}")
+    print(f"Results saved to: {csv_path}")
+    print(f"{'='*60}")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def save_csv_on_finish(request):
+    """Fixture to save CSV results after all tests complete."""
+    yield
+    if _should_run_behavior_tests():
+        _save_results_to_csv()
+
+
 @pytest.mark.planner_behavior
-@pytest.mark.parametrize("test_case", _load_test_cases())
+@pytest.mark.parametrize("test_case", _load_test_cases(), ids=lambda tc: tc.get("question", "")[:40])
 def test_planner_selects_correct_tool(
     test_case: Dict[str, Any],
     live_planner_llm,
@@ -69,38 +110,78 @@ def test_planner_selects_correct_tool(
 ):
     """
     Test that planner selects the expected tool for a given question.
-    
+
     This is a behavioral/integration test that requires a live LLM.
     """
     question = test_case["question"]
     expected_tool = test_case["expected_tool"]
     expected_args = test_case.get("expected_arguments", {})
     description = test_case.get("description", "")
-    
+
     # Build planner with live LLM
     planner = build_planner_runnable(
         live_planner_llm,
         tuple(behavior_tool_client.tools.values())
     )
-    
+
     # Run planner
     messages = [HumanMessage(content=question)]
     plan = planner.invoke({"messages": messages})
-    
+
+    # Determine if tool and args match
+    tool_match = plan.selected_tool == expected_tool
+
+    # Check args match
+    args_match = True
+    plan_args = plan.arguments or {}
+    for key, expected_value in expected_args.items():
+        if key not in plan_args:
+            args_match = False
+            break
+        if isinstance(expected_value, dict):
+            plan_value = plan_args.get(key, {})
+            for nested_key, nested_value in expected_value.items():
+                if nested_key not in plan_value or plan_value[nested_key] != nested_value:
+                    args_match = False
+                    break
+
+    # Collect result for CSV
+    test_case_num = len(_test_results)
+    _test_results.append({
+        "test_case": test_case_num,
+        "question": question,
+        "description": description,
+        "status": "PASS" if (tool_match and args_match) else "FAIL",
+        "expected_tool": expected_tool,
+        "actual_tool": plan.selected_tool,
+        "tool_match": "YES" if tool_match else "NO",
+        "expected_args": json.dumps(expected_args),
+        "actual_args": json.dumps(plan.arguments),
+        "args_match": "YES" if args_match else "NO",
+    })
+
+    # Print actual results for visibility
+    print(f"\n{'='*60}")
+    print(f"Question: {question}")
+    print(f"Expected Tool: {expected_tool}")
+    print(f"Actual Tool:   {plan.selected_tool}")
+    print(f"Expected Args: {json.dumps(expected_args, indent=2)}")
+    print(f"Actual Args:   {json.dumps(plan.arguments, indent=2)}")
+    print(f"{'='*60}")
+
     # Assertions
     assert plan.selected_tool == expected_tool, (
         f"Expected tool '{expected_tool}' but got '{plan.selected_tool}'. "
         f"Description: {description}"
     )
-    
+
     # Check that expected arguments are present (allowing extra args)
-    plan_args = plan.arguments or {}
     for key, expected_value in expected_args.items():
         assert key in plan_args, (
             f"Expected argument '{key}' not found in plan.arguments. "
             f"Got: {plan_args}"
         )
-        
+
         if isinstance(expected_value, dict):
             # For nested dicts (like filters), check that expected keys exist
             plan_value = plan_args.get(key, {})
@@ -125,4 +206,3 @@ def test_planner_selects_correct_tool(
                 assert plan_value == expected_value, (
                     f"Expected '{key}' = {expected_value}, got {plan_value}"
                 )
-

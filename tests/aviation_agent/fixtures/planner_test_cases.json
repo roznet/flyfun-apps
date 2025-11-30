@@ -60,12 +60,149 @@
     "question": "Search for airports in Germany",
     "expected_tool": "search_airports",
     "expected_arguments": {
-      "query": "Germany",
+      "query": "Germany"
+    },
+    "description": "Country-based airport search - filter is optional since query contains country"
+  },
+
+  {
+    "_comment": "=== Mixed ICAO + Location ===",
+    "question": "Find airports between LFPO and Bromley",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "LFPO",
+      "to_location": "Bromley"
+    },
+    "description": "Mixed ICAO and location name - ICAO first, location second"
+  },
+  {
+    "question": "Airports along route from EGKB to Nice, France",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EGKB",
+      "to_location": "Nice, France"
+    },
+    "description": "Mixed ICAO and location with country context"
+  },
+  {
+    "question": "Route from Paris to LOWI",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Paris",
+      "to_location": "LOWI"
+    },
+    "description": "Mixed location name first, ICAO second"
+  },
+
+  {
+    "_comment": "=== Location Names Only ===",
+    "question": "Find airports between Bromley and Vik, Iceland",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Bromley",
+      "to_location": "Vik, Iceland"
+    },
+    "description": "Location names only with country context for disambiguation"
+  },
+  {
+    "question": "Airports between London and Reykjavik",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "London",
+      "to_location": "Reykjavik"
+    },
+    "description": "Location names only - major cities"
+  },
+  {
+    "question": "Route from Geneva to Barcelona",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Geneva",
+      "to_location": "Barcelona"
+    },
+    "description": "Location names only - European cities"
+  },
+
+  {
+    "_comment": "=== With Filters ===",
+    "question": "Find airports with AVGAS between Edinburgh and Bergen, Norway",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Edinburgh",
+      "to_location": "Bergen, Norway",
       "filters": {
-        "country": "DE"
+        "has_avgas": true
       }
     },
-    "description": "Country-based airport search"
+    "description": "Route with AVGAS filter and country context"
+  },
+  {
+    "question": "Airports with customs between Bromley and Paris",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "filters": {
+        "point_of_entry": true
+      }
+    },
+    "description": "Route with customs/border crossing filter - LLM may add country context to ambiguous locations"
+  },
+  {
+    "question": "Route from Munich to Stockholm with hard runways",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Munich",
+      "to_location": "Stockholm",
+      "filters": {
+        "has_hard_runway": true
+      }
+    },
+    "description": "Route with hard runway filter"
+  },
+
+  {
+    "_comment": "=== Ambiguous Names (country matters!) ===",
+    "question": "Airports near Vik, Iceland",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Vik, Iceland"
+    },
+    "description": "Ambiguous location with Iceland context - should include country"
+  },
+  {
+    "question": "Airports near Vik, Norway",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Vik, Norway"
+    },
+    "description": "Ambiguous location with Norway context - should include country"
+  },
+  {
+    "question": "Route from Vik, Iceland to Paris",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "Vik, Iceland",
+      "to_location": "Paris"
+    },
+    "description": "Route with ambiguous origin including country context"
+  },
+
+  {
+    "_comment": "=== ICAO Only (still works) ===",
+    "question": "Find airports between EGKB and BIRK",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EGKB",
+      "to_location": "BIRK"
+    },
+    "description": "ICAO codes only - standard route query"
+  },
+  {
+    "question": "Route from LFPG to LEMD",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "LFPG",
+      "to_location": "LEMD"
+    },
+    "description": "ICAO codes only - Paris to Madrid"
   }
 ]
-
