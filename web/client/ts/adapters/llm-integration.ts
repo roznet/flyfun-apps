@@ -231,10 +231,10 @@ export class LLMIntegration {
     const store = this.store as any;
     const state = store.getState();
     const highlights = state.visualization.highlights;
-    
+
     // Collect IDs to remove first (avoid modifying Map during iteration)
     const idsToRemove: string[] = [];
-    
+
     if (highlights instanceof globalThis.Map) {
       highlights.forEach((_, id: string) => {
         if (id.startsWith('llm-airport-')) {
@@ -248,11 +248,50 @@ export class LLMIntegration {
         }
       });
     }
-    
+
     // Remove collected IDs
     idsToRemove.forEach(id => {
       store.getState().removeHighlight(id);
     });
+  }
+
+  /**
+   * Reset all visualizations (public method for clearing chat)
+   * Complete reset - clears everything and loads all airports
+   */
+  async resetVisualization(): Promise<void> {
+    const store = this.store as any;
+
+    // Clear LLM highlights
+    this.clearLLMHighlights();
+
+    // Clear all highlights
+    store.getState().clearHighlights();
+
+    // Clear route
+    store.getState().setRoute(null);
+
+    // Clear locate state
+    store.getState().setLocate(null);
+
+    // Clear filters to default
+    store.getState().clearFilters();
+
+    // Clear search query
+    store.getState().setSearchQuery('');
+
+    // Load all airports with default filters (limit to 1000)
+    try {
+      store.getState().setLoading(true);
+      const response = await this.apiAdapter.getAirports({ limit: 1000 });
+      store.getState().setAirports(response.data);
+      store.getState().setLoading(false);
+      console.log(`✅ Complete reset - loaded ${response.data.length} airports`);
+    } catch (error) {
+      console.error('Error loading airports after reset:', error);
+      store.getState().setAirports([]);
+      store.getState().setLoading(false);
+    }
   }
   
   /**

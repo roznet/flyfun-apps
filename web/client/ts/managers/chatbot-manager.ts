@@ -660,17 +660,49 @@ export class ChatbotManager {
    */
   private clearConversation(): void {
     if (!this.chatMessages) return;
-    
-    // Clear messages (except welcome)
-    const messages = this.chatMessages.querySelectorAll('.chat-message:not(.welcome-message)');
+
+    // Clear ALL messages including welcome
+    const messages = this.chatMessages.querySelectorAll('.chat-message');
     messages.forEach(msg => msg.remove());
-    
+
     // Clear history
     this.messageHistory = [];
     this.sessionId = null;
-    
-    // Add welcome message back
+
+    // Reset map visualization (clear highlights, airports, routes)
+    this.llmIntegration.resetVisualization();
+
+    // Clear filter UI controls
+    this.clearFilterUI();
+
+    // Add welcome message back (only one)
     this.addWelcomeMessage();
+  }
+
+  /**
+   * Clear all filter UI controls
+   */
+  private clearFilterUI(): void {
+    // Clear country filter
+    const countrySelect = document.getElementById('country-filter') as HTMLSelectElement;
+    if (countrySelect) countrySelect.value = '';
+
+    // Clear search input
+    const searchInput = document.getElementById('search-input') as HTMLInputElement;
+    if (searchInput) searchInput.value = '';
+
+    // Clear all checkboxes
+    const checkboxes = [
+      'has-procedures',
+      'has-aip-data',
+      'has-hard-runway',
+      'border-crossing-only'
+    ];
+
+    checkboxes.forEach(id => {
+      const checkbox = document.getElementById(id) as HTMLInputElement;
+      if (checkbox) checkbox.checked = false;
+    });
   }
   
   /**

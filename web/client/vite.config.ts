@@ -35,7 +35,13 @@ export default defineConfig({
     allowedHosts: ['ovh.zhaoqian.me', 'localhost', '127.0.0.1'],
     hmr: {
       // Disable full page reload - only update modules
-      overlay: true
+      overlay: true,
+      // Prevent automatic full page reload
+      protocol: 'ws'
+    },
+    // Watch options to reduce unnecessary reloads
+    watch: {
+      ignored: ['**/node_modules/**', '**/dist/**']
     },
     proxy: {
       '/api': {

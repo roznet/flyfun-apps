@@ -1536,3 +1536,16 @@ initApp().catch(error => {
   console.error('Failed to initialize application:', error);
 });
 
+// Hot Module Replacement (HMR) support
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    console.log('HMR update detected - preserving application state');
+    // Don't reload the page, let Vite handle the module updates
+  });
+
+  // Dispose handler to clean up before updates
+  import.meta.hot.dispose(() => {
+    console.log('HMR disposing old module');
+  });
+}
+
