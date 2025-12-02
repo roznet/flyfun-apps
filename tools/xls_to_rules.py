@@ -327,6 +327,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--append", action="store_true", help="Append into existing rules.json if present")
     p.add_argument("--add", action="append", nargs=2, metavar=("CC","XLSX"),
                    help="Add Excel file for country code CC (ISO-2), can be repeated")
+    
+    # RAG vector database options
+    p.add_argument("--build-rag", action="store_true", default=True,
+                   help="Build vector database for RAG retrieval (default: True)")
+    p.add_argument("--no-rag", action="store_false", dest="build_rag",
+                   help="Skip vector database build")
+    p.add_argument("--vector-db-path", default="cache/rules_vector_db",
+                   help="Path for vector database (default: cache/rules_vector_db)")
+    p.add_argument("--embedding-model", default="all-MiniLM-L6-v2",
+                   help="Embedding model for RAG (default: all-MiniLM-L6-v2)")
+    
     args = p.parse_args(argv)
 
     out_path = Path(args.out)
@@ -381,6 +392,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_path.write_text(json.dumps(combined, ensure_ascii=False, indent=2), encoding="utf-8")
     num_q = len(combined.get('questions', []))
     print(f"Wrote {out_path} with {num_q} questions and {total_answers} country-answers.")
+    
+    # Build vector database for RAG
+    if args.build_rag:
+        print(f"\nBuilding vector database with {args.embedding_model}...")
+        try:
+            # Import here to avoid dependency if not needed
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from shared.aviation_agent.rules_rag import build_vector_db
+            
+            vector_db_path = Path(args.vector_db_path)
+            doc_count = build_vector_db(
+                rules_json_path=out_path,
+                vector_db_path=vector_db_path,
+                embedding_model=args.embedding_model,
+                force_rebuild=True
+            )
+            print(f"✓ Vector database built with {doc_count} documents at {vector_db_path}")
+        except ImportError as e:
+            print(f"Warning: Could not build vector database: {e}", file=sys.stderr)
+            print("Install dependencies: pip install chromadb sentence-transformers", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Vector database build failed: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+    
     return 0
 
 if __name__ == "__main__":
