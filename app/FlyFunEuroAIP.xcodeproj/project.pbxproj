@@ -34,9 +34,22 @@
 		424573BB2EDB2B8D004E4BF9 /* rzflight */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = rzflight; path = /Users/brice/Developer/public/rzflight; sourceTree = "<absolute>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		42D4BF782EDECC1C00DAFE7D /* Exceptions for "FlyFunEuroAIP" folder in "FlyFunEuroAIP" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 420ECDFB2EAE0D0A009FE6CE /* FlyFunEuroAIP */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		420ECDFE2EAE0D0A009FE6CE /* FlyFunEuroAIP */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				42D4BF782EDECC1C00DAFE7D /* Exceptions for "FlyFunEuroAIP" folder in "FlyFunEuroAIP" target */,
+			);
 			path = FlyFunEuroAIP;
 			sourceTree = "<group>";
 		};
