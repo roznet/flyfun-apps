@@ -33,12 +33,16 @@ import time
 from euro_aip.storage.database_storage import DatabaseStorage
 from euro_aip.models.euro_aip_model import EuroAipModel
 
-# Import security configuration
+# Import security configuration (values only)
 from security_config import (
     ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
-    FORCE_HTTPS, get_safe_db_path, get_safe_rules_path, get_safe_ga_meta_db_path,
-    get_ga_friendliness_readonly,
-    SECURITY_HEADERS, LOG_LEVEL, LOG_FORMAT
+    FORCE_HTTPS, SECURITY_HEADERS, LOG_LEVEL, LOG_FORMAT
+)
+
+# Import configuration helper functions (logic only)
+from config_helpers import (
+    get_safe_db_path, get_safe_rules_path, get_safe_ga_meta_db_path,
+    get_ga_friendliness_readonly
 )
 
 # Import API routes
