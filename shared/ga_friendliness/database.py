@@ -302,19 +302,36 @@ def ensure_schema_version(conn: sqlite3.Connection) -> None:
         )
 
 
-def get_connection(db_path: Path) -> sqlite3.Connection:
+def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
     """
     Get a connection to ga_meta.sqlite.
     
-    Creates the database and schema if it doesn't exist.
+    Creates the database and schema if it doesn't exist (unless readonly=True).
     Ensures schema is at current version.
     
     Args:
         db_path: Path to the database file
+        readonly: If True, open in read-only mode (no schema checks/writes)
         
     Returns:
         Connection with schema at current version.
     """
+    if readonly:
+        # Read-only mode: database must exist
+        if not db_path.exists():
+            raise StorageError(f"Database not found (readonly mode): {db_path}")
+        
+        # Open with URI for read-only mode
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        
+        # Set read-only pragma for safety
+        conn.execute("PRAGMA query_only = ON")
+        
+        # No WAL mode or schema checks in read-only mode
+        return conn
+    
+    # Write mode: create database and enable WAL for concurrent access
     # Create parent dirs if needed
     db_path.parent.mkdir(parents=True, exist_ok=True)
 

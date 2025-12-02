@@ -37,6 +37,7 @@ from euro_aip.models.euro_aip_model import EuroAipModel
 from security_config import (
     ALLOWED_ORIGINS, ALLOWED_HOSTS, RATE_LIMIT_WINDOW, RATE_LIMIT_MAX_REQUESTS,
     FORCE_HTTPS, get_safe_db_path, get_safe_rules_path, get_safe_ga_meta_db_path,
+    get_ga_friendliness_readonly,
     SECURITY_HEADERS, LOG_LEVEL, LOG_FORMAT
 )
 
@@ -137,10 +138,11 @@ async def lifespan(app: FastAPI):
 
         # Initialize GA friendliness service (optional)
         ga_meta_db_path = get_safe_ga_meta_db_path()
-        ga_service = ga_friendliness.GAFriendlinessService(ga_meta_db_path)
+        ga_readonly = get_ga_friendliness_readonly()
+        ga_service = ga_friendliness.GAFriendlinessService(ga_meta_db_path, readonly=ga_readonly)
         ga_friendliness.set_service(ga_service)
         if ga_service.enabled:
-            logger.info(f"GA Friendliness service enabled with DB: {ga_meta_db_path}")
+            logger.info(f"GA Friendliness service enabled (readonly={ga_readonly}): {ga_meta_db_path}")
         else:
             logger.info("GA Friendliness service disabled (no database configured)")
 

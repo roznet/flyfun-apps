@@ -65,19 +65,30 @@ class GAMetaStorage(StorageInterface):
         - Thread-safe operations
         - Batch writes for efficiency
         - Resource cleanup
+        - Read-only mode for production use
     """
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, readonly: bool = False):
         """
         Initialize storage.
         
-        Creates database and schema if needed.
+        Creates database and schema if needed (unless readonly=True).
         Ensures schema is at current version.
+        
+        Args:
+            db_path: Path to database file
+            readonly: If True, open in read-only mode (no writes allowed)
         """
         self.db_path = db_path
-        self.conn = get_connection(db_path)
+        self.readonly = readonly
+        self.conn = get_connection(db_path, readonly=readonly)
         self._lock = threading.Lock()
         self._in_transaction = False
+    
+    def _check_readonly(self) -> None:
+        """Raise error if attempting write operation in readonly mode."""
+        if self.readonly:
+            raise StorageError("Cannot perform write operation in readonly mode")
 
     def __enter__(self) -> "GAMetaStorage":
         """Context manager entry: begin transaction."""
@@ -104,6 +115,7 @@ class GAMetaStorage(StorageInterface):
 
     def write_airfield_stats(self, stats: AirportStats) -> None:
         """Insert or update a row in ga_airfield_stats."""
+        self._check_readonly()
         with self._lock:
             try:
                 self.conn.execute("""
@@ -211,6 +223,7 @@ class GAMetaStorage(StorageInterface):
 
     def write_review_tags(self, icao: str, tags: List[ReviewExtraction]) -> None:
         """Write review tags to ga_review_ner_tags."""
+        self._check_readonly()
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
@@ -246,6 +259,7 @@ class GAMetaStorage(StorageInterface):
         self, tags_by_icao: Dict[str, List[ReviewExtraction]]
     ) -> None:
         """Write tags for multiple airports in a single transaction."""
+        self._check_readonly()
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
@@ -295,6 +309,7 @@ class GAMetaStorage(StorageInterface):
         self, icao: str, summary_text: str, tags_json: List[str]
     ) -> None:
         """Insert or update ga_review_summary for an airport."""
+        self._check_readonly()
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
@@ -313,6 +328,7 @@ class GAMetaStorage(StorageInterface):
 
     def write_meta_info(self, key: str, value: str) -> None:
         """Write to ga_meta_info table."""
+        self._check_readonly()
         with self._lock:
             try:
                 self.conn.execute("""
@@ -351,6 +367,7 @@ class GAMetaStorage(StorageInterface):
         self, icao: str, timestamp: datetime
     ) -> None:
         """Update last processed timestamp for an airport."""
+        self._check_readonly()
         key = f"last_processed_{icao}"
         self.write_meta_info(key, timestamp.isoformat())
 
@@ -418,6 +435,7 @@ class GAMetaStorage(StorageInterface):
 
     def set_last_successful_icao(self, icao: str) -> None:
         """Set last successfully processed ICAO code."""
+        self._check_readonly()
         self.write_meta_info("last_successful_icao", icao)
 
     # --- AIP Rules Operations ---
@@ -426,6 +444,7 @@ class GAMetaStorage(StorageInterface):
         self, icao: str, rules: List[NotificationRule]
     ) -> None:
         """Write notification requirements to ga_notification_requirements."""
+        self._check_readonly()
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
@@ -476,6 +495,7 @@ class GAMetaStorage(StorageInterface):
 
     def write_aip_rule_summary(self, icao: str, summary: RuleSummary) -> None:
         """Insert or update ga_aip_rule_summary."""
+        self._check_readonly()
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
@@ -498,6 +518,7 @@ class GAMetaStorage(StorageInterface):
 
     def update_notification_hassle_score(self, icao: str, score: float) -> None:
         """Update notification_hassle_score in ga_airfield_stats."""
+        self._check_readonly()
         with self._lock:
             try:
                 self.conn.execute("""
@@ -526,6 +547,7 @@ class GAMetaStorage(StorageInterface):
         self, icao: str, timestamp: datetime
     ) -> None:
         """Update last processed timestamp for AIP rules."""
+        self._check_readonly()
         key = f"last_aip_processed_{icao}"
         self.write_meta_info(key, timestamp.isoformat())
 
@@ -565,6 +587,7 @@ class GAMetaStorage(StorageInterface):
 
     def store_global_priors(self, priors: Dict[str, float]) -> None:
         """Store computed global priors in ga_meta_info."""
+        self._check_readonly()
         self.write_meta_info("global_priors", json.dumps(priors))
 
     def get_global_priors(self) -> Optional[Dict[str, float]]:

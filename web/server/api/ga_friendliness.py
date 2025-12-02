@@ -81,24 +81,27 @@ class GAFriendlinessService:
     Wraps the ga_friendliness library with web API patterns.
     """
     
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, readonly: bool = True):
         """
         Initialize the service.
         
         Args:
             db_path: Path to ga_meta.sqlite. If None, service is disabled.
+            readonly: If True, open database in read-only mode (default for web API).
         """
         self.db_path = db_path
+        self.readonly = readonly
         self.storage: Optional[GAMetaStorage] = None
         self.persona_manager: Optional[PersonaManager] = None
         self._enabled = False
         
         if db_path and Path(db_path).exists():
             try:
-                self.storage = GAMetaStorage(Path(db_path))
+                # Open in readonly mode by default for web API (no writes)
+                self.storage = GAMetaStorage(Path(db_path), readonly=readonly)
                 self.persona_manager = PersonaManager(get_default_personas())
                 self._enabled = True
-                logger.info(f"GA Friendliness service initialized with DB: {db_path}")
+                logger.info(f"GA Friendliness service initialized (readonly={readonly}): {db_path}")
             except Exception as e:
                 logger.error(f"Failed to initialize GA Friendliness service: {e}")
                 self._enabled = False
