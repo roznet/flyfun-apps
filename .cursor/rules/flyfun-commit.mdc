@@ -1,0 +1,35 @@
+---
+alwaysApply: true
+---
+Write commit messages in the following format:
+
+<verb> <object> in <scope>: <impact>
+
+Rules:
+- Use imperative verbs (Add, Fix, Refactor, Remove, Improve, Rename, Update).
+- Keep the subject under 70 characters.
+- The subject must describe WHAT changed (not HOW).
+- <scope> is the module, directory, or logical component (e.g. web, mcp, tools, shared, db).
+- <impact> is ONE short phrase describing WHY the change matters (performance, reliability, clarity, bugs avoided, etc).
+
+Examples:
+- Fix logging path in mcp: avoid crash
+- Add airport cache in web: speed up queries
+- Remove chromadb in server: reduce deps
+- Refactor rules loader in tools: simpler pipeline
+
+DO NOT:
+- Use past tense (“fixed”, “added”).
+- Write vague messages (“update code”, “fix stuff”).
+- Describe how code works or implementation details in the subject.
+- Exceed one line unless a short bullet body is necessary.
+
+OPTIONAL body (when needed):
+- Use 1–4 bullet points.
+- Include rationale, context, or tradeoffs.
+- No noise, no stack traces, no diffs.
+
+Body structure:
+- What prompted the change (bug, design flaw, perf issue)
+- Constraints or assumptions
+- Impact on related modules
