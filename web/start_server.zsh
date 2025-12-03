@@ -5,7 +5,7 @@
 # The script changes directory to "server" located alongside start_server.ksh.
 
 if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 /path/to/python /path/to/dev.env" >&2
+    echo "Usage: $0 /path/to/python /path/to/.env" >&2
     exit 1
 fi
 

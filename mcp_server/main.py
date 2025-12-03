@@ -17,14 +17,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
+# Add the flyfun-apps package to the path (before importing shared)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Load environment variables using shared loader
+from shared.env_loader import load_component_env
+
+# Load from component directory (e.g., mcp_server/dev.env)
+component_dir = Path(__file__).parent
+load_component_env(component_dir)
+
 from fastmcp import Context, FastMCP
 
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.storage.database_storage import DatabaseStorage
 from euro_aip.storage.enrichment_storage import EnrichmentStorage
-
-# Add the flyfun-apps package to the path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from shared.airport_tools import (
     ToolContext,

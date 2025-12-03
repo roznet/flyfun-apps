@@ -37,29 +37,29 @@ class Application {
   private currentSelectedIcao: string | null = null;
   private isUpdatingMapView: boolean = false; // Flag to prevent infinite loops
   private storeUnsubscribe?: () => void; // Store unsubscribe function
-  
+
   constructor() {
     // Initialize store (Zustand hook)
     this.store = useStore;
-    
+
     // Initialize API adapter
     this.apiAdapter = new APIAdapter('');
-    
+
     // Initialize visualization engine
     this.visualizationEngine = new VisualizationEngine();
-    
+
     // Initialize UI manager
     this.uiManager = new UIManager(this.store, this.apiAdapter);
-    
+
     // Initialize LLM integration (pass visualization engine for fitBounds)
     this.llmIntegration = new LLMIntegration(this.store, this.apiAdapter, this.uiManager, this.visualizationEngine);
-    
+
     // Initialize chatbot manager
     this.chatbotManager = new ChatbotManager(this.llmIntegration);
-    
+
     // Initialize persona manager
     this.personaManager = new PersonaManager(this.apiAdapter);
-    
+
     // Expose to window for debugging
     window.appState = this.store as any;
     window.visualizationEngine = this.visualizationEngine;
@@ -68,43 +68,43 @@ class Application {
     window.personaManager = this.personaManager;
     (window as any).chatbotManager = this.chatbotManager;
   }
-  
+
   /**
    * Initialize application
    */
   async init(): Promise<void> {
     console.log('Initializing Airport Explorer application...');
-    
+
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
       await new Promise(resolve => {
         document.addEventListener('DOMContentLoaded', resolve);
       });
     }
-    
+
     // Initialize map
     this.initMap();
-    
+
     // Subscribe to store changes
     this.subscribeToStore();
-    
+
     // Initialize UI manager
     this.uiManager.init();
-    
+
     // Initialize persona manager (async, loads GA config)
     this.personaManager.init().catch(error => {
       console.error('Failed to initialize PersonaManager:', error);
     });
-    
+
     // Initialize event listeners
     this.initEventListeners();
-    
+
     // Load initial data (if URL params present)
     await this.loadInitialState();
-    
+
     console.log('Application initialized successfully');
   }
-  
+
   /**
    * Initialize map
    */
@@ -119,7 +119,7 @@ class Application {
       }
       return;
     }
-    
+
     // Wait for Leaflet to be available
     // @ts-ignore - L is a global from Leaflet CDN
     if (typeof window.L === 'undefined') {
@@ -136,12 +136,12 @@ class Application {
       }, 100);
       return;
     }
-    
+
     console.log('Initializing map...');
     this.visualizationEngine.initMap('map');
     console.log('Map initialized successfully');
   }
-  
+
   /**
    * Subscribe to store changes for visualization updates
    */
@@ -154,7 +154,7 @@ class Application {
     let lastRouteHash: string = '';
     let lastLocateHash: string = '';
     let lastProcedureLinesHash: string = ''; // Track loaded procedure lines
-    
+
     // Zustand's subscribe - listens to all state changes
     // Use debounce to prevent infinite loops
     let updateTimeout: number | null = null;
@@ -163,7 +163,7 @@ class Application {
       if (updateTimeout) {
         clearTimeout(updateTimeout);
       }
-      
+
       updateTimeout = window.setTimeout(() => {
         try {
           // Update markers if airports changed
@@ -173,15 +173,15 @@ class Application {
           const airportsChanged = currentAirportsHash !== lastAirportsHash;
           const legendModeChanged = state.visualization.legendMode !== lastLegendMode;
           const personaChanged = state.ga.selectedPersona !== lastSelectedPersona;
-          
+
           // Capture previous legend mode BEFORE updating it (needed for procedure lines clearing)
           const wasProcedurePrecision = lastLegendMode === 'procedure-precision';
           const isProcedurePrecision = state.visualization.legendMode === 'procedure-precision';
-          
+
           // Update markers when airports, legend mode, or persona changes (persona affects relevance coloring)
-          const needsMarkerUpdate = airportsChanged || legendModeChanged || 
+          const needsMarkerUpdate = airportsChanged || legendModeChanged ||
             (personaChanged && state.visualization.legendMode === 'relevance');
-          
+
           if (needsMarkerUpdate) {
             console.log('Store subscription: Updating markers', {
               airportCount: state.filteredAirports.length,
@@ -191,23 +191,23 @@ class Application {
               personaChanged,
               selectedPersona: state.ga.selectedPersona
             });
-            
+
             const shouldFitBounds = airportsChanged && state.filteredAirports.length > 0;
             this.visualizationEngine.updateMarkers(
               state.filteredAirports,
               state.visualization.legendMode,
               shouldFitBounds // Auto-fit bounds when airports change from chatbot
             );
-            
+
             lastAirports = [...state.filteredAirports]; // Copy array for comparison
             lastLegendMode = state.visualization.legendMode;
             lastSelectedPersona = state.ga.selectedPersona;
           }
-          
+
           // Build reference point highlights from route/locate state
           // These are automatically maintained based on route and locate state
           const referenceHighlights = new globalThis.Map<string, any>();
-          
+
           // Add locate center highlight if present
           if (state.locate && state.locate.center) {
             const center = state.locate.center;
@@ -221,7 +221,7 @@ class Application {
               popup: `<b>Locate Center</b><br>${center.label || 'Search origin'}<br>Radius: ${state.locate.radiusNm}nm`
             });
           }
-          
+
           // Add route airport highlights if present
           if (state.route && state.route.originalRouteAirports) {
             state.route.originalRouteAirports.forEach((airport) => {
@@ -237,7 +237,7 @@ class Application {
               });
             });
           }
-          
+
           // Merge reference highlights with user highlights (user highlights take precedence)
           let highlights: any = state.visualization.highlights;
           if (!highlights) {
@@ -247,7 +247,7 @@ class Application {
             const entries = Object.entries(highlights as Record<string, any>);
             highlights = new globalThis.Map(entries);
           }
-          
+
           // Remove old reference highlights that are no longer valid
           const combinedHighlights = new globalThis.Map<string, any>(highlights);
           // Remove any old reference highlights
@@ -278,7 +278,7 @@ class Application {
             this.visualizationEngine.updateHighlights(filteredHighlights as any);
             lastHighlightsHash = highlightsHash;
           }
-          
+
           // Update route (only if changed)
           const routeHash = JSON.stringify(state.route);
           if (routeHash !== lastRouteHash) {
@@ -289,7 +289,7 @@ class Application {
             }
             lastRouteHash = routeHash;
           }
-          
+
           // Handle procedure lines based on legend mode
           if (legendModeChanged && wasProcedurePrecision && !isProcedurePrecision) {
             // Clear procedure lines when switching away from procedure-precision mode
@@ -303,9 +303,9 @@ class Application {
             // Load procedure lines when in procedure-precision mode
             // Only reload if airports changed OR if legend mode just changed TO procedure-precision
             const currentProcedureLinesHash = currentAirportsHash; // Use airports hash as proxy
-            const shouldLoadProcedureLines = (legendModeChanged && isProcedurePrecision) || 
+            const shouldLoadProcedureLines = (legendModeChanged && isProcedurePrecision) ||
               (airportsChanged && currentProcedureLinesHash !== lastProcedureLinesHash);
-            
+
             if (shouldLoadProcedureLines) {
               console.log('Loading procedure lines - procedure-precision mode', {
                 airportCount: state.filteredAirports.length,
@@ -317,7 +317,7 @@ class Application {
               lastProcedureLinesHash = currentProcedureLinesHash;
             }
           }
-          
+
           // NOTE: We don't update map view here to prevent infinite loops
           // Map view is only updated from map events (moveend/zoomend) or initial load
         } catch (error) {
@@ -325,41 +325,42 @@ class Application {
         }
       }, 50); // Debounce 50ms to batch updates
     });
-    
+
     // Store unsubscribe function (though we never need to unsubscribe in this case)
     this.storeUnsubscribe = unsubscribe;
   }
-  
+
   /**
    * Get store instance (helper)
    */
   getStore() {
     return this.store;
   }
-  
+
   /**
    * Initialize event listeners
    */
   private initEventListeners(): void {
-    // Right panel collapse button
-    const rightPanelCollapseBtn = document.getElementById('right-panel-collapse');
-    if (rightPanelCollapseBtn) {
-      rightPanelCollapseBtn.addEventListener('click', () => {
-        this.toggleRightPanel();
+    // Right panel close button
+    const rightPanelCloseBtn = document.getElementById('right-panel-close');
+    if (rightPanelCloseBtn) {
+      rightPanelCloseBtn.addEventListener('click', () => {
+        const rightPanel = document.getElementById('right-panel');
+        if (rightPanel) rightPanel.classList.add('hidden');
       });
     }
     // Reset zoom event
     window.addEventListener('reset-zoom', () => {
       this.visualizationEngine.fitBounds();
     });
-    
+
     // Render route event (from LLM integration)
-    window.addEventListener('render-route', ((e: CustomEvent<{route: RouteState}>) => {
+    window.addEventListener('render-route', ((e: CustomEvent<{ route: RouteState }>) => {
       this.visualizationEngine.displayRoute(e.detail.route);
     }) as EventListener);
-    
+
     // Trigger search event
-    window.addEventListener('trigger-search', ((e: CustomEvent<{query: string}>) => {
+    window.addEventListener('trigger-search', ((e: CustomEvent<{ query: string }>) => {
       // This will be handled by UI Manager's search handler
       const searchInput = document.getElementById('search-input') as HTMLInputElement;
       if (searchInput) {
@@ -367,29 +368,10 @@ class Application {
         searchInput.dispatchEvent(new Event('input'));
       }
     }) as EventListener);
-    
-    // Relevance tab listener - reload GA data when tab is shown (in case persona changed)
-    const relevanceTab = document.getElementById('relevance-tab');
-    if (relevanceTab) {
-      relevanceTab.addEventListener('shown.bs.tab', () => {
-        if (this.currentSelectedIcao) {
-          this.loadGARelevanceData(this.currentSelectedIcao);
-        }
-      });
-    }
-    
-    // Persona selector listener - reload GA relevance data when persona changes
-    const personaSelector = document.getElementById('persona-selector');
-    if (personaSelector) {
-      personaSelector.addEventListener('change', () => {
-        // Check if relevance tab is currently active and an airport is selected
-        const relevancePanel = document.getElementById('relevance-panel');
-        if (relevancePanel?.classList.contains('show') && this.currentSelectedIcao) {
-          this.loadGARelevanceData(this.currentSelectedIcao);
-        }
-      });
-    }
-    
+
+    // Relevance tab listener and Persona selector listener moved to UIManager
+
+
     // Display airport details event
     window.addEventListener('display-airport-details', ((e: Event) => {
       const customEvent = e as CustomEvent<{
@@ -401,37 +383,37 @@ class Application {
       }>;
       this.displayAirportDetails(customEvent.detail);
     }) as EventListener);
-    
+
     // Map move/zoom events for URL sync
     // Use a flag to prevent infinite loops
     const map = this.visualizationEngine.getMap();
     if (map) {
       // Debounce map view updates to prevent infinite loops
       let mapUpdateTimeout: number | null = null;
-      
+
       map.on('moveend zoomend', () => {
         // Skip if we're updating from store (to prevent infinite loop)
         if (this.isUpdatingMapView) {
           return;
         }
-        
+
         // Debounce to prevent rapid-fire updates
         if (mapUpdateTimeout) {
           clearTimeout(mapUpdateTimeout);
         }
-        
+
         mapUpdateTimeout = window.setTimeout(() => {
           const center = map.getCenter();
           const zoom = map.getZoom();
           const store = this.store as any;
           const currentState = store.getState();
-          
+
           // Only update if view actually changed
           const currentView = currentState.mapView;
-          if (!currentView || 
-              Math.abs(currentView.center[0] - center.lat) > 0.0001 ||
-              Math.abs(currentView.center[1] - center.lng) > 0.0001 ||
-              currentView.zoom !== zoom) {
+          if (!currentView ||
+            Math.abs(currentView.center[0] - center.lat) > 0.0001 ||
+            Math.abs(currentView.center[1] - center.lng) > 0.0001 ||
+            currentView.zoom !== zoom) {
             store.getState().setMapView({
               center: [center.lat, center.lng],
               zoom
@@ -442,54 +424,54 @@ class Application {
       });
     }
   }
-  
+
   /**
    * Load initial state from URL parameters
    */
   private async loadInitialState(): Promise<void> {
     const urlParams = new URLSearchParams(window.location.search);
-    
+
     // Load filters from URL
     const filters: Partial<FilterConfig> = {};
-    
+
     if (urlParams.has('country')) {
       filters.country = urlParams.get('country')!;
     }
-    
+
     if (urlParams.has('has_procedures')) {
       filters.has_procedures = urlParams.get('has_procedures') === 'true';
     }
-    
+
     if (urlParams.has('has_aip_data')) {
       filters.has_aip_data = urlParams.get('has_aip_data') === 'true';
     }
-    
+
     if (urlParams.has('has_hard_runway')) {
       filters.has_hard_runway = urlParams.get('has_hard_runway') === 'true';
     }
-    
+
     if (urlParams.has('border_crossing_only') || urlParams.has('point_of_entry')) {
       filters.point_of_entry = true;
     }
-    
+
     if (urlParams.has('max_airports')) {
       filters.limit = parseInt(urlParams.get('max_airports')!, 10);
     }
-    
+
     // Apply filters if any (only if there are actual filter values)
     const hasFilters = Object.entries(filters).some(([key, value]) => value !== null && value !== undefined && value !== '');
     if (hasFilters) {
       const store = this.store as any;
       store.getState().setFilters(filters);
     }
-    
+
     // Load legend mode
     if (urlParams.has('legend')) {
       const legendMode = urlParams.get('legend') as any;
       const store = this.store as any;
       store.getState().setLegendMode(legendMode);
     }
-    
+
     // Load search query (don't trigger search automatically, just set the value)
     if (urlParams.has('search')) {
       const searchQuery = decodeURIComponent(urlParams.get('search')!);
@@ -500,7 +482,7 @@ class Application {
         searchInput.value = searchQuery;
       }
     }
-    
+
     // Load map view (skip store update to avoid loop, just set the view directly)
     if (urlParams.has('center') && urlParams.has('zoom')) {
       const centerParts = urlParams.get('center')!.split(',');
@@ -508,7 +490,7 @@ class Application {
         const lat = parseFloat(centerParts[0]);
         const lng = parseFloat(centerParts[1]);
         const zoom = parseInt(urlParams.get('zoom')!, 10);
-        
+
         if (!isNaN(lat) && !isNaN(lng) && !isNaN(zoom)) {
           // Don't update store during init to avoid loops, just set view
           this.isUpdatingMapView = true;
@@ -522,24 +504,24 @@ class Application {
         }
       }
     }
-    
+
     // Load initial airports if no search/route
     if (!urlParams.has('search') && !urlParams.has('route')) {
       await this.loadInitialAirports();
     }
   }
-  
+
   /**
    * Load initial airports
    */
   private async loadInitialAirports(): Promise<void> {
     const state = this.store.getState();
-    
+
     // Only load if filters are applied
-    const hasFilters = Object.values(state.filters).some(value => 
+    const hasFilters = Object.values(state.filters).some(value =>
       value !== null && value !== undefined && value !== ''
     );
-    
+
     if (hasFilters) {
       this.store.getState().setLoading(true);
       try {
@@ -553,7 +535,7 @@ class Application {
       }
     }
   }
-  
+
   /**
    * Load procedure lines for airports
    */
@@ -561,34 +543,7 @@ class Application {
     // This will be called automatically when legend mode is 'procedure-precision'
     await this.visualizationEngine.loadBulkProcedureLines(airports, this.apiAdapter);
   }
-  
-  /**
-   * Toggle right panel collapse
-   */
-  private toggleRightPanel(): void {
-    const rightPanel = document.querySelector('.right-panel');
-    const rightPanelCol = document.querySelector('.right-panel-col');
-    const mapCol = document.querySelector('.map-column-col');
-    const leftPanelCol = document.querySelector('.left-panel-col');
 
-    if (rightPanel && rightPanelCol && mapCol && leftPanelCol) {
-      // Toggle collapsed state
-      const isCollapsed = rightPanel.classList.contains('collapsed');
-      
-      rightPanel.classList.toggle('collapsed');
-      rightPanelCol.classList.toggle('collapsed');
-      mapCol.classList.toggle('map-expanded');
-      leftPanelCol.classList.toggle('with-expanded-map');
-
-      console.log(`Right panel ${!isCollapsed ? 'collapsed' : 'expanded'}`);
-
-      // Invalidate map size after panel resize (with delay to allow CSS transition)
-      setTimeout(() => {
-        this.invalidateMapSize();
-      }, 300); // Match CSS transition duration
-    }
-  }
-  
   /**
    * Invalidate map size (call after layout changes)
    */
@@ -598,7 +553,7 @@ class Application {
       map.invalidateSize();
     }
   }
-  
+
   /**
    * Display airport details
    */
@@ -611,26 +566,23 @@ class Application {
   }): void {
     const airport = data.detail;
     const { procedures, runways, aipEntries, rules } = data;
-    
+
     const infoContainer = document.getElementById('airport-info');
-    const airportContent = document.getElementById('airport-content');
-    const noSelectionContainer = document.getElementById('no-selection');
-    
+    const rightPanel = document.getElementById('right-panel');
+
     if (!airport) {
-      // Hide tabbed content, show "no selection" message
-      if (airportContent) (airportContent as HTMLElement).style.display = 'none';
-      if (noSelectionContainer) (noSelectionContainer as HTMLElement).style.display = 'block';
+      // Hide right panel
+      if (rightPanel) rightPanel.classList.add('hidden');
       return;
     }
-    
-    // Show tabbed content, hide "no selection" message
-    if (airportContent) (airportContent as HTMLElement).style.display = 'flex';
-    if (noSelectionContainer) (noSelectionContainer as HTMLElement).style.display = 'none';
-    
+
+    // Show right panel
+    if (rightPanel) rightPanel.classList.remove('hidden');
+
     if (!infoContainer) return;
-    
+
     let html = '';
-    
+
     // Add links section
     const links: string[] = [];
     if (airport.home_link) {
@@ -643,16 +595,16 @@ class Application {
         <i class="fab fa-wikipedia-w"></i> Wikipedia
       </a>`);
     }
-    
+
     // Always add EuroGA and Airfield Directory links
     links.push(`<a href="https://airports.euroga.org/search.php?icao=${this.escapeAttribute(airport.ident || '')}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-success btn-sm me-2">
       <i class="fas fa-plane"></i> EuroGA
     </a>`);
-    
+
     links.push(`<a href="https://airfield.directory/airfield/${this.escapeAttribute(airport.ident || '')}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-success btn-sm me-2">
       <i class="fas fa-plane"></i> Airfield Directory
     </a>`);
-    
+
     // Add Google Maps "Nearby Restaurants" link
     if (airport.latitude_deg !== undefined && airport.longitude_deg !== undefined) {
       const q = encodeURIComponent('restaurants');
@@ -663,22 +615,22 @@ class Application {
         <i class="fas fa-utensils"></i> Nearby Restaurants
       </a>`);
     }
-    
+
     if (links.length > 0) {
       html += `
-        <div class="airport-detail-section">
-          <h6><i class="fas fa-link"></i> Links</h6>
+        <div class="info-card">
+          <h6>Links</h6>
           <div class="d-flex flex-wrap gap-2">
             ${links.join('')}
           </div>
         </div>
       `;
     }
-    
+
     // Add basic information
     html += `
-      <div class="airport-detail-section">
-        <h6><i class="fas fa-info-circle"></i> Basic Information</h6>
+      <div class="info-card">
+        <h6>Basic Information</h6>
         <table class="table table-sm">
           <tr><td><strong>ICAO:</strong></td><td>${this.escapeHtml(airport.ident || 'N/A')}</td></tr>
           <tr><td><strong>Name:</strong></td><td>${this.escapeHtml(airport.name || 'N/A')}</td></tr>
@@ -691,14 +643,14 @@ class Application {
         </table>
       </div>
     `;
-    
+
     // Add runways section
     if (runways && runways.length > 0) {
       html += `
-        <div class="airport-detail-section">
-          <h6><i class="fas fa-plane"></i> Runways (${runways.length})</h6>
+        <div class="info-card">
+          <h6>Runways (${runways.length})</h6>
       `;
-      
+
       runways.forEach((runway: any) => {
         html += `
           <div class="runway-info">
@@ -710,17 +662,17 @@ class Application {
           </div>
         `;
       });
-      
+
       html += '</div>';
     }
-    
+
     // Add procedures section
     if (procedures && procedures.length > 0) {
       html += `
-        <div class="airport-detail-section">
-          <h6><i class="fas fa-route"></i> Procedures (${procedures.length})</h6>
+        <div class="info-card">
+          <h6>Procedures (${procedures.length})</h6>
       `;
-      
+
       // Group procedures by type
       const proceduresByType: Record<string, any[]> = {};
       procedures.forEach((proc: any) => {
@@ -730,7 +682,7 @@ class Application {
         }
         proceduresByType[type].push(proc);
       });
-      
+
       Object.entries(proceduresByType).forEach(([type, procs]) => {
         html += `<h6 class="mt-2">${this.escapeHtml(type.charAt(0).toUpperCase() + type.slice(1))} (${procs.length})</h6>`;
         procs.forEach((proc: any) => {
@@ -738,44 +690,44 @@ class Application {
           html += `<span class="badge ${badgeClass} procedure-badge">${this.escapeHtml(proc.name || 'Unnamed')}</span>`;
         });
       });
-      
+
       html += '</div>';
     }
-    
+
     // Add sources section
     if (airport.sources && Array.isArray(airport.sources) && airport.sources.length > 0) {
       html += `
-        <div class="airport-detail-section">
-          <h6><i class="fas fa-database"></i> Data Sources</h6>
+        <div class="info-card">
+          <h6>Data Sources</h6>
           ${airport.sources.map((source: any) => `<span class="badge bg-secondary me-1">${this.escapeHtml(String(source))}</span>`).join('')}
         </div>
       `;
     }
-    
+
     infoContainer.innerHTML = html;
-    
+
     // Display AIP data and rules
     this.displayAIPData(aipEntries);
     this.displayCountryRules(rules, airport.iso_country);
-    
+
     // Track selected airport and load GA relevance data
     this.currentSelectedIcao = airport.ident;
     this.loadGARelevanceData(airport.ident);
   }
-  
+
   /**
    * Display AIP data
    */
   private displayAIPData(aipEntries: any[]): void {
     const aipContentContainer = document.getElementById('aip-data-content');
-    
+
     if (!aipContentContainer) return;
-    
+
     if (!aipEntries || aipEntries.length === 0) {
       aipContentContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No AIP data available</div>';
       return;
     }
-    
+
     // Group by standardized field section
     const entriesBySection: Record<string, any[]> = {};
     aipEntries.forEach((entry: any) => {
@@ -792,59 +744,59 @@ class Application {
       } else {
         section = entry.section || 'Other';
       }
-      
+
       if (!entriesBySection[section]) {
         entriesBySection[section] = [];
       }
       entriesBySection[section].push(entry);
     });
-    
+
     let html = '';
     Object.entries(entriesBySection).forEach(([section, entries]) => {
-      const sectionId = `aip-section-${section.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      const sectionId = `aip - section - ${section.toLowerCase().replace(/[^a-z0-9]+/g, '-')} `;
       html += `
-        <div class="aip-section" data-section="${this.escapeAttribute(section)}">
-          <div class="aip-section-header" onclick="window.toggleAIPSection('${sectionId}')">
+        < div class="aip-section" data - section="${this.escapeAttribute(section)}" >
+          <div class="aip-section-header" onclick = "window.toggleAIPSection('${sectionId}')" >
             <span>
-              <i class="fas fa-chevron-right aip-section-toggle" id="toggle-${sectionId}"></i>
+            <i class="fas fa-chevron-right aip-section-toggle" id = "toggle-${sectionId}" > </i>
               ${this.escapeHtml(section)} (${entries.length})
-            </span>
-          </div>
-          <div class="aip-section-content" id="${sectionId}">
-      `;
-      
+      </span>
+        </div>
+        < div class="aip-section-content" id = "${sectionId}" >
+          `;
+
       entries.forEach((entry: any) => {
         const fieldName = entry.std_field || entry.field;
-        const entryId = `aip-entry-${entry.std_field_id || entry.field || Math.random()}`;
+        const entryId = `aip - entry - ${entry.std_field_id || entry.field || Math.random()} `;
         html += `
-          <div class="aip-entry" id="${entryId}" data-field="${this.escapeAttribute(fieldName || '')}" data-value="${this.escapeAttribute(entry.value || '')}">
-            <strong>${this.escapeHtml(fieldName || 'Unknown')}:</strong> ${this.escapeHtml(entry.value || 'N/A')}
+        < div class="aip-entry" id = "${entryId}" data - field="${this.escapeAttribute(fieldName || '')}" data - value="${this.escapeAttribute(entry.value || '')}" >
+          <strong>${this.escapeHtml(fieldName || 'Unknown')}: </strong> ${this.escapeHtml(entry.value || 'N/A')}
             ${entry.alt_value ? `<br><em>${this.escapeHtml(entry.alt_value)}</em>` : ''}
-          </div>
+      </div>
         `;
       });
-      
+
       html += `
-          </div>
         </div>
-      `;
+        </div>
+          `;
     });
-    
+
     aipContentContainer.innerHTML = html;
     this.initializeAIPFilter();
   }
-  
+
   /**
    * Display country rules
    */
   private displayCountryRules(rulesData: any, countryCode?: string): void {
     const rulesContainer = document.getElementById('rules-content');
     const rulesSummary = document.getElementById('rules-summary');
-    
+
     if (!rulesContainer) return;
-    
+
     const code = countryCode ? countryCode.toUpperCase() : null;
-    
+
     if (!code) {
       if (rulesSummary) {
         rulesSummary.textContent = '';
@@ -852,7 +804,7 @@ class Application {
       rulesContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No country information available for this airport.</div>';
       return;
     }
-    
+
     if (!rulesData || !Array.isArray(rulesData.categories) || rulesData.categories.length === 0) {
       if (rulesSummary) {
         rulesSummary.textContent = `No published rules available for ${code}.`;
@@ -860,35 +812,35 @@ class Application {
       rulesContainer.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-info-circle"></i> No rules available for this country.</div>';
       return;
     }
-    
+
     if (rulesSummary) {
       const totalCategories = rulesData.categories.length;
       rulesSummary.textContent = `Rules for ${code}: ${rulesData.total_rules || 0} answers across ${totalCategories} ${totalCategories === 1 ? 'category' : 'categories'}.`;
     }
-    
+
     let html = '';
-    
+
     rulesData.categories.forEach((category: any) => {
       const sectionId = this.buildRuleSectionId(code, category.name);
-      const toggleId = `rules-toggle-${sectionId}`;
-      
+      const toggleId = `rules - toggle - ${sectionId} `;
+
       html += `
-        <div class="rules-section" data-category="${this.escapeAttribute(category.name || 'General')}">
-          <div class="rules-section-header" onclick="window.toggleRuleSection('${sectionId}')">
+        < div class="rules-section" data - category="${this.escapeAttribute(category.name || 'General')}" >
+          <div class="rules-section-header" onclick = "window.toggleRuleSection('${sectionId}')" >
             <span>
-              <i class="fas fa-chevron-right rules-section-toggle" id="${toggleId}"></i>
+            <i class="fas fa-chevron-right rules-section-toggle" id = "${toggleId}" > </i>
               ${this.escapeHtml(category.name || 'General')} (${category.count || 0})
-            </span>
-          </div>
-          <div class="rules-section-content" id="${sectionId}">
-      `;
-      
+      </span>
+        </div>
+        < div class="rules-section-content" id = "${sectionId}" >
+          `;
+
       if (category.rules && Array.isArray(category.rules)) {
         category.rules.forEach((rule: any) => {
           const question = this.escapeHtml(rule.question_text || 'Untitled rule');
           const answerText = this.escapeHtml(this.stripHtml(rule.answer_html) || 'No answer available.');
           const tagsHtml = (rule.tags || [])
-            .map((tag: any) => `<span class="badge bg-secondary">${this.escapeHtml(String(tag))}</span>`)
+            .map((tag: any) => `< span class="badge bg-secondary" > ${this.escapeHtml(String(tag))} </span>`)
             .join(' ');
           const linksHtml = (rule.links || [])
             .map((link: any) => {
@@ -904,7 +856,7 @@ class Application {
               return `<a href="${safeUrl}" class="me-2" target="_blank" rel="noopener noreferrer">${this.escapeHtml(label)}</a>`;
             })
             .join(' ');
-          
+
           const metaParts: string[] = [];
           if (rule.last_reviewed) {
             metaParts.push(`Last reviewed: ${this.escapeHtml(rule.last_reviewed)}`);
@@ -912,7 +864,7 @@ class Application {
           if (rule.confidence) {
             metaParts.push(`Confidence: ${this.escapeHtml(rule.confidence)}`);
           }
-          
+
           html += `
             <div class="rules-entry">
               <span class="rule-question"><i class="fas fa-gavel me-2"></i>${question}</span>
@@ -924,18 +876,18 @@ class Application {
           `;
         });
       }
-      
+
       html += `
           </div>
         </div>
       `;
     });
-    
+
     rulesContainer.innerHTML = html;
     this.initializeRuleSections();
     this.initializeRulesFilter();
   }
-  
+
   /**
    * Helper methods
    */
@@ -950,11 +902,11 @@ class Application {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
-  
+
   private escapeAttribute(value: any): string {
     return this.escapeHtml(value);
   }
-  
+
   private stripHtml(html: any): string {
     if (!html) {
       return '';
@@ -963,24 +915,21 @@ class Application {
     tempDiv.innerHTML = String(html);
     return tempDiv.textContent || tempDiv.innerText || '';
   }
-  
+
   private getProcedureBadgeClass(procedureType?: string, approachType?: string): string {
-    if (procedureType === 'approach') {
-      switch (approachType?.toUpperCase()) {
-        case 'ILS': return 'bg-success';
-        case 'RNAV': return 'bg-primary';
-        case 'VOR': return 'bg-info';
-        case 'NDB': return 'bg-warning';
-        default: return 'bg-secondary';
-      }
-    } else if (procedureType === 'departure') {
-      return 'bg-danger';
-    } else if (procedureType === 'arrival') {
-      return 'bg-warning';
-    }
-    return 'bg-secondary';
+    const t = (procedureType || '').toLowerCase();
+    const a = (approachType || '').toLowerCase();
+
+    if (t.includes('precision') || a.includes('ils')) return 'bg-success'; // Green for ILS/Precision
+    if (t.includes('rnp') || t.includes('rnav') || a.includes('rnp') || a.includes('rnav')) return 'bg-primary'; // Blue for RNP/RNAV
+    if (t.includes('vor') || t.includes('ndb')) return 'bg-warning text-dark'; // Yellow for VOR/NDB
+
+    if (t.includes('departure') || t.includes('sid')) return 'bg-danger';
+    if (t.includes('arrival') || t.includes('star')) return 'bg-warning text-dark';
+
+    return 'bg-secondary'; // Grey for others
   }
-  
+
   private buildRuleSectionId(countryCode: string, categoryName?: string): string {
     const slug = (categoryName || 'general')
       .toString()
@@ -989,7 +938,7 @@ class Application {
       .replace(/^-+|-+$/g, '');
     return `rules-${countryCode}-${slug || 'general'}`;
   }
-  
+
   /**
    * Load and display GA relevance data for an airport
    */
@@ -997,32 +946,32 @@ class Application {
     const loadingEl = document.getElementById('relevance-loading');
     const dataEl = document.getElementById('relevance-data');
     const noDataEl = document.getElementById('relevance-no-data');
-    
+
     if (!loadingEl || !dataEl || !noDataEl) return;
-    
+
     // Show loading state
     loadingEl.style.display = 'block';
     dataEl.style.display = 'none';
     noDataEl.style.display = 'none';
-    
+
     try {
       const persona = useStore.getState().ga.selectedPersona;
       const summary = await this.apiAdapter.getGASummary(icao, persona);
-      
+
       if (!summary.has_data) {
         loadingEl.style.display = 'none';
         noDataEl.style.display = 'block';
         return;
       }
-      
+
       // Get feature display names from config
       const config = useStore.getState().ga.config;
       const displayNames = config?.feature_display_names || {};
       const descriptions = config?.feature_descriptions || {};
-      
+
       // Build the HTML
       let html = '';
-      
+
       // Overall score section
       html += `
         <div class="airport-detail-section">
@@ -1045,7 +994,7 @@ class Application {
           </div>
         </div>
       `;
-      
+
       // Feature breakdown section
       if (summary.features) {
         html += `
@@ -1053,14 +1002,14 @@ class Application {
             <h6><i class="fas fa-chart-bar"></i> Feature Breakdown</h6>
             <table class="table table-sm">
         `;
-        
+
         for (const [featureName, value] of Object.entries(summary.features)) {
           const displayName = displayNames[featureName] || featureName.replace(/_/g, ' ').replace('ga ', '');
           const description = descriptions[featureName] || '';
           const percentage = value !== null ? (value * 100).toFixed(0) : 'N/A';
           const barWidth = value !== null ? Math.max(5, value * 100) : 0;
           const barColor = value !== null ? this.getScoreColor(value) : '#ccc';
-          
+
           html += `
             <tr title="${this.escapeAttribute(description)}">
               <td style="width: 40%"><strong>${this.escapeHtml(displayName)}</strong></td>
@@ -1076,27 +1025,27 @@ class Application {
             </tr>
           `;
         }
-        
+
         html += `
             </table>
           </div>
         `;
       }
-      
+
       // Tags section
       if (summary.tags && summary.tags.length > 0) {
         html += `
           <div class="airport-detail-section">
             <h6><i class="fas fa-tags"></i> Review Tags</h6>
             <div class="d-flex flex-wrap gap-1">
-              ${summary.tags.map(tag => 
-                `<span class="badge bg-secondary">${this.escapeHtml(tag)}</span>`
-              ).join('')}
+              ${summary.tags.map(tag =>
+          `<span class="badge bg-secondary">${this.escapeHtml(tag)}</span>`
+        ).join('')}
             </div>
           </div>
         `;
       }
-      
+
       // Summary text section
       if (summary.summary_text) {
         html += `
@@ -1106,7 +1055,7 @@ class Application {
           </div>
         `;
       }
-      
+
       // Notification/hassle section
       if (summary.notification_summary || summary.hassle_level) {
         html += `
@@ -1121,7 +1070,7 @@ class Application {
         }
         html += `</div>`;
       }
-      
+
       // Hotel/Restaurant info
       if (summary.hotel_info || summary.restaurant_info) {
         html += `
@@ -1136,18 +1085,18 @@ class Application {
         }
         html += `</div>`;
       }
-      
+
       dataEl.innerHTML = html;
       loadingEl.style.display = 'none';
       dataEl.style.display = 'block';
-      
+
     } catch (error) {
       console.error('[Application] Failed to load GA relevance data:', error);
       loadingEl.style.display = 'none';
       noDataEl.style.display = 'block';
     }
   }
-  
+
   /**
    * Get color based on score (0-1)
    */
@@ -1158,7 +1107,7 @@ class Application {
     if (score >= 0.25) return '#f39c12';
     return '#e74c3c';
   }
-  
+
   /**
    * Get darker color for gradient
    */
@@ -1169,7 +1118,7 @@ class Application {
     if (score >= 0.25) return '#d68910';
     return '#c0392b';
   }
-  
+
   /**
    * Format review date from various formats
    * Handles formats like "2025-08-28 07:27:20 UTC"
@@ -1180,75 +1129,75 @@ class Application {
       const normalized = dateStr
         .replace(' UTC', 'Z')
         .replace(' ', 'T');
-      
+
       const date = new Date(normalized);
-      
+
       if (isNaN(date.getTime())) {
         // If still invalid, try parsing as-is without the UTC part
         const withoutUtc = dateStr.replace(' UTC', '').replace('UTC', '');
         const fallbackDate = new Date(withoutUtc);
-        
+
         if (isNaN(fallbackDate.getTime())) {
           return dateStr; // Return original if all parsing fails
         }
         return fallbackDate.toLocaleDateString();
       }
-      
+
       return date.toLocaleDateString();
     } catch {
       return dateStr; // Return original on error
     }
   }
-  
+
   /**
    * Initialize AIP filter
    */
   private initializeAIPFilter(): void {
     const filterInput = document.getElementById('aip-filter-input');
     const clearButton = document.getElementById('aip-filter-clear');
-    
+
     if (!filterInput) return;
-    
+
     // Remove existing listeners by cloning and replacing
     const newFilterInput = filterInput.cloneNode(true) as HTMLInputElement;
     filterInput.parentNode?.replaceChild(newFilterInput, filterInput);
-    
+
     const newClearButton = clearButton ? (clearButton.cloneNode(true) as HTMLButtonElement) : null;
     if (clearButton && newClearButton) {
       clearButton.parentNode?.replaceChild(newClearButton, clearButton);
     }
-    
+
     newFilterInput.addEventListener('input', (e) => {
       this.handleAIPFilter(e as any);
     });
-    
+
     if (newClearButton) {
       newClearButton.addEventListener('click', () => {
         newFilterInput.value = '';
         this.handleAIPFilter({ target: { value: '' } } as any);
       });
     }
-    
+
     // Load saved section states
     this.loadAIPSectionStates();
   }
-  
+
   /**
    * Handle AIP filter
    */
   private handleAIPFilter(event: { target: { value: string } }): void {
     const filterText = (event.target.value || '').toLowerCase();
     const entries = document.querySelectorAll('.aip-entry');
-    
+
     entries.forEach((entry) => {
       const fieldName = (entry as HTMLElement).dataset.field || '';
       const value = (entry as HTMLElement).dataset.value || '';
       const altValue = entry.querySelector('em')?.textContent || '';
-      
-      const matches = fieldName.toLowerCase().includes(filterText) || 
-                     value.toLowerCase().includes(filterText) ||
-                     altValue.toLowerCase().includes(filterText);
-      
+
+      const matches = fieldName.toLowerCase().includes(filterText) ||
+        value.toLowerCase().includes(filterText) ||
+        altValue.toLowerCase().includes(filterText);
+
       if (matches) {
         entry.classList.remove('hidden');
         if (filterText) {
@@ -1256,7 +1205,7 @@ class Application {
         } else {
           entry.classList.remove('highlight');
         }
-        
+
         const section = entry.closest('.aip-section');
         if (section) {
           const content = section.querySelector('.aip-section-content');
@@ -1269,7 +1218,7 @@ class Application {
         entry.classList.remove('highlight');
       }
     });
-    
+
     // Hide sections that have no visible entries
     const sections = document.querySelectorAll('.aip-section');
     sections.forEach((section) => {
@@ -1277,7 +1226,7 @@ class Application {
       (section as HTMLElement).style.display = visibleEntries.length === 0 ? 'none' : 'block';
     });
   }
-  
+
   /**
    * Load AIP section states
    */
@@ -1301,14 +1250,14 @@ class Application {
       console.error('Error loading AIP section states:', e);
     }
   }
-  
+
   /**
    * Initialize rule sections
    */
   private initializeRuleSections(): void {
     this.loadRuleSectionStates();
   }
-  
+
   /**
    * Load rule section states
    */
@@ -1316,16 +1265,16 @@ class Application {
     try {
       const sections = document.querySelectorAll('.rules-section-content');
       if (!sections.length) return;
-      
+
       const states = JSON.parse(localStorage.getItem('ruleSectionStates') || '{}');
       const hasStoredState = Object.keys(states).length > 0;
-      
+
       sections.forEach((section, index) => {
         const sectionId = (section as HTMLElement).id;
         const toggle = document.getElementById(`rules-toggle-${sectionId}`);
         const isExpanded = states[sectionId];
         const shouldExpand = isExpanded === true || (!hasStoredState && index === 0);
-        
+
         if (shouldExpand) {
           section.classList.add('expanded');
           if (toggle) toggle.classList.add('expanded');
@@ -1341,7 +1290,7 @@ class Application {
       console.error('Error loading rule section states:', e);
     }
   }
-  
+
   /**
    * Save rule section state
    */
@@ -1354,31 +1303,31 @@ class Application {
       console.error('Error saving rule section state:', e);
     }
   }
-  
+
   /**
    * Initialize rules filter
    */
   private initializeRulesFilter(): void {
     const filterInput = document.getElementById('rules-filter-input');
     const clearButton = document.getElementById('rules-filter-clear');
-    
+
     if (!filterInput) return;
-    
+
     // Remove existing listeners by cloning and replacing
     const newFilterInput = filterInput.cloneNode(true) as HTMLInputElement;
     filterInput.parentNode?.replaceChild(newFilterInput, filterInput);
-    
+
     const newClearButton = clearButton ? (clearButton.cloneNode(true) as HTMLButtonElement) : null;
     if (clearButton && newClearButton) {
       clearButton.parentNode?.replaceChild(newClearButton, clearButton);
     }
-    
+
     newFilterInput.value = ''; // Clear any stale value
-    
+
     newFilterInput.addEventListener('input', (e) => {
       this.handleRulesFilter(e as any);
     });
-    
+
     if (newClearButton) {
       newClearButton.addEventListener('click', () => {
         newFilterInput.value = '';
@@ -1386,26 +1335,26 @@ class Application {
       });
     }
   }
-  
+
   /**
    * Handle rules filter
    */
   private handleRulesFilter(event: { target: { value: string } }): void {
     const filterText = (event.target.value || '').toLowerCase();
     const entries = document.querySelectorAll('.rules-entry');
-    
+
     const matchedSections = new Set<string>();
-    
+
     entries.forEach((entry) => {
       const question = entry.querySelector('.rule-question')?.textContent || '';
       const answer = entry.querySelector('.rule-answer')?.textContent || '';
       const tags = Array.from(entry.querySelectorAll('.badge')).map(b => b.textContent || '').join(' ');
       const meta = entry.querySelector('.text-muted')?.textContent || '';
       const category = entry.closest('.rules-section')?.getAttribute('data-category') || '';
-      
+
       const combined = `${question} ${answer} ${tags} ${meta} ${category}`.toLowerCase();
       const matches = combined.includes(filterText);
-      
+
       if (matches) {
         entry.classList.remove('hidden');
         entry.classList.toggle('highlight', Boolean(filterText));
@@ -1418,7 +1367,7 @@ class Application {
         entry.classList.remove('highlight');
       }
     });
-    
+
     // Expand matched sections, collapse others if filter active
     const sections = document.querySelectorAll('.rules-section-content');
     sections.forEach((section) => {
@@ -1426,7 +1375,7 @@ class Application {
       const toggle = document.getElementById(`rules-toggle-${sectionId}`);
       const visibleEntries = section.querySelectorAll('.rules-entry:not(.hidden)');
       const sectionElement = section.parentElement as HTMLElement;
-      
+
       if (filterText) {
         const shouldExpand = matchedSections.has(sectionId) || visibleEntries.length > 0;
         if (shouldExpand) {
@@ -1447,7 +1396,9 @@ class Application {
       }
     });
   }
-  
+
+
+
   /**
    * Public method to handle LLM visualizations (for chatbot integration)
    */
@@ -1487,7 +1438,7 @@ async function initApp(): Promise<void> {
   const content = document.getElementById(sectionId);
   const toggle = document.getElementById(`toggle-${sectionId}`);
   if (!content || !toggle) return;
-  
+
   const isExpanded = content.classList.contains('expanded');
   if (isExpanded) {
     content.classList.remove('expanded');
@@ -1496,7 +1447,7 @@ async function initApp(): Promise<void> {
     content.classList.add('expanded');
     toggle.classList.add('expanded');
   }
-  
+
   // Save state
   try {
     const states = JSON.parse(localStorage.getItem('aipSectionStates') || '{}');
@@ -1511,7 +1462,7 @@ async function initApp(): Promise<void> {
   const content = document.getElementById(sectionId);
   const toggle = document.getElementById(`rules-toggle-${sectionId}`);
   if (!content || !toggle) return;
-  
+
   const isExpanded = content.classList.contains('expanded');
   if (isExpanded) {
     content.classList.remove('expanded');
@@ -1520,7 +1471,7 @@ async function initApp(): Promise<void> {
     content.classList.add('expanded');
     toggle.classList.add('expanded');
   }
-  
+
   // Save state
   try {
     const states = JSON.parse(localStorage.getItem('ruleSectionStates') || '{}');
