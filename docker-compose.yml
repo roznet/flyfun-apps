@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   web-server:
     build:
@@ -14,19 +12,18 @@ services:
     env_file:
       - .env
     # Container-specific overrides (paths must be container paths, not host paths)
-    # Only override what's different from .env for container paths
+    # These hard-coded paths override any host paths from .env
+    # Other variables (API keys, etc.) still come from .env via env_file
     environment:
-      - AIRPORTS_DB=${AIRPORTS_DB:-/app/data/airports.db}
-      - RULES_JSON=${RULES_JSON:-/app/data/rules.json}
-      - GA_META_DB=${GA_META_DB:-/app/out/ga_meta.sqlite}
-      - VECTOR_DB_PATH=${VECTOR_DB_PATH:-/app/cache/rules_vector_db}
+      - AIRPORTS_DB=/app/data/airports.db
+      - RULES_JSON=/app/data/rules.json
+      - GA_META_DB=/app/out/ga_meta.sqlite
+      - VECTOR_DB_PATH=/app/out/rules_vector_db
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
-      # Output files (writable)
+      # Output files (writable) - includes ga_meta.sqlite and rules_vector_db
       - ${OUTPUT_DIR:-./out}:/app/out:rw
-      # Cache (writable)
-      - ${CACHE_DIR:-./cache}:/app/cache:rw
       # Logs (writable)
       - ${LOGS_DIR:-./logs}:/app/logs:rw
       # Security config (optional override)
@@ -50,14 +47,15 @@ services:
     env_file:
       - .env
     # Container-specific overrides (paths must be container paths, not host paths)
+    # These hard-coded paths override any host paths from .env
     environment:
-      - AIRPORTS_DB=${AIRPORTS_DB:-/app/data/airports.db}
-      - RULES_JSON=${RULES_JSON:-/app/data/rules.json}
+      - AIRPORTS_DB=/app/data/airports.db
+      - RULES_JSON=/app/data/rules.json
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
-      # Cache (writable for vector DB)
-      - ${CACHE_DIR:-./cache}:/app/cache:rw
+      # Output files (writable) - includes rules_vector_db
+      - ${OUTPUT_DIR:-./out}:/app/out:rw
       # Logs (writable)
       - ${LOGS_DIR:-./logs}:/app/logs:rw
     restart: unless-stopped
@@ -69,14 +67,3 @@ services:
 networks:
   flyfun-network:
     driver: bridge
-
-volumes:
-  # Optional: Use named volumes instead of bind mounts
-  # Uncomment and adjust if preferred
-  # data:
-  #   driver: local
-  # output:
-  #   driver: local
-  # cache:
-  #   driver: local
-

@@ -40,6 +40,18 @@ struct AirportMapView: View {
                     .stroke(.blue.opacity(0.8), lineWidth: 4)
             }
             
+            // Procedure lines (when in procedure legend mode)
+            if currentLegendMode == .procedures {
+                ForEach(Array(procedureLines.keys), id: \.self) { icao in
+                    if let lines = procedureLines[icao] {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            MapPolyline(coordinates: [line.startCoordinate, line.endCoordinate])
+                                .stroke(procedureLineColor(line.precisionCategory), lineWidth: 3)
+                        }
+                    }
+                }
+            }
+            
             // Highlights (from chat visualization)
             ForEach(Array(highlights.values), id: \.id) { highlight in
                 MapCircle(center: highlight.coordinate, radius: highlight.radius)
@@ -66,6 +78,18 @@ struct AirportMapView: View {
                 state?.navigation.showAirportDetail()
             }
         }
+        .onChange(of: currentLegendMode) { oldValue, newValue in
+            // Load procedure lines when switching to procedure mode
+            if newValue == .procedures && oldValue != .procedures {
+                Task {
+                    await state?.airports.loadProcedureLines()
+                }
+            }
+            // Clear procedure lines when switching away from procedure mode
+            else if newValue != .procedures && oldValue == .procedures {
+                state?.airports.clearProcedureLines()
+            }
+        }
         .overlay(alignment: .topTrailing) {
             legendOverlay
         }
@@ -89,6 +113,10 @@ struct AirportMapView: View {
         state?.airports.highlights ?? [:]
     }
     
+    private var procedureLines: [String: [RZFlight.Airport.ProcedureLine]] {
+        state?.airports.procedureLines ?? [:]
+    }
+    
     private var mapPosition: Binding<MapCameraPosition> {
         Binding(
             get: { state?.airports.mapPosition ?? .automatic },
@@ -107,6 +135,19 @@ struct AirportMapView: View {
         case .green: return .green
         case .orange: return .orange
         case .purple: return .purple
+        }
+    }
+    
+    /// Get color for procedure line based on precision category
+    /// Matches web app: Yellow = Precision (ILS), Blue = RNAV, White = Non-Precision
+    private func procedureLineColor(_ category: RZFlight.Procedure.PrecisionCategory) -> Color {
+        switch category {
+        case .precision:
+            return Color(red: 1.0, green: 1.0, blue: 0.0) // Yellow (#ffff00) for ILS
+        case .rnav:
+            return Color(red: 0.0, green: 0.5, blue: 1.0) // Blue (#0000ff) for RNAV/GPS
+        case .nonPrecision:
+            return .white // White (#ffffff) for VOR/NDB
         }
     }
     

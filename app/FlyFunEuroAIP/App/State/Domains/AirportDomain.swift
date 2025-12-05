@@ -37,12 +37,21 @@ final class AirportDomain {
     var highlights: [String: MapHighlight] = [:]
     var activeRoute: RouteVisualization?
     
+    // MARK: - Procedure Lines
+    /// Procedure lines for visualization (keyed by airport ICAO)
+    var procedureLines: [String: [RZFlight.Airport.ProcedureLine]] = [:]
+    private var procedureLinesLoadingTask: Task<Void, Never>?
+    
     // MARK: - Cached Lookups (for legend coloring)
     /// Set of ICAOs that are border crossing points - loaded once at startup
     var borderCrossingICAOs: Set<String> = []
     
     // MARK: - Region Loading
     private var regionUpdateTask: Task<Void, Never>?
+    
+    // MARK: - Search State
+    /// Track when search results are active to prevent region-based loading from overwriting them
+    var isSearchActive: Bool = false
     
     // MARK: - Init
     
@@ -54,7 +63,14 @@ final class AirportDomain {
     
     /// Called when map region changes - loads airports for visible area
     /// Uses debouncing to avoid excessive queries during pan/zoom
+    /// Respects search state: won't overwrite search results unless search is cleared
     func onRegionChange(_ region: MKCoordinateRegion) {
+        // Don't load if search is active - preserve search results
+        guard !isSearchActive else {
+            // Skip region load when search is active
+            return
+        }
+        
         regionUpdateTask?.cancel()
         regionUpdateTask = Task {
             // Debounce: wait 300ms after last region change
@@ -77,6 +93,11 @@ final class AirportDomain {
             limit: 500  // Cap markers for performance
         )
         Logger.app.info("Loaded \(self.airports.count) airports in region")
+        
+        // Load procedure lines if in procedure legend mode
+        if legendMode == .procedures {
+            await loadProcedureLines()
+        }
     }
     
     /// Initial load - loads airports for default Europe view
@@ -100,6 +121,11 @@ final class AirportDomain {
     func search(query: String) async throws {
         guard !query.isEmpty else {
             searchResults = []
+            isSearchActive = false
+            // Clear search state - allow region loading to resume
+            if visibleRegion != nil {
+                try? await loadAirportsInRegion(visibleRegion!)
+            }
             return
         }
         
@@ -110,6 +136,8 @@ final class AirportDomain {
         if isRouteQuery(query) {
             try await searchRoute(query)
         } else {
+            // Regular search - set search active to preserve results
+            isSearchActive = true
             searchResults = try await repository.searchAirports(query: query, limit: 50)
         }
     }
@@ -123,6 +151,9 @@ final class AirportDomain {
     private func searchRoute(_ query: String) async throws {
         let icaos = query.uppercased().split(separator: " ").map(String.init)
         guard icaos.count >= 2, let from = icaos.first, let to = icaos.last else { return }
+        
+        // Mark search as active to prevent region loading from overwriting results
+        isSearchActive = true
         
         let result = try await repository.airportsNearRoute(
             from: from, to: to, distanceNm: 50, filters: filters
@@ -140,6 +171,7 @@ final class AirportDomain {
         }
         
         fitMapToRoute()
+        Logger.app.info("Route search active - showing \(airports.count) airports within 50nm")
     }
     
     // MARK: - Selection
@@ -192,6 +224,30 @@ final class AirportDomain {
         activeRoute = nil
         // Clear route-related highlights but keep chat highlights
         highlights = highlights.filter { !$0.key.hasPrefix("route-") }
+        // Clear search state when route is cleared
+        isSearchActive = false
+        // Reload airports for current region
+        if let region = visibleRegion {
+            Task {
+                try? await loadAirportsInRegion(region)
+            }
+        }
+    }
+    
+    /// Clear search results and resume normal region-based loading
+    func clearSearch() {
+        searchResults = []
+        isSearchActive = false
+        // Reload airports for current region
+        if let region = visibleRegion {
+            Task {
+                try? await loadAirportsInRegion(region)
+            }
+        } else {
+            Task {
+                try? await load()
+            }
+        }
     }
     
     func clearChatHighlights() {
@@ -373,6 +429,10 @@ final class AirportDomain {
     // MARK: - Filter Actions
     
     func applyFilters() async throws {
+        // Clear search state when filters are applied - filters take precedence
+        isSearchActive = false
+        searchResults = []
+        
         if let region = visibleRegion {
             try await loadAirportsInRegion(region)
         } else {
@@ -385,6 +445,46 @@ final class AirportDomain {
         Task {
             try? await applyFilters()
         }
+    }
+    
+    // MARK: - Procedure Lines Loading
+    
+    /// Load procedure lines for visible airports
+    /// Only loads for airports that have procedures and aren't already loaded
+    func loadProcedureLines() async {
+        // Cancel any existing loading task
+        procedureLinesLoadingTask?.cancel()
+        
+        procedureLinesLoadingTask = Task {
+            // Filter to airports with procedures that don't have lines loaded yet
+            let airportsToLoad = airports.filter { airport in
+                !airport.procedures.isEmpty && procedureLines[airport.icao] == nil
+            }
+            
+            // Limit to reasonable number for performance
+            let airportsToProcess = Array(airportsToLoad.prefix(50))
+            
+            for airport in airportsToProcess {
+                guard !Task.isCancelled else { break }
+                
+                // Get procedure lines from the airport
+                let result = airport.procedureLines(distanceNm: 10.0)
+                if !result.procedureLines.isEmpty {
+                    procedureLines[airport.icao] = result.procedureLines
+                }
+            }
+            
+            Logger.app.info("Loaded procedure lines for \(procedureLines.count) airports")
+        }
+        
+        await procedureLinesLoadingTask?.value
+    }
+    
+    /// Clear procedure lines (e.g., when switching away from procedure legend mode)
+    func clearProcedureLines() {
+        procedureLines.removeAll()
+        procedureLinesLoadingTask?.cancel()
+        procedureLinesLoadingTask = nil
     }
     
     // MARK: - Metadata Loading

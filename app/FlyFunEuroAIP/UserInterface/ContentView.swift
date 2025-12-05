@@ -25,20 +25,7 @@ struct ContentView: View {
             FilterPanelView()
                 .presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: detailSheetBinding) {
-            if let airport = state?.airports.selectedAirport {
-                NavigationStack {
-                    AirportDetailView(airport: airport)
-                }
-                .presentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: chatSheetBinding) {
-            NavigationStack {
-                ChatView()
-            }
-            .presentationDetents([.large])
-        }
+        // Chat and detail are now in left overlay and bottom tabs - no sheets needed
         .overlay {
             // Error banner
             if let error = state?.system.error {
@@ -74,19 +61,6 @@ struct ContentView: View {
         )
     }
     
-    private var detailSheetBinding: Binding<Bool> {
-        Binding(
-            get: { state?.navigation.showingAirportDetail ?? false },
-            set: { state?.navigation.showingAirportDetail = $0 }
-        )
-    }
-    
-    private var chatSheetBinding: Binding<Bool> {
-        Binding(
-            get: { state?.navigation.showingChat ?? false },
-            set: { state?.navigation.showingChat = $0 }
-        )
-    }
 }
 
 // MARK: - Regular Layout (iPad/Mac)
@@ -95,36 +69,21 @@ struct RegularLayout: View {
     @Environment(\.appState) private var state
     
     var body: some View {
-        NavigationSplitView {
-            // Sidebar
-            SidebarView()
-                #if os(macOS)
-                .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 400)
-                #endif
-        } detail: {
-            // Map + Detail
-            HSplitViewOrHStack {
-                // Map
+        HStack(spacing: 0) {
+            // Left Overlay (Search/Chat)
+            LeftOverlayContainer()
+            
+            // Map (fills remaining space)
+            ZStack {
                 AirportMapView()
                 
-                // Detail panel (when airport selected)
-                if let airport = state?.airports.selectedAirport {
-                    AirportDetailView(airport: airport)
-                        .frame(minWidth: 350, idealWidth: 400, maxWidth: 500)
+                // Bottom Tab Bar (overlay)
+                VStack {
+                    Spacer()
+                    BottomTabBar()
                 }
             }
         }
-        #if os(macOS)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    state?.navigation.toggleFilters()
-                } label: {
-                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
-                }
-            }
-        }
-        #endif
     }
 }
 
@@ -139,17 +98,24 @@ struct CompactLayout: View {
             AirportMapView()
                 .ignoresSafeArea()
             
-            // Floating search bar
-            VStack {
-                FloatingSearchBar()
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+            // Left overlay (can be hidden/shown)
+            HStack {
+                if state?.navigation.leftOverlayMode == .search || state?.navigation.leftOverlayMode == .chat {
+                    LeftOverlayContainer()
+                        .transition(.move(edge: .leading))
+                }
                 
                 Spacer()
-                
-                // Bottom toolbar
-                CompactToolbar()
             }
+            
+            // Bottom Tab Bar (overlay)
+            VStack {
+                Spacer()
+                BottomTabBar()
+            }
+            
+            // Floating toggle button (when overlay is hidden)
+            // For now, overlay is always visible - can add hide/show later
         }
     }
 }

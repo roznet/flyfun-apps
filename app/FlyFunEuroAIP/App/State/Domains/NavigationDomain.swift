@@ -16,6 +16,16 @@ final class NavigationDomain {
     // MARK: - Tab State
     var selectedTab: Tab = .map
     
+    // MARK: - Left Overlay Mode
+    /// Controls what's shown in the left overlay (search/filter or chat)
+    var leftOverlayMode: LeftOverlayMode = .search
+    
+    // MARK: - Bottom Tab State
+    /// Selected bottom tab (Airport Info, AIP, Rules)
+    var selectedBottomTab: BottomTab = .airportInfo
+    /// Whether the bottom tab bar is visible (can be hidden even when airport is selected)
+    var showingBottomTabBar: Bool = false
+    
     // MARK: - Sheet State
     var showingChat: Bool = false
     var showingFilters: Bool = false
@@ -42,6 +52,31 @@ final class NavigationDomain {
             case .chat: return "bubble.left.and.bubble.right"
             case .settings: return "gear"
             }
+        }
+    }
+    
+    enum LeftOverlayMode: String, Sendable {
+        case search
+        case chat
+    }
+    
+    enum BottomTab: String, CaseIterable, Identifiable, Sendable {
+        case airportInfo = "Airport"
+        case aip = "AIP"
+        case rules = "Rules"
+        
+        var id: String { rawValue }
+        
+        var systemImage: String {
+            switch self {
+            case .airportInfo: return "airplane"
+            case .aip: return "doc.text"
+            case .rules: return "book"
+            }
+        }
+        
+        var displayName: String {
+            rawValue
         }
     }
     
@@ -93,6 +128,38 @@ final class NavigationDomain {
     
     func hideAirportDetail() {
         showingAirportDetail = false
+    }
+    
+    // MARK: - Left Overlay Actions
+    
+    func toggleLeftOverlay() {
+        leftOverlayMode = leftOverlayMode == .search ? .chat : .search
+    }
+    
+    func showSearchInLeftOverlay() {
+        leftOverlayMode = .search
+    }
+    
+    func showChatInLeftOverlay() {
+        leftOverlayMode = .chat
+    }
+    
+    // MARK: - Bottom Tab Actions
+    
+    func selectBottomTab(_ tab: BottomTab) {
+        selectedBottomTab = tab
+    }
+    
+    func showBottomTabBar() {
+        showingBottomTabBar = true
+    }
+    
+    func hideBottomTabBar() {
+        showingBottomTabBar = false
+    }
+    
+    func toggleBottomTabBar() {
+        showingBottomTabBar.toggle()
     }
     
     // MARK: - Navigation Path

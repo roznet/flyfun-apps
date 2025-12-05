@@ -62,7 +62,7 @@ struct SearchView: View {
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
-                    state?.airports.searchResults = []
+                    state?.airports.clearSearch()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)

@@ -11,25 +11,30 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install euro_aip from git (adjust URL as needed)
-# Note: This assumes euro_aip is available as a git repository
-# If it's a submodule or local, adjust accordingly
-RUN pip install git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip || \
-    echo "Warning: euro_aip installation failed. Ensure it's available."
-
 # Copy application code
 COPY shared/ /app/shared/
 COPY web/server/ /app/web/server/
-COPY src/ /app/src/  # euro_aip source if needed
+COPY web/client/ /app/web/client/
+
+# Build client (TypeScript to JavaScript)
+WORKDIR /app/web/client
+RUN npm ci && npm run build
+
+# Install euro_aip from GitHub (latest version)
+WORKDIR /app
+RUN pip install "git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip"
 
 # Create directories for logs and data with correct ownership
-RUN mkdir -p /app/data /app/out /app/cache /app/logs && \
+RUN mkdir -p /app/data /app/out /app/logs && \
     chown -R flyfun:flyfun /app
 
 # Set environment variables

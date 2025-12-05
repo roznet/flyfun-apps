@@ -28,8 +28,7 @@ The deployment consists of:
 ├── env.sample              # Template for .env
 ├── .dockerignore           # Files to exclude from builds
 ├── data/                   # Data files (airports.db, rules.json) - mounted as volume
-├── out/                    # Output files (ga_meta.sqlite) - mounted as volume
-├── cache/                  # Cache files (vector DB) - mounted as volume
+├── out/                    # Output files (ga_meta.sqlite, rules_vector_db) - mounted as volume
 └── logs/                   # Log files - mounted as volume
 ```
 
@@ -43,9 +42,16 @@ cp env.sample .env
 
 # Edit .env with your configuration
 # - Set OPENAI_API_KEY
-# - Adjust paths if needed
+# - IMPORTANT: Update paths to use container paths (not host paths):
+#   AIRPORTS_DB=/app/data/airports.db
+#   RULES_JSON=/app/data/rules.json
+#   GA_META_DB=/app/out/ga_meta.sqlite
+#   VECTOR_DB_PATH=/app/out/rules_vector_db
+# - Remove or ignore WORKING_DIR (not used in Docker)
 # - Configure security settings
 ```
+
+**Note:** The `docker-compose.yml` will override paths to use container paths, but setting them correctly in `.env` avoids confusion.
 
 ### 2. Prepare Data Files and Directories
 
@@ -55,26 +61,26 @@ Ensure you have the required data files:
 
 ```bash
 # Create directories if they don't exist
-mkdir -p data out cache logs
+mkdir -p data out logs
 
 # Ensure data files are in place
 ls -la data/airports.db data/rules.json
 
 # Set permissions for writable directories (containers run as UID 2000/2001)
 # Option 1: Make directories world-writable (less secure, but simple)
-chmod 777 out cache logs
+chmod 777 out logs
 
 # Option 2: Create directories with specific ownership (more secure)
 # This requires matching the UID/GID on your host system
-# sudo chown -R 2000:2000 out cache logs
-# chmod 755 out cache logs
+# sudo chown -R 2000:2000 out logs
+# chmod 755 out logs
 ```
 
 **Note on Permissions**: The containers run as non-root users:
 - Web server: UID 2000 (user `flyfun`)
 - MCP server: UID 2001 (user `flyfun-mcp`)
 
-For writable volumes (`out`, `cache`, `logs`), ensure they're writable by these UIDs or use world-writable permissions (777) for development.
+For writable volumes (`out`, `logs`), ensure they're writable by these UIDs or use world-writable permissions (777) for development.
 
 ### 3. Build and Run
 
@@ -98,6 +104,8 @@ docker-compose down
 
 All configuration is done through the `.env` file at the project root. Key variables:
 
+**Important:** Paths in `.env` should use **container paths** when running in Docker (e.g., `/app/data/airports.db`), not host paths. The `docker-compose.yml` automatically overrides paths to use container paths, but it's best to set them correctly in `.env` for clarity.
+
 #### Common
 - `ENVIRONMENT`: `development` or `production`
 - `AIRPORTS_DB`: Path to airports database (inside container: `/app/data/airports.db`)
@@ -109,7 +117,7 @@ All configuration is done through the `.env` file at the project root. Key varia
 - `GA_META_DB`: Path to GA meta database (default: `/app/out/ga_meta.sqlite`)
 - `GA_META_READONLY`: Whether GA database is read-only (default: `true`)
 - `AVIATION_AGENT_ENABLED`: Enable aviation agent (default: `true`)
-- `VECTOR_DB_PATH`: Path to vector database (default: `/app/cache/rules_vector_db`)
+- `VECTOR_DB_PATH`: Path to vector database (default: `/app/out/rules_vector_db`)
 
 #### MCP Server
 - `AIRPORTS_DB`: Path to airports database (inside container: `/app/data/airports.db`)
@@ -126,15 +134,13 @@ The `docker-compose.yml` maps host directories to container paths:
 | Host Directory | Container Path | Purpose | Access |
 |---------------|---------------|---------|--------|
 | `./data` | `/app/data` | Data files (airports.db, rules.json) | Read-only |
-| `./out` | `/app/out` | Output files (ga_meta.sqlite) | Read-write |
-| `./cache` | `/app/cache` | Cache files (vector DB) | Read-write |
+| `./out` | `/app/out` | Output files (ga_meta.sqlite, rules_vector_db) | Read-write |
 | `./logs` | `/app/logs` | Log files | Read-write |
 
 You can customize these in `.env`:
 ```bash
 DATA_DIR=./data
 OUTPUT_DIR=./out
-CACHE_DIR=./cache
 LOGS_DIR=./logs
 ```
 
@@ -159,7 +165,7 @@ LOGS_DIR=./logs
    - Read-only in production web server (default)
 
 2. **Vector DB**: Rules vector database for RAG
-   - Location: `cache/rules_vector_db/`
+   - Location: `out/rules_vector_db/`
    - Created automatically on first use
    - Read-write in containers
 
@@ -245,6 +251,7 @@ docker-compose ps
    # Add to docker-compose.yml under web-server volumes:
    - ./web/server:/app/web/server:ro
    - ./shared:/app/shared:ro
+   - ./out:/app/out:rw  # For vector DB and ga_meta.sqlite
    ```
 
 2. **Use development environment**:
@@ -338,6 +345,7 @@ docker-compose --env-file .env.prod up -d
    - Ensure output directory is writable by UID 2000 (web server)
    - Check file permissions: `ls -la out/`
    - Fix permissions: `chmod 777 out` or `chown -R 2000:2000 out`
+   - Verify vector DB path: `ls -la out/rules_vector_db/`
 
 2. **Database not found**:
    - Verify `AIRPORTS_DB` path in `.env`
@@ -346,9 +354,9 @@ docker-compose --env-file .env.prod up -d
 
 3. **Permission denied errors**:
    - Containers run as non-root (UID 2000/2001)
-   - Ensure writable volumes (`out`, `cache`, `logs`) have correct permissions
+   - Ensure writable volumes (`out`, `logs`) have correct permissions
    - Check container user: `docker-compose exec web-server id`
-   - Fix: `chmod 777 out cache logs` or match UID/GID on host
+   - Fix: `chmod 777 out logs` or match UID/GID on host
 
 ### Port Conflicts
 
@@ -406,6 +414,30 @@ docker-compose up -d
 # Verify services are running
 docker-compose ps
 curl http://localhost:8000/health
+```
+
+## Testing
+
+See `designs/DOCKER_TESTING_GUIDE.md` for comprehensive testing instructions, including:
+- Pre-flight checks
+- Build and runtime tests
+- Functionality verification
+- Troubleshooting guide
+
+**Quick Test:**
+```bash
+# Build and start
+docker-compose build
+docker-compose up -d
+
+# Check health
+curl http://localhost:8000/health
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
 ```
 
 ## Next Steps
