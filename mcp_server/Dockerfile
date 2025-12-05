@@ -17,17 +17,15 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install euro_aip from git (adjust URL as needed)
-RUN pip install git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip || \
-    echo "Warning: euro_aip installation failed. Ensure it's available."
-
 # Copy application code
 COPY shared/ /app/shared/
 COPY mcp_server/ /app/mcp_server/
-COPY src/ /app/src/  # euro_aip source if needed
+
+# Install euro_aip from GitHub (latest version)
+RUN pip install "git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip"
 
 # Create directories for logs and data with correct ownership
-RUN mkdir -p /app/data /app/out /app/cache /app/logs && \
+RUN mkdir -p /app/data /app/out /app/logs && \
     chown -R flyfun-mcp:flyfun-mcp /app
 
 # Set environment variables
@@ -43,5 +41,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Run the MCP server
 WORKDIR /app/mcp_server
-CMD ["python", "main.py"]
+CMD ["python", "main.py", "--transport", "http", "--host", "127.0.0.1", "--port", "8001"]
 
