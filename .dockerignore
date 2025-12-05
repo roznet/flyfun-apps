@@ -1,0 +1,73 @@
+# Git
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files (use .env.sample as template)
+.env
+*.env
+!*.env.sample
+dev.env
+prod.env
+
+# Data files (mounted as volumes)
+data/
+out/
+cache/
+logs/
+tmp/
+
+# Node (for web client)
+web/client/node_modules/
+web/client/dist/
+web/client/build/
+
+# Documentation
+*.md
+!README.md
+designs/
+
+# Tests
+tests/
+pytest.ini
+.pytest_cache/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# Docker
+docker-compose.yml
+Dockerfile*
+.dockerignore
+
+# Other
+conversation_logs/
+chat~/
+python~/
+etc~/
+

@@ -1,0 +1,69 @@
+services:
+  web-server:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: flyfun-web-server
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    # Load environment variables from .env file
+    # This is more standard, maintainable, and secure than listing all variables explicitly
+    # Variables in .env are automatically loaded into the container
+    env_file:
+      - .env
+    # Container-specific overrides (paths must be container paths, not host paths)
+    # These hard-coded paths override any host paths from .env
+    # Other variables (API keys, etc.) still come from .env via env_file
+    environment:
+      - AIRPORTS_DB=/app/data/airports.db
+      - RULES_JSON=/app/data/rules.json
+      - GA_META_DB=/app/out/ga_meta.sqlite
+      - VECTOR_DB_PATH=/app/out/rules_vector_db
+    volumes:
+      # Data files (read-only)
+      - ${DATA_DIR:-./data}:/app/data:ro
+      # Output files (writable) - includes ga_meta.sqlite and rules_vector_db
+      - ${OUTPUT_DIR:-./out}:/app/out:rw
+      # Logs (writable)
+      - ${LOGS_DIR:-./logs}:/app/logs:rw
+      # Security config (optional override)
+      - ${SECURITY_CONFIG_PATH:-./web/server/security_config.py}:/app/web/server/security_config.py:ro
+    restart: unless-stopped
+    networks:
+      - flyfun-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    container_name: flyfun-mcp-server
+    # Load environment variables from .env file
+    env_file:
+      - .env
+    # Container-specific overrides (paths must be container paths, not host paths)
+    # These hard-coded paths override any host paths from .env
+    environment:
+      - AIRPORTS_DB=/app/data/airports.db
+      - RULES_JSON=/app/data/rules.json
+    volumes:
+      # Data files (read-only)
+      - ${DATA_DIR:-./data}:/app/data:ro
+      # Output files (writable) - includes rules_vector_db
+      - ${OUTPUT_DIR:-./out}:/app/out:rw
+      # Logs (writable)
+      - ${LOGS_DIR:-./logs}:/app/logs:rw
+    restart: unless-stopped
+    networks:
+      - flyfun-network
+    # MCP servers typically use stdio, so no HTTP healthcheck
+    # They're usually managed by the MCP client
+
+networks:
+  flyfun-network:
+    driver: bridge

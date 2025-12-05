@@ -5,18 +5,17 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# Load environment variables from .env file
-env_path = Path(__file__).parent / '.env'
-if env_path.exists():
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, value = line.split('=', 1)
-                os.environ[key.strip()] = value.strip()
-
-# Add the flyfun-apps package to the path
+# Add the flyfun-apps package to the path (before importing shared)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Load environment variables using shared loader
+from shared.env_loader import load_component_env
+
+# Load from component directory (e.g., web/server/dev.env)
+component_dir = Path(__file__).parent
+load_component_env(component_dir)
+
+# Now continue with imports
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -51,8 +50,9 @@ from api import airports, procedures, filters, statistics, rules, aviation_agent
 from shared.rules_manager import RulesManager
 
 # Configure logging with both file and console output
-log_dir = Path("/tmp/flyfun-logs")
-log_dir.mkdir(exist_ok=True)
+# Use /app/logs in Docker, /tmp/flyfun-logs for local development
+log_dir = Path(os.getenv("LOG_DIR", "/tmp/flyfun-logs"))
+log_dir.mkdir(exist_ok=True, parents=True)
 log_file = log_dir / "web_server.log"
 
 # Create handlers
