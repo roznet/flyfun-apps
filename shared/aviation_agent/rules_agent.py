@@ -44,10 +44,9 @@ Guidelines:
 1. **Answer the specific question** - Focus on what the pilot asked
 2. **Cite countries** - Clearly indicate which rule applies to which country
 3. **Compare when multiple countries** - If rules differ, highlight the differences
-4. **Use source links** - Include reference links at the end
-5. **Be concise** - Pilots need clear, actionable information
-6. **Don't make up information** - Only use the provided rules
-7. **Format clearly** - Use markdown with headers, bullets, and bold text
+4. **Be concise** - Pilots need clear, actionable information
+5. **Don't make up information** - Only use the provided rules
+6. **Format clearly** - Use markdown with headers, bullets, and bold text
 
 If the retrieved rules don't answer the question, say: "I don't have specific information about that in the regulations I have access to."
 
@@ -55,7 +54,8 @@ Format your answer in markdown:
 - Use **bold** for country names and key terms
 - Use bullet points for lists
 - Use `code` for airport codes (ICAO)
-- Include links as [Text](URL) at the end"""),
+
+CRITICAL: Do NOT add any "References", "Sources", or links section. Do NOT include any markdown links like [text](url) or [text](#). The system will automatically add references after your answer. Your answer should end immediately after answering the question."""),
             
             ("human", """Question: {query}
 
@@ -111,10 +111,30 @@ Please provide a clear, well-formatted answer to the pilot's question.""")
             })
             
             answer = response.content if hasattr(response, 'content') else str(response)
-            
-            # Extract sources
+
+            # Strip any markdown links the LLM added despite instructions
+            # Remove [text](url) and [text](#) patterns
+            import re
+            answer = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', answer)
+
+            # Extract sources from RAG chunks
             sources = self._extract_sources(retrieved_rules)
-            
+            logger.info(f"Extracted {len(sources)} sources from RAG: {sources}")
+
+            # Append simple references section from RAG outputs
+            if sources:
+                answer = answer.strip()
+                answer += "\n\n---\n\n### References\n\n"
+                answer += "Based on regulations retrieved from knowledge base:\n\n"
+                # Group by country - sources is now a dict: {country: [categories]}
+                for country in sorted(sources.keys()):
+                    categories = sources[country]
+                    categories_str = ", ".join(categories)
+                    answer += f"- **{country}**: {categories_str}\n"
+                logger.info(f"Appended references section to answer. Answer length: {len(answer)}")
+            else:
+                logger.warning("No sources extracted from RAG, skipping references section")
+
             # Identify rules used
             rules_used = [
                 {
@@ -124,9 +144,11 @@ Please provide a clear, well-formatted answer to the pilot's question.""")
                 }
                 for rule in retrieved_rules
             ]
-            
+
             logger.info(f"Synthesized answer using {len(retrieved_rules)} rules for countries: {countries}")
-            
+            logger.info(f"Final answer preview (first 200 chars): {answer[:200]}...")
+            logger.info(f"Final answer preview (last 200 chars): ...{answer[-200:]}")
+
             return {
                 "answer": answer,
                 "sources": sources,
@@ -179,23 +201,23 @@ Please provide a clear, well-formatted answer to the pilot's question.""")
         
         return "\n".join(lines)
     
-    def _extract_sources(self, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-        """Extract unique source links from rules."""
-        sources = []
-        seen_urls = set()
-        
+    def _extract_sources(self, rules: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+        """Extract sources grouped by country from RAG-retrieved rules."""
+        sources_by_country = {}
+
         for rule in rules:
-            links = rule.get("links", [])
-            for link in links:
-                if link and link not in seen_urls:
-                    seen_urls.add(link)
-                    sources.append({
-                        "url": link,
-                        "country": rule.get("country_code", "Unknown"),
-                        "title": f"{rule.get('country_code', 'Unknown')} - {rule.get('category', 'Regulation')}"
-                    })
-        
-        return sources
+            country = rule.get("country_code", "Unknown")
+            category = rule.get("category", "Regulation")
+
+            # Group categories by country
+            if country not in sources_by_country:
+                sources_by_country[country] = []
+
+            # Add category if not already present for this country
+            if category not in sources_by_country[country]:
+                sources_by_country[country].append(category)
+
+        return sources_by_country
     
     def _no_rules_response(self, query: str, countries: List[str]) -> str:
         """Generate response when no rules are found."""
