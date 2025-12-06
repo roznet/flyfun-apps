@@ -78,6 +78,7 @@ def _airport_summary(a: Airport) -> Dict[str, Any]:
         "name": a.name,
         "municipality": a.municipality,
         "country": a.iso_country,
+        "iso_country": a.iso_country,  # Include both for compatibility
         "latitude_deg": getattr(a, "latitude_deg", None),
         "longitude_deg": getattr(a, "longitude_deg", None),
         "longest_runway_length_ft": getattr(a, "longest_runway_length_ft", None),
@@ -496,7 +497,8 @@ def get_border_crossing_airports(ctx: ToolContext, country: Optional[str] = None
         "filter_profile": filter_profile,  # Filter settings for UI sync
         "visualization": {
             "type": "markers",
-            "data": airports_for_llm,  # Only show what LLM sees and recommends
+            "data": all_airports,  # Show ALL border crossing airports on map
+            "markers": airports_for_llm,  # Highlight only airports mentioned by LLM
             "style": "customs"
         }
     }
