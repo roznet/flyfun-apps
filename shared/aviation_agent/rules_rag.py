@@ -188,6 +188,101 @@ Formal question:"""
             return query
 
 
+class Reranker:
+    """
+    Cross-encoder reranker for improved retrieval precision.
+    
+    Uses a cross-encoder model to rerank results after initial retrieval,
+    providing better accuracy on top results.
+    """
+    
+    # Default model - good balance of speed and quality
+    DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    
+    def __init__(self, model_name: str = None):
+        """
+        Initialize reranker.
+        
+        Args:
+            model_name: Cross-encoder model name. Options:
+                - "cross-encoder/ms-marco-MiniLM-L-6-v2" (fast, good quality)
+                - "cross-encoder/ms-marco-TinyBERT-L-2-v2" (fastest, lower quality)
+                - "cross-encoder/stsb-roberta-base" (slower, better for semantic similarity)
+        """
+        self.model_name = model_name or self.DEFAULT_MODEL
+        self._model = None  # Lazy load
+        
+    @property
+    def model(self):
+        """Lazy load the cross-encoder model."""
+        if self._model is None:
+            try:
+                from sentence_transformers import CrossEncoder
+                logger.info(f"Loading cross-encoder model: {self.model_name}")
+                self._model = CrossEncoder(self.model_name)
+                logger.info(f"✓ Loaded cross-encoder: {self.model_name}")
+            except ImportError:
+                logger.warning(
+                    "Cross-encoder requires sentence-transformers. "
+                    "Reranking disabled."
+                )
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to load cross-encoder: {e}")
+                return None
+        return self._model
+    
+    def rerank(
+        self, 
+        query: str, 
+        documents: List[Dict[str, Any]], 
+        text_key: str = "question_text",
+        top_k: int = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Rerank documents using cross-encoder.
+        
+        Args:
+            query: The search query
+            documents: List of document dicts to rerank
+            text_key: Key in document dict containing text to compare
+            top_k: Number of top results to return (None = all)
+            
+        Returns:
+            Reranked list of documents with added 'rerank_score' field
+        """
+        if not documents:
+            return documents
+            
+        if self.model is None:
+            logger.debug("Reranker not available, returning original order")
+            return documents
+        
+        # Prepare query-document pairs
+        pairs = [(query, doc.get(text_key, "")) for doc in documents]
+        
+        try:
+            # Get reranking scores
+            scores = self.model.predict(pairs)
+            
+            # Add scores to documents and sort
+            for doc, score in zip(documents, scores):
+                doc["rerank_score"] = float(score)
+            
+            # Sort by rerank score (descending)
+            reranked = sorted(documents, key=lambda x: x.get("rerank_score", 0), reverse=True)
+            
+            logger.debug(f"Reranked {len(documents)} documents")
+            
+            if top_k:
+                return reranked[:top_k]
+            return reranked
+            
+        except Exception as e:
+            logger.warning(f"Reranking failed: {e}")
+            return documents
+
+
 class RulesRAG:
     """
     RAG system for aviation rules retrieval.
@@ -202,6 +297,7 @@ class RulesRAG:
         vector_db_url: Optional[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2",
         enable_reformulation: bool = True,
+        enable_reranking: bool = True,
         llm: Optional[Any] = None,
         rules_manager: Optional[Any] = None,
     ):
@@ -213,6 +309,7 @@ class RulesRAG:
             vector_db_url: URL to ChromaDB service (for service mode). If provided, takes precedence over vector_db_path.
             embedding_model: Name of embedding model to use
             enable_reformulation: Whether to reformulate queries for better matching
+            enable_reranking: Whether to use cross-encoder reranking
             llm: Optional LLM instance for reformulation
             rules_manager: Optional RulesManager instance for multi-country lookups
         """
@@ -229,6 +326,13 @@ class RulesRAG:
             self.reformulator = QueryReformulator(llm)
         else:
             self.reformulator = None
+        
+        # Initialize reranker (lazy loaded on first use)
+        self.enable_reranking = enable_reranking
+        if enable_reranking:
+            self.reranker = Reranker()
+        else:
+            self.reranker = None
         
         # Store rules manager for multi-country lookups
         self.rules_manager = rules_manager
@@ -339,13 +443,14 @@ class RulesRAG:
             logger.error(f"Failed to generate query embedding: {e}")
             return []
         
-        # For multiple countries: query first country only to get top question IDs
-        # For single country: query that country and return results directly
+        # For multiple countries: query WITHOUT country filter to get globally best questions
+        # Then use RulesManager to expand those questions to all requested countries
+        # For single country: query that country directly and return results
         if has_multiple_countries:
-            # Query first country only
-            first_country = countries[0].upper()
-            where_filter = {"country_code": first_country}
-            n_results = top_k
+            # Query without country filter to get globally best matching questions
+            where_filter = None  # No country filter - find best questions across all
+            n_results = top_k * 3  # Get more results since we'll dedupe by question_id
+            logger.info(f"Multi-country query: searching globally for best questions, then expanding to {countries}")
         else:
             # Single country or no country filter
             where_filter = None
@@ -372,6 +477,9 @@ class RulesRAG:
             seen_question_ids = set()
             for i, doc_id in enumerate(results['ids'][0]):
                 distance = results['distances'][0][i] if results['distances'] else 1.0
+                # ChromaDB cosine "distance" varies by model. For sentence-transformers,
+                # distances around 1.0 are common for good matches. The formula below
+                # maps distance to a usable similarity range.
                 similarity = max(0, 1 - (distance / 2))
                 
                 if similarity < similarity_threshold:
@@ -394,9 +502,23 @@ class RulesRAG:
                         "tags": self._parse_json_field(metadata.get("tags"), []),
                     })
         
-        # Sort by similarity and take top_k
+        # Sort by similarity and take candidates for reranking
         question_matches.sort(key=lambda x: x['similarity'], reverse=True)
-        question_matches = question_matches[:top_k]
+        
+        # If reranking enabled, get more candidates and rerank
+        if self.enable_reranking and self.reranker:
+            # Take top_k * 2 candidates for reranking to give reranker more options
+            candidates = question_matches[:top_k * 2]
+            if candidates:
+                question_matches = self.reranker.rerank(
+                    query=original_query,  # Use original query, not reformulated
+                    documents=candidates,
+                    text_key="question_text",
+                    top_k=top_k
+                )
+                logger.debug(f"Reranked {len(candidates)} candidates to {len(question_matches)} results")
+        else:
+            question_matches = question_matches[:top_k]
         
         if not question_matches:
             logger.info(f"No matching rules found for query: '{query}'")
