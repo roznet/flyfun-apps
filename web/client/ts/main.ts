@@ -702,9 +702,7 @@ class Application {
     if (airportContent) airportContent.style.display = 'flex';
     if (noSelection) noSelection.style.display = 'none';
 
-    // Show airport content, hide no-selection message
-    const airportContent = document.getElementById('airport-content');
-    const noSelection = document.getElementById('no-selection');
+    // Show airport content and hide no-selection message
     if (airportContent) airportContent.style.display = 'flex';
     if (noSelection) noSelection.style.display = 'none';
 
@@ -718,6 +716,7 @@ class Application {
       // Trigger map resize
       window.dispatchEvent(new CustomEvent('panel-resize'));
     }
+
 
     if (!infoContainer) return;
 

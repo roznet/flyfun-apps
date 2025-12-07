@@ -145,16 +145,25 @@ export class ChatbotManager {
       sessionId: this.sessionId
     });
 
-    // Call aviation agent streaming API
-    const response = await fetch('/api/aviation-agent/chat/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.sessionId ? { 'X-Session-ID': this.sessionId } : {})
-      },
-      credentials: 'include',
-      body: JSON.stringify({ messages })
-    });
+    // Call aviation agent streaming API with 120s timeout for cold start
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    let response: Response;
+    try {
+      response = await fetch('/api/aviation-agent/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.sessionId ? { 'X-Session-ID': this.sessionId } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify({ messages }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
