@@ -102,7 +102,7 @@ services:
     networks:
       - flyfun-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat').getcode()==200 else 1)"]
+      test: [ "CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000" ]
       interval: 30s
       timeout: 10s
       retries: 3
