@@ -28,6 +28,7 @@ final class NavigationDomain {
     
     // MARK: - Sheet State
     var showingChat: Bool = false
+    var showingSearchSheet: Bool = false
     var showingFilters: Bool = false
     var showingSettings: Bool = false
     var showingAirportDetail: Bool = false
@@ -100,6 +101,18 @@ final class NavigationDomain {
     
     func toggleChat() {
         showingChat.toggle()
+    }
+    
+    func showSearchSheet() {
+        showingSearchSheet = true
+    }
+    
+    func hideSearchSheet() {
+        showingSearchSheet = false
+    }
+    
+    func toggleSearchSheet() {
+        showingSearchSheet.toggle()
     }
     
     func showFilters() {

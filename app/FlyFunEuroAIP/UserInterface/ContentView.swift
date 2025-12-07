@@ -25,7 +25,39 @@ struct ContentView: View {
             FilterPanelView()
                 .presentationDetents([.medium, .large])
         }
-        // Chat and detail are now in left overlay and bottom tabs - no sheets needed
+        // Search and Chat sheets (iPhone only - compact size class)
+        .sheet(isPresented: searchSheetBinding) {
+            NavigationStack {
+                SearchView()
+                    .navigationTitle("Search Airports")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                state?.navigation.hideSearchSheet()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: state?.airports.selectedAirport) { _, newValue in
+            // Auto-close search sheet on iPhone when airport is selected
+            if !isRegularWidth && newValue != nil {
+                state?.navigation.hideSearchSheet()
+            }
+        }
+        .sheet(isPresented: chatSheetBinding) {
+            NavigationStack {
+                ChatView()
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .overlay {
             // Error banner
             if let error = state?.system.error {
@@ -58,6 +90,44 @@ struct ContentView: View {
         Binding(
             get: { state?.navigation.showingFilters ?? false },
             set: { state?.navigation.showingFilters = $0 }
+        )
+    }
+    
+    // Search sheet binding (only used on compact/iPhone)
+    private var searchSheetBinding: Binding<Bool> {
+        Binding(
+            get: { 
+                // Only show search sheet on compact size class
+                !isRegularWidth && (state?.navigation.showingSearchSheet ?? false)
+            },
+            set: { 
+                if !isRegularWidth {
+                    if $0 {
+                        state?.navigation.showSearchSheet()
+                    } else {
+                        state?.navigation.hideSearchSheet()
+                    }
+                }
+            }
+        )
+    }
+    
+    // Chat sheet binding (only used on compact/iPhone)
+    private var chatSheetBinding: Binding<Bool> {
+        Binding(
+            get: { 
+                // Only show chat sheet on compact size class
+                !isRegularWidth && (state?.navigation.showingChat ?? false)
+            },
+            set: { 
+                if !isRegularWidth {
+                    if $0 {
+                        state?.navigation.showChat()
+                    } else {
+                        state?.navigation.hideChat()
+                    }
+                }
+            }
         )
     }
     
@@ -98,25 +168,85 @@ struct CompactLayout: View {
             AirportMapView()
                 .ignoresSafeArea()
             
-            // Left overlay (can be hidden/shown)
-            HStack {
-                if state?.navigation.leftOverlayMode == .search || state?.navigation.leftOverlayMode == .chat {
-                    LeftOverlayContainer()
-                        .transition(.move(edge: .leading))
-                }
-                
-                Spacer()
-            }
-            
             // Bottom Tab Bar (overlay)
             VStack {
                 Spacer()
                 BottomTabBar()
             }
             
-            // Floating toggle button (when overlay is hidden)
-            // For now, overlay is always visible - can add hide/show later
+            // Floating Action Buttons (top-right corner)
+            VStack {
+                HStack {
+                    Spacer()
+                    FloatingActionButtons()
+                        .padding(.trailing, 16)
+                        .padding(.top, 8)
+                }
+                .padding(.top, 8) // Safe area padding
+                Spacer()
+            }
         }
+    }
+}
+
+// MARK: - Floating Action Buttons (iPhone)
+
+struct FloatingActionButtons: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Search button
+            FloatingActionButton(
+                icon: "magnifyingglass",
+                label: "Search",
+                color: .blue
+            ) {
+                state?.navigation.showSearchSheet()
+            }
+            
+            // Chat button
+            FloatingActionButton(
+                icon: "bubble.left.and.bubble.right",
+                label: "Chat",
+                color: .green
+            ) {
+                state?.navigation.showChat()
+            }
+            
+            // Filters button (if has active filters, show indicator)
+            FloatingActionButton(
+                icon: state?.airports.filters.hasActiveFilters == true 
+                    ? "line.3.horizontal.decrease.circle.fill"
+                    : "line.3.horizontal.decrease.circle",
+                label: "Filters",
+                color: state?.airports.filters.hasActiveFilters == true ? .orange : .gray
+            ) {
+                state?.navigation.toggleFilters()
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
+// MARK: - Floating Action Button
+
+struct FloatingActionButton: View {
+    let icon: String
+    let label: String
+    let color: Color
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.white)
+                .frame(width: 50, height: 50)
+                .background(color, in: Circle())
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
     }
 }
 
