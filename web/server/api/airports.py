@@ -640,19 +640,39 @@ async def search_airports(
     query: str = Path(..., description="Search query", max_length=100, min_length=1),
     limit: int = Query(20, description="Maximum number of results", ge=1, le=100)
 ):
-    """Search airports by name or ICAO code."""
+    """Search airports by name, ICAO code, or free-text location (geocoded via Geoapify)."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
     
-    query = query.upper()
+    query_upper = query.upper()
     results = []
     
+    # First try direct database search
     for airport in model.airports.values():
-        if (query in airport.ident or 
-            (airport.name and query in airport.name.upper()) or 
-            (airport.iata_code and query in airport.iata_code)):
+        if (query_upper in airport.ident or 
+            (airport.name and query_upper in airport.name.upper()) or 
+            (airport.iata_code and query_upper in airport.iata_code) or
+            (airport.municipality and query_upper in airport.municipality.upper())):
             results.append(AirportSummary.from_airport(airport))
             if len(results) >= limit:
                 break
+    
+    # If no results found, try geocoding via Geoapify
+    if not results:
+        ctx = ToolContext(model=model)
+        geo_result = find_airports_near_location(
+            ctx,
+            location_query=query,
+            max_distance_nm=50.0,  # 50nm default radius
+            filters=None
+        )
+        if geo_result.get("found") and geo_result.get("airports"):
+            for apt_data in geo_result["airports"][:limit]:
+                # Look up actual airport object from model
+                icao = apt_data.get("ident")
+                if icao:
+                    airport = model.get_airport(icao)
+                    if airport:
+                        results.append(AirportSummary.from_airport(airport))
     
     return results 

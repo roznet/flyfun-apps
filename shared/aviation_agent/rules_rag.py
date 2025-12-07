@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import chromadb
 from chromadb.config import Settings
@@ -187,6 +188,101 @@ Formal question:"""
             return query
 
 
+class Reranker:
+    """
+    Cross-encoder reranker for improved retrieval precision.
+    
+    Uses a cross-encoder model to rerank results after initial retrieval,
+    providing better accuracy on top results.
+    """
+    
+    # Default model - good balance of speed and quality
+    DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    
+    def __init__(self, model_name: str = None):
+        """
+        Initialize reranker.
+        
+        Args:
+            model_name: Cross-encoder model name. Options:
+                - "cross-encoder/ms-marco-MiniLM-L-6-v2" (fast, good quality)
+                - "cross-encoder/ms-marco-TinyBERT-L-2-v2" (fastest, lower quality)
+                - "cross-encoder/stsb-roberta-base" (slower, better for semantic similarity)
+        """
+        self.model_name = model_name or self.DEFAULT_MODEL
+        self._model = None  # Lazy load
+        
+    @property
+    def model(self):
+        """Lazy load the cross-encoder model."""
+        if self._model is None:
+            try:
+                from sentence_transformers import CrossEncoder
+                logger.info(f"Loading cross-encoder model: {self.model_name}")
+                self._model = CrossEncoder(self.model_name)
+                logger.info(f"✓ Loaded cross-encoder: {self.model_name}")
+            except ImportError:
+                logger.warning(
+                    "Cross-encoder requires sentence-transformers. "
+                    "Reranking disabled."
+                )
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to load cross-encoder: {e}")
+                return None
+        return self._model
+    
+    def rerank(
+        self, 
+        query: str, 
+        documents: List[Dict[str, Any]], 
+        text_key: str = "question_text",
+        top_k: int = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Rerank documents using cross-encoder.
+        
+        Args:
+            query: The search query
+            documents: List of document dicts to rerank
+            text_key: Key in document dict containing text to compare
+            top_k: Number of top results to return (None = all)
+            
+        Returns:
+            Reranked list of documents with added 'rerank_score' field
+        """
+        if not documents:
+            return documents
+            
+        if self.model is None:
+            logger.debug("Reranker not available, returning original order")
+            return documents
+        
+        # Prepare query-document pairs
+        pairs = [(query, doc.get(text_key, "")) for doc in documents]
+        
+        try:
+            # Get reranking scores
+            scores = self.model.predict(pairs)
+            
+            # Add scores to documents and sort
+            for doc, score in zip(documents, scores):
+                doc["rerank_score"] = float(score)
+            
+            # Sort by rerank score (descending)
+            reranked = sorted(documents, key=lambda x: x.get("rerank_score", 0), reverse=True)
+            
+            logger.debug(f"Reranked {len(documents)} documents")
+            
+            if top_k:
+                return reranked[:top_k]
+            return reranked
+            
+        except Exception as e:
+            logger.warning(f"Reranking failed: {e}")
+            return documents
+
+
 class RulesRAG:
     """
     RAG system for aviation rules retrieval.
@@ -197,21 +293,28 @@ class RulesRAG:
     
     def __init__(
         self,
-        vector_db_path: Path | str,
+        vector_db_path: Optional[Path | str] = None,
+        vector_db_url: Optional[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2",
         enable_reformulation: bool = True,
+        enable_reranking: bool = True,
         llm: Optional[Any] = None,
+        rules_manager: Optional[Any] = None,
     ):
         """
         Initialize RAG system.
         
         Args:
-            vector_db_path: Path to ChromaDB storage directory
+            vector_db_path: Path to ChromaDB storage directory (for local mode)
+            vector_db_url: URL to ChromaDB service (for service mode). If provided, takes precedence over vector_db_path.
             embedding_model: Name of embedding model to use
             enable_reformulation: Whether to reformulate queries for better matching
+            enable_reranking: Whether to use cross-encoder reranking
             llm: Optional LLM instance for reformulation
+            rules_manager: Optional RulesManager instance for multi-country lookups
         """
-        self.vector_db_path = Path(vector_db_path)
+        self.vector_db_path = Path(vector_db_path) if vector_db_path else None
+        self.vector_db_url = vector_db_url
         self.embedding_model = embedding_model
         
         # Initialize embedding provider
@@ -224,14 +327,41 @@ class RulesRAG:
         else:
             self.reformulator = None
         
-        # Initialize ChromaDB
-        logger.info(f"Initializing ChromaDB at {self.vector_db_path}")
-        self.client = chromadb.PersistentClient(
-            path=str(self.vector_db_path),
-            settings=Settings(
-                anonymized_telemetry=False,  # Disable telemetry for privacy
+        # Initialize reranker (lazy loaded on first use)
+        self.enable_reranking = enable_reranking
+        if enable_reranking:
+            self.reranker = Reranker()
+        else:
+            self.reranker = None
+        
+        # Store rules manager for multi-country lookups
+        self.rules_manager = rules_manager
+        
+        # Initialize ChromaDB - use service mode if URL is provided, otherwise local mode
+        if self.vector_db_url:
+            logger.info(f"Initializing ChromaDB service at {self.vector_db_url}")
+            # Parse URL to extract host and port
+            parsed_url = urlparse(self.vector_db_url)
+            host = parsed_url.hostname or "localhost"
+            port = parsed_url.port or (8000 if parsed_url.scheme == "http" else 443)
+            
+            # Initialize HttpClient with basic settings
+            # Note: Auth token support can be added later if needed via headers or Settings
+            self.client = chromadb.HttpClient(
+                host=host,
+                port=port,
+                settings=Settings(anonymized_telemetry=False)
             )
-        )
+        elif self.vector_db_path:
+            logger.info(f"Initializing ChromaDB at {self.vector_db_path}")
+            self.client = chromadb.PersistentClient(
+                path=str(self.vector_db_path),
+                settings=Settings(
+                    anonymized_telemetry=False,  # Disable telemetry for privacy
+                )
+            )
+        else:
+            raise ValueError("Either vector_db_path or vector_db_url must be provided")
         
         # Load collection
         try:
@@ -246,6 +376,20 @@ class RulesRAG:
             logger.error("Run build_vector_db() to create the vector database")
             self.collection = None
     
+    @staticmethod
+    def _parse_json_field(value: Any, default: Any = []) -> Any:
+        """Parse a JSON field from metadata, handling both string and list formats."""
+        if value is None:
+            return default
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return default
+        if isinstance(value, list):
+            return value
+        return default
+    
     def retrieve_rules(
         self,
         query: str,
@@ -253,23 +397,36 @@ class RulesRAG:
         top_k: int = 5,
         similarity_threshold: float = 0.3,
         reformulate: Optional[bool] = None,
+        rules_manager: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Retrieve relevant rules using semantic search.
         
+        For multiple countries: queries the first country to get top questions,
+        then uses RulesManager to get answers for those questions across all countries.
+        For single country: returns results directly from vector DB metadata.
+        
         Args:
             query: User query text
             countries: List of ISO-2 country codes to filter by (e.g., ["FR", "GB"])
-            top_k: Number of results to return per country
+            top_k: Number of question IDs to retrieve (will return answers for all countries)
             similarity_threshold: Minimum similarity score (0-1)
             reformulate: Override default reformulation setting
+            rules_manager: Optional RulesManager instance (uses self.rules_manager if not provided)
         
         Returns:
-            List of matching rules with metadata, sorted by similarity score
+            List of matching rules with metadata, sorted by similarity score.
+            For multiple countries, returns the same questions for all countries.
         """
         if self.collection is None:
             logger.error("Collection not initialized")
             return []
+        
+        # Use provided rules_manager or fall back to instance variable
+        rules_mgr = rules_manager or self.rules_manager
+        
+        # Determine if we have multiple countries
+        has_multiple_countries = countries and len(countries) > 1
         
         # Query reformulation
         original_query = query
@@ -286,14 +443,21 @@ class RulesRAG:
             logger.error(f"Failed to generate query embedding: {e}")
             return []
         
-        # Build filters
-        where_filter = None
-        if countries:
-            countries_upper = [c.upper() for c in countries]
-            where_filter = {"country_code": {"$in": countries_upper}}
-        
-        # Calculate n_results
-        n_results = top_k * len(countries) if countries else top_k
+        # For multiple countries: query WITHOUT country filter to get globally best questions
+        # Then use RulesManager to expand those questions to all requested countries
+        # For single country: query that country directly and return results
+        if has_multiple_countries:
+            # Query without country filter to get globally best matching questions
+            where_filter = None  # No country filter - find best questions across all
+            n_results = top_k * 3  # Get more results since we'll dedupe by question_id
+            logger.info(f"Multi-country query: searching globally for best questions, then expanding to {countries}")
+        else:
+            # Single country or no country filter
+            where_filter = None
+            if countries:
+                countries_upper = [c.upper() for c in countries]
+                where_filter = {"country_code": {"$in": countries_upper}}
+            n_results = top_k
         
         # Search collection
         try:
@@ -307,13 +471,128 @@ class RulesRAG:
             logger.error(f"ChromaDB query failed: {e}")
             return []
         
-        # Format results
+        # Extract top question IDs and their similarity scores
+        question_matches = []
+        if results and results['ids'] and results['ids'][0]:
+            seen_question_ids = set()
+            for i, doc_id in enumerate(results['ids'][0]):
+                distance = results['distances'][0][i] if results['distances'] else 1.0
+                # ChromaDB cosine "distance" varies by model. For sentence-transformers,
+                # distances around 1.0 are common for good matches. The formula below
+                # maps distance to a usable similarity range.
+                similarity = max(0, 1 - (distance / 2))
+                
+                if similarity < similarity_threshold:
+                    continue
+                
+                metadata = results['metadatas'][0][i]
+                question_id = metadata.get("question_id")
+                
+                if not question_id:
+                    continue
+                
+                # Track unique question IDs with their best similarity score
+                if question_id not in seen_question_ids:
+                    seen_question_ids.add(question_id)
+                    question_matches.append({
+                        "question_id": question_id,
+                        "question_text": results['documents'][0][i],
+                        "similarity": similarity,
+                        "category": metadata.get("category"),
+                        "tags": self._parse_json_field(metadata.get("tags"), []),
+                    })
+        
+        # Sort by similarity and take candidates for reranking
+        question_matches.sort(key=lambda x: x['similarity'], reverse=True)
+        
+        # If reranking enabled, get more candidates and rerank
+        if self.enable_reranking and self.reranker:
+            # Take top_k * 2 candidates for reranking to give reranker more options
+            candidates = question_matches[:top_k * 2]
+            if candidates:
+                question_matches = self.reranker.rerank(
+                    query=original_query,  # Use original query, not reformulated
+                    documents=candidates,
+                    text_key="question_text",
+                    top_k=top_k
+                )
+                logger.debug(f"Reranked {len(candidates)} candidates to {len(question_matches)} results")
+        else:
+            question_matches = question_matches[:top_k]
+        
+        if not question_matches:
+            logger.info(f"No matching rules found for query: '{query}'")
+            return []
+        
+        # For multiple countries: use RulesManager to get answers for all countries
+        if has_multiple_countries:
+            if not rules_mgr:
+                logger.warning(
+                    "Multiple countries requested but RulesManager not available. "
+                    "Falling back to single-country query behavior."
+                )
+                # Fall through to single-country logic below
+            else:
+                # Ensure rules manager is loaded
+                if not rules_mgr.loaded:
+                    rules_mgr.load_rules()
+                
+                matches = []
+                countries_upper = [c.upper() for c in countries] if countries else []
+                
+                for q_match in question_matches:
+                    question_id = q_match["question_id"]
+                    question_info = rules_mgr.question_map.get(question_id)
+                    
+                    if not question_info:
+                        logger.warning(f"Question ID {question_id} not found in RulesManager")
+                        continue
+                    
+                    answers_by_country = question_info.get("answers_by_country", {})
+                    
+                    # Get answers for all requested countries
+                    for country_code in countries_upper:
+                        answer_data = answers_by_country.get(country_code)
+                        
+                        if not answer_data:
+                            # Skip if no answer for this country
+                            continue
+                        
+                        # Parse links
+                        links = answer_data.get("links", [])
+                        if isinstance(links, str):
+                            try:
+                                links = json.loads(links)
+                            except (json.JSONDecodeError, TypeError):
+                                links = []
+                        elif not isinstance(links, list):
+                            links = []
+                        
+                        matches.append({
+                            "id": f"{question_id}_{country_code}",
+                            "question_id": question_id,
+                            "question_text": q_match["question_text"],
+                            "similarity": round(q_match["similarity"], 3),
+                            "country_code": country_code,
+                            "category": q_match["category"],
+                            "tags": q_match["tags"],
+                            "answer_html": answer_data.get("answer_html", ""),
+                            "links": links,
+                            "last_reviewed": answer_data.get("last_reviewed"),
+                        })
+                
+                log_msg = f"Retrieved {len(question_matches)} questions for {len(countries_upper)} countries"
+                if query != original_query:
+                    log_msg += f" (reformulated: '{original_query}' → '{query}')"
+                logger.info(log_msg)
+                
+                return matches
+        
+        # For single country: return results directly from metadata
         matches = []
         if results and results['ids'] and results['ids'][0]:
             for i, doc_id in enumerate(results['ids'][0]):
                 distance = results['distances'][0][i] if results['distances'] else 1.0
-                # Convert distance to similarity score (cosine distance → similarity)
-                # ChromaDB uses L2 distance, normalize to 0-1 range
                 similarity = max(0, 1 - (distance / 2))
                 
                 if similarity < similarity_threshold:
@@ -322,14 +601,26 @@ class RulesRAG:
                 metadata = results['metadatas'][0][i]
                 
                 # Parse JSON fields
-                try:
-                    links = json.loads(metadata.get("links", "[]"))
-                except (json.JSONDecodeError, TypeError):
+                links_raw = metadata.get("links", "[]")
+                if isinstance(links_raw, str):
+                    try:
+                        links = json.loads(links_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        links = []
+                elif isinstance(links_raw, list):
+                    links = links_raw
+                else:
                     links = []
                 
-                try:
-                    tags = json.loads(metadata.get("tags", "[]"))
-                except (json.JSONDecodeError, TypeError):
+                tags_raw = metadata.get("tags", "[]")
+                if isinstance(tags_raw, str):
+                    try:
+                        tags = json.loads(tags_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        tags = []
+                elif isinstance(tags_raw, list):
+                    tags = tags_raw
+                else:
                     tags = []
                 
                 matches.append({
@@ -360,7 +651,8 @@ class RulesRAG:
 
 def build_vector_db(
     rules_json_path: Path | str,
-    vector_db_path: Path | str,
+    vector_db_path: Optional[Path | str] = None,
+    vector_db_url: Optional[str] = None,
     embedding_model: str = "all-MiniLM-L6-v2",
     batch_size: int = 100,
     force_rebuild: bool = False,
@@ -373,7 +665,8 @@ def build_vector_db(
     
     Args:
         rules_json_path: Path to rules.json file
-        vector_db_path: Path to ChromaDB storage directory
+        vector_db_path: Path to ChromaDB storage directory (for local mode)
+        vector_db_url: URL to ChromaDB service (for service mode). If provided, takes precedence over vector_db_path.
         embedding_model: Name of embedding model to use
         batch_size: Number of documents to process per batch
         force_rebuild: If True, rebuild even if collection exists
@@ -386,7 +679,6 @@ def build_vector_db(
         ValueError: If rules.json format is invalid
     """
     rules_json_path = Path(rules_json_path)
-    vector_db_path = Path(vector_db_path)
     
     # Load rules.json
     if not rules_json_path.exists():
@@ -433,12 +725,31 @@ def build_vector_db(
     # Initialize embedding provider
     embedding_provider = EmbeddingProvider(embedding_model)
 
-    # Initialize ChromaDB
-    vector_db_path.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(
-        path=str(vector_db_path),
-        settings=Settings(anonymized_telemetry=False)
-    )
+    # Initialize ChromaDB - use service mode if URL is provided, otherwise local mode
+    if vector_db_url:
+        logger.info(f"Building vector database using ChromaDB service at {vector_db_url}")
+        # Parse URL to extract host and port
+        parsed_url = urlparse(vector_db_url)
+        host = parsed_url.hostname or "localhost"
+        port = parsed_url.port or (8000 if parsed_url.scheme == "http" else 443)
+        
+        # Initialize HttpClient with basic settings
+        # Note: Auth token support can be added later if needed
+        client = chromadb.HttpClient(
+            host=host,
+            port=port,
+            settings=Settings(anonymized_telemetry=False)
+        )
+    elif vector_db_path:
+        vector_db_path = Path(vector_db_path)
+        logger.info(f"Building vector database at {vector_db_path}")
+        vector_db_path.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(
+            path=str(vector_db_path),
+            settings=Settings(anonymized_telemetry=False)
+        )
+    else:
+        raise ValueError("Either vector_db_path or vector_db_url must be provided")
 
     # Check if collection exists
     collection_name = "aviation_rules"

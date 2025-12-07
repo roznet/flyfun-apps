@@ -191,14 +191,33 @@ def load_rules_for_country(country_code: str, xlsx_path: Path, definitions: Dict
             links = extract_links(a, explicit_links)
             qid = qid_for(q_raw, q_prefix)
             if qid not in defs:
-                inconsistent_qids.add(qid)
-                continue
+                if qid == "":
+                    # Empty question ID might be a continuation of the previous answer
+                    if out and a:
+                        previous_q = out[-1]
+                        # Append answer text (with separator if previous answer exists)
+                        if previous_q.get("answer_html"):
+                            previous_q["answer_html"] += "<br>" + a
+                        else:
+                            previous_q["answer_html"] = a
+                        # Merge links, avoiding duplicates
+                        if "links" not in previous_q:
+                            previous_q["links"] = []
+                        existing_links = set(previous_q["links"])
+                        new_links = [link for link in links if link not in existing_links]
+                        previous_q["links"].extend(new_links)
+                    else:
+                        print("Warning: Empty question but no previous answer found", file=sys.stderr)
+                        continue
+                else:
+                    inconsistent_qids.add(qid)
+                    continue
             out.append({
                 "question_id": qid,
-                "question_raw": q_raw,
-                "question_prefix": q_prefix,
-                "answer_html": a,
-                "links": links,
+                "question_raw": q_raw if qid != "" else previous_q["question_raw"],
+                "question_prefix": q_prefix if qid != "" else previous_q["question_prefix"],
+                "answer_html": a if qid != "" else previous_q["answer_html"],
+                "links": links if qid != "" else previous_q["links"],
                 "country_code": country_code,
             })
     if len(inconsistent_qids) > 0:
@@ -323,75 +342,99 @@ def merge_rules_with_definitions(
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Convert definitions + country Excel Q/A files into rules.json")
     p.add_argument("--out", required=True, help="Output rules.json path")
-    p.add_argument("--defs", required=True, help="Definitions Excel path (Raw Question, Question, Category, Tags)")
+    p.add_argument("--defs", required=False, help="Definitions Excel path (Raw Question, Question, Category, Tags). Required if --add is used.")
     p.add_argument("--append", action="store_true", help="Append into existing rules.json if present")
     p.add_argument("--add", action="append", nargs=2, metavar=("CC","XLSX"),
-                   help="Add Excel file for country code CC (ISO-2), can be repeated")
+                   help="Add Excel file for country code CC (ISO-2), can be repeated. If omitted, only rebuilds RAG from existing rules.json")
     
     # RAG vector database options
     p.add_argument("--build-rag", action="store_true", default=True,
                    help="Build vector database for RAG retrieval (default: True)")
     p.add_argument("--no-rag", action="store_false", dest="build_rag",
                    help="Skip vector database build")
-    p.add_argument("--vector-db-path", default="cache/rules_vector_db",
-                   help="Path for vector database (default: cache/rules_vector_db)")
+    p.add_argument("--vector-db-path", default=None,
+                   help="Path for vector database (local mode). Defaults to cache/rules_vector_db or VECTOR_DB_PATH env var")
+    p.add_argument("--vector-db-url", default=None,
+                   help="URL for ChromaDB service (service mode, takes precedence over --vector-db-path). Can also use VECTOR_DB_URL env var")
     p.add_argument("--embedding-model", default="all-MiniLM-L6-v2",
                    help="Embedding model for RAG (default: all-MiniLM-L6-v2)")
     
     args = p.parse_args(argv)
 
     out_path = Path(args.out)
-    defs_path = Path(args.defs).expanduser()
-    if not defs_path.exists():
-        print(f"Error: definitions file not found {defs_path}", file=sys.stderr)
-        return 2
-    if not args.add:
-        p.error("Provide at least one --add CC XLSX")
+    
+    # If --add is provided, --defs is required
+    if args.add:
+        if not args.defs:
+            p.error("--defs is required when using --add")
+        defs_path = Path(args.defs).expanduser()
+        if not defs_path.exists():
+            print(f"Error: definitions file not found {defs_path}", file=sys.stderr)
+            return 2
+    else:
+        # No --add commands: just rebuild RAG from existing rules.json
+        if not out_path.exists():
+            p.error(f"Output file {out_path} does not exist. Use --add to create rules.json from Excel files.")
+        defs_path = None
 
+    # Load existing rules.json if it exists
     history_data: Dict[str, Any] = {"questions": []}
+    combined: Dict[str, Any] = {"questions": []}
     if out_path.exists():
         try:
             history_data = json.loads(out_path.read_text(encoding="utf-8"))
             if not isinstance(history_data, dict) or "questions" not in history_data:
                 history_data = {"questions": []}
+            # Use existing data as base
+            if args.append or not args.add:
+                combined = history_data
         except Exception:
             print(f"Warning: failed to parse existing {out_path}, ignoring previous data", file=sys.stderr)
             history_data = {"questions": []}
+            if not args.add:
+                print(f"Error: cannot rebuild RAG from invalid {out_path}", file=sys.stderr)
+                return 2
 
-    combined: Dict[str, Any] = {"questions": []}
-    if args.append and history_data.get("questions"):
-        combined = history_data
-
-    definitions = load_definitions(defs_path)
-
+    # Process --add commands if provided
     total_answers = 0
-    for cc, fpath in args.add:
-        xlsx = Path(fpath).expanduser()
-        if not xlsx.exists():
-            print(f"Error: file not found {xlsx}", file=sys.stderr)
-            return 2
-        country_results = load_rules_for_country(cc, xlsx, definitions)
-        total_answers += len(country_results)
-        review_date = dt.date.today().isoformat()
-        combined = merge_rules_with_definitions(
-            combined,
-            definitions,
-            country_results,
-            review_date=review_date,
-            history=history_data,
-        )
-        print(f"Loaded {len(country_results)} entries from {cc}:{xlsx.name}")
+    if args.add:
+        # defs_path is guaranteed to be Path here (checked above)
+        assert defs_path is not None, "--defs is required when using --add"
+        definitions = load_definitions(defs_path)
+        
+        for cc, fpath in args.add:
+            xlsx = Path(fpath).expanduser()
+            if not xlsx.exists():
+                print(f"Error: file not found {xlsx}", file=sys.stderr)
+                return 2
+            country_results = load_rules_for_country(cc, xlsx, definitions)
+            total_answers += len(country_results)
+            review_date = dt.date.today().isoformat()
+            combined = merge_rules_with_definitions(
+                combined,
+                definitions,
+                country_results,
+                review_date=review_date,
+                history=history_data,
+            )
+            print(f"Loaded {len(country_results)} entries from {cc}:{xlsx.name}")
 
-    # optional: mirror links_json for potential downstream loaders
-    for q in combined.get("questions", []):
-        answers_by_country = q.get("answers_by_country", {})
-        for cc, ans in answers_by_country.items():
-            if "links_json" not in ans:
-                ans["links_json"] = ans.get("links", [])
+        # optional: mirror links_json for potential downstream loaders
+        for q in combined.get("questions", []):
+            answers_by_country = q.get("answers_by_country", {})
+            for cc, ans in answers_by_country.items():
+                if "links_json" not in ans:
+                    ans["links_json"] = ans.get("links", [])
 
-    out_path.write_text(json.dumps(combined, ensure_ascii=False, indent=2), encoding="utf-8")
-    num_q = len(combined.get('questions', []))
-    print(f"Wrote {out_path} with {num_q} questions and {total_answers} country-answers.")
+        # Write updated rules.json
+        out_path.write_text(json.dumps(combined, ensure_ascii=False, indent=2), encoding="utf-8")
+        num_q = len(combined.get('questions', []))
+        print(f"Wrote {out_path} with {num_q} questions and {total_answers} country-answers.")
+    else:
+        # No --add: just report what we're working with
+        num_q = len(combined.get('questions', []))
+        total_answers = sum(len(q.get("answers_by_country", {})) for q in combined.get("questions", []))
+        print(f"Using existing {out_path} with {num_q} questions and {total_answers} country-answers.")
     
     # Build vector database for RAG
     if args.build_rag:
@@ -399,17 +442,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             # Import here to avoid dependency if not needed
             import sys
+            import os
             sys.path.insert(0, str(Path(__file__).parent.parent))
             from shared.aviation_agent.rules_rag import build_vector_db
             
-            vector_db_path = Path(args.vector_db_path)
+            # Determine vector DB configuration: URL takes precedence, then path
+            vector_db_url = args.vector_db_url or os.environ.get("VECTOR_DB_URL")
+            vector_db_path = None
+            if not vector_db_url:
+                # Use path from args, env var, or default
+                vector_db_path_str = args.vector_db_path or os.environ.get("VECTOR_DB_PATH", "cache/rules_vector_db")
+                vector_db_path = Path(vector_db_path_str)
+            
             doc_count = build_vector_db(
                 rules_json_path=out_path,
                 vector_db_path=vector_db_path,
+                vector_db_url=vector_db_url,
                 embedding_model=args.embedding_model,
                 force_rebuild=True
             )
-            print(f"✓ Vector database built with {doc_count} documents at {vector_db_path}")
+            if vector_db_url:
+                print(f"✓ Vector database built with {doc_count} documents at {vector_db_url}")
+            else:
+                print(f"✓ Vector database built with {doc_count} documents at {vector_db_path}")
         except ImportError as e:
             print(f"Warning: Could not build vector database: {e}", file=sys.stderr)
             print("Install dependencies: pip install chromadb sentence-transformers", file=sys.stderr)

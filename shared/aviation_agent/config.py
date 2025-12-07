@@ -63,6 +63,11 @@ def _default_vector_db() -> Path:
     return _locate_file(VECTOR_DB_CANDIDATES)
 
 
+def _default_vector_db_url() -> Optional[str]:
+    """Get ChromaDB service URL if configured, otherwise None for local mode."""
+    return os.environ.get("VECTOR_DB_URL")
+
+
 class AviationAgentSettings(BaseSettings):
     """
     Central configuration for the aviation agent.
@@ -100,8 +105,13 @@ class AviationAgentSettings(BaseSettings):
     )
     vector_db_path: Path = Field(
         default_factory=_default_vector_db,
-        description="Path to rules vector database for RAG retrieval.",
+        description="Path to rules vector database for RAG retrieval (local mode).",
         alias="VECTOR_DB_PATH",
+    )
+    vector_db_url: Optional[str] = Field(
+        default_factory=_default_vector_db_url,
+        description="URL to ChromaDB service for RAG retrieval (service mode). If set, takes precedence over vector_db_path.",
+        alias="VECTOR_DB_URL",
     )
     
     # RAG settings

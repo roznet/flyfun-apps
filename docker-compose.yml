@@ -18,19 +18,33 @@ services:
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
       - GA_META_DB=/app/out/ga_meta.sqlite
+      # Use ChromaDB service in production (defaults to service URL in Docker)
+      # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
+      # This is separate from host ports - no conflict with web-server's host port 8000
+      - VECTOR_DB_URL=http://chromadb:8000
+      # Local path fallback (used if VECTOR_DB_URL is not set)
       - VECTOR_DB_PATH=/app/out/rules_vector_db
     volumes:
+      # Source code (mounted for development - changes reflect immediately after restart)
+      - ${WEB_SERVER_DIR:-./web/server}:/app/web/server:ro
+      - ${WEB_CLIENT_DIR:-./web/client}:/app/web/client:rw
+      - ${SHARED_DIR:-./shared}:/app/shared:ro
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
       # Output files (writable) - includes ga_meta.sqlite and rules_vector_db
       - ${OUTPUT_DIR:-./out}:/app/out:rw
       # Logs (writable)
       - ${LOGS_DIR:-./logs}:/app/logs:rw
+      # Tools directory (for building vector DB and other utilities)
+      - ${TOOLS_DIR:-./tools}:/app/tools:ro
       # Security config (optional override)
       - ${SECURITY_CONFIG_PATH:-./web/server/security_config.py}:/app/web/server/security_config.py:ro
     restart: unless-stopped
     networks:
       - flyfun-network
+    depends_on:
+      chromadb:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
       interval: 30s
@@ -51,18 +65,54 @@ services:
     environment:
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
+      # Use ChromaDB service in production (defaults to service URL in Docker)
+      # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
+      # This is separate from host ports - no conflict with web-server's host port 8000
+      # Set VECTOR_DB_URL in .env to override, or leave unset to use local VECTOR_DB_PATH
+      - VECTOR_DB_URL=${VECTOR_DB_URL:-http://chromadb:8000}
+      # Local path fallback (used if VECTOR_DB_URL is not set)
+      - VECTOR_DB_PATH=/app/out/rules_vector_db
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
-      # Output files (writable) - includes rules_vector_db
+      # Output files (writable) - includes rules_vector_db (for local mode fallback)
       - ${OUTPUT_DIR:-./out}:/app/out:rw
       # Logs (writable)
       - ${LOGS_DIR:-./logs}:/app/logs:rw
     restart: unless-stopped
     networks:
       - flyfun-network
+    depends_on:
+      - chromadb
     # MCP servers typically use stdio, so no HTTP healthcheck
     # They're usually managed by the MCP client
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: flyfun-chromadb
+    ports:
+      # External port mapping: host:container
+      # Host port 8001 maps to container port 8000 (for external access/debugging)
+      # Internal services use "chromadb:8000" (service name + container port) - no host port conflict
+      - "${CHROMADB_PORT:-8001}:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMADB_AUTH_TOKEN:-test-token}
+      - CHROMA_SERVER_AUTHN_TOKEN_TRANSPORT_HEADER=X-Chroma-Token
+    volumes:
+      # Persistent storage for ChromaDB data
+      - ${CHROMADB_DATA_DIR:-./out/chromadb_data}:/chroma/chroma
+    restart: unless-stopped
+    networks:
+      - flyfun-network
+    healthcheck:
+      test: [ "CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   flyfun-network:

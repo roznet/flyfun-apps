@@ -354,6 +354,11 @@ class Application {
       this.visualizationEngine.fitBounds();
     });
 
+    // Panel resize event (from collapse/expand buttons)
+    window.addEventListener('panel-resize', () => {
+      this.invalidateMapSize();
+    });
+
     // Render route event (from LLM integration)
     window.addEventListener('render-route', ((e: CustomEvent<{ route: RouteState }>) => {
       this.visualizationEngine.displayRoute(e.detail.route);
@@ -382,6 +387,86 @@ class Application {
         rules: any;
       }>;
       this.displayAirportDetails(customEvent.detail);
+    }) as EventListener);
+
+    // Reset rules panel event (from chatbot when starting new query)
+    window.addEventListener('reset-rules-panel', (() => {
+      console.log('FlyFunApp: Resetting rules panel');
+      // Clear rules summary header
+      const rulesSummary = document.getElementById('rules-summary');
+      if (rulesSummary) {
+        rulesSummary.textContent = '';
+      }
+      // Clear rules display - show "no selection" state
+      const rulesContent = document.getElementById('rules-content');
+      if (rulesContent) {
+        rulesContent.innerHTML = '<p class="text-muted">No rules to display. Ask a country-specific question to see relevant rules.</p>';
+      }
+    }) as EventListener);
+
+    // Show country rules event (from RAG chatbot)
+    window.addEventListener('show-country-rules', (async (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        countries: string[];
+        categoriesByCountry?: Record<string, string[]>;
+      }>;
+      const { countries, categoriesByCountry } = customEvent.detail;
+
+      if (countries && countries.length > 0) {
+        console.log('FlyFunApp: Loading rules for countries', countries, 'categoriesByCountry:', categoriesByCountry);
+
+        try {
+          // Load rules for all countries in parallel
+          const rulesPromises = countries.map(code => this.apiAdapter.getCountryRules(code));
+          const allRulesResults = await Promise.all(rulesPromises);
+
+          // Filter each country's rules to only relevant categories and combine
+          const combinedCategories: any[] = [];
+          let totalRules = 0;
+
+          countries.forEach((countryCode, index) => {
+            const rules = allRulesResults[index];
+            const relevantCategories = categoriesByCountry?.[countryCode] || [];
+
+            if (rules && rules.categories) {
+              // Filter categories if we have specific ones
+              let filteredCategories = rules.categories;
+              if (relevantCategories.length > 0) {
+                filteredCategories = rules.categories.filter((cat: any) =>
+                  relevantCategories.includes(cat.name)
+                );
+              }
+
+              // Add country prefix to category names and combine
+              filteredCategories.forEach((cat: any) => {
+                combinedCategories.push({
+                  ...cat,
+                  name: `${countryCode}: ${cat.name}`,
+                  country: countryCode
+                });
+                totalRules += cat.count || 0;
+              });
+            }
+          });
+
+          // Create combined rules object
+          const combinedRules = {
+            country: countries.join(', '),
+            total_rules: totalRules,
+            categories: combinedCategories
+          };
+
+          console.log('FlyFunApp: Combined rules from', countries.length, 'countries,', combinedCategories.length, 'categories,', totalRules, 'rules');
+
+          // Display in right panel
+          this.displayCountryRules(combinedRules, countries.join(', '));
+
+          // Show the right panel and switch to Rules tab
+          this.showRulesTab();
+        } catch (error) {
+          console.error('FlyFunApp: Error loading country rules', error);
+        }
+      }
     }) as EventListener);
 
     // Map move/zoom events for URL sync
@@ -555,6 +640,35 @@ class Application {
   }
 
   /**
+   * Show rules tab in right panel (for RAG country rules display)
+   */
+  private showRulesTab(): void {
+    // Expand right panel if collapsed
+    const rightPanelCol = document.querySelector('.right-panel-col');
+    const rightPanel = document.getElementById('right-panel');
+    const mapDataRow = document.getElementById('map-data-row');
+
+    if (rightPanelCol?.classList.contains('collapsed')) {
+      rightPanelCol.classList.remove('collapsed');
+      rightPanel?.classList.remove('collapsed');
+      mapDataRow?.classList.remove('data-collapsed');
+      window.dispatchEvent(new CustomEvent('panel-resize'));
+    }
+
+    // Show airport content area (hide no-selection message)
+    const airportContent = document.getElementById('airport-content');
+    const noSelection = document.getElementById('no-selection');
+    if (airportContent) airportContent.style.display = 'flex';
+    if (noSelection) noSelection.style.display = 'none';
+
+    // Switch to Rules tab
+    const rulesTab = document.getElementById('rules-tab');
+    if (rulesTab) {
+      rulesTab.click();
+    }
+  }
+
+  /**
    * Display airport details
    */
   private displayAirportDetails(data: {
@@ -569,15 +683,40 @@ class Application {
 
     const infoContainer = document.getElementById('airport-info');
     const rightPanel = document.getElementById('right-panel');
+    const airportContent = document.getElementById('airport-content');
+    const noSelection = document.getElementById('no-selection');
 
     if (!airport) {
       // Hide right panel
       if (rightPanel) rightPanel.classList.add('hidden');
+      // Hide airport content, show no-selection message
+      if (airportContent) airportContent.style.display = 'none';
+      if (noSelection) noSelection.style.display = 'block';
       return;
     }
 
-    // Show right panel
+    // Show right panel and its content
     if (rightPanel) rightPanel.classList.remove('hidden');
+    
+    // Show airport content and hide no-selection message
+    if (airportContent) airportContent.style.display = 'flex';
+    if (noSelection) noSelection.style.display = 'none';
+
+    // Show airport content and hide no-selection message
+    if (airportContent) airportContent.style.display = 'flex';
+    if (noSelection) noSelection.style.display = 'none';
+
+    // Auto-expand right panel if collapsed
+    const rightPanelCol = document.querySelector('.right-panel-col');
+    const mapDataRow = document.getElementById('map-data-row');
+    if (rightPanelCol?.classList.contains('collapsed')) {
+      rightPanelCol.classList.remove('collapsed');
+      rightPanel?.classList.remove('collapsed');
+      mapDataRow?.classList.remove('data-collapsed');
+      // Trigger map resize
+      window.dispatchEvent(new CustomEvent('panel-resize'));
+    }
+
 
     if (!infoContainer) return;
 
@@ -753,33 +892,33 @@ class Application {
 
     let html = '';
     Object.entries(entriesBySection).forEach(([section, entries]) => {
-      const sectionId = `aip - section - ${section.toLowerCase().replace(/[^a-z0-9]+/g, '-')} `;
+      const sectionId = `aip-section-${section.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
       html += `
-        < div class="aip-section" data - section="${this.escapeAttribute(section)}" >
-          <div class="aip-section-header" onclick = "window.toggleAIPSection('${sectionId}')" >
+        <div class="aip-section" data-section="${this.escapeAttribute(section)}">
+          <div class="aip-section-header" onclick="window.toggleAIPSection('${sectionId}')">
             <span>
-            <i class="fas fa-chevron-right aip-section-toggle" id = "toggle-${sectionId}" > </i>
+              <i class="fas fa-chevron-right aip-section-toggle" id="toggle-${sectionId}"></i>
               ${this.escapeHtml(section)} (${entries.length})
-      </span>
-        </div>
-        < div class="aip-section-content" id = "${sectionId}" >
-          `;
+            </span>
+          </div>
+          <div class="aip-section-content" id="${sectionId}">
+      `;
 
       entries.forEach((entry: any) => {
         const fieldName = entry.std_field || entry.field;
-        const entryId = `aip - entry - ${entry.std_field_id || entry.field || Math.random()} `;
+        const entryId = `aip-entry-${entry.std_field_id || entry.field || Math.random()}`;
         html += `
-        < div class="aip-entry" id = "${entryId}" data - field="${this.escapeAttribute(fieldName || '')}" data - value="${this.escapeAttribute(entry.value || '')}" >
-          <strong>${this.escapeHtml(fieldName || 'Unknown')}: </strong> ${this.escapeHtml(entry.value || 'N/A')}
-            ${entry.alt_value ? `<br><em>${this.escapeHtml(entry.alt_value)}</em>` : ''}
-      </div>
+            <div class="aip-entry" id="${entryId}" data-field="${this.escapeAttribute(fieldName || '')}" data-value="${this.escapeAttribute(entry.value || '')}">
+              <strong>${this.escapeHtml(fieldName || 'Unknown')}:</strong> ${this.escapeHtml(entry.value || 'N/A')}
+              ${entry.alt_value ? `<br><em>${this.escapeHtml(entry.alt_value)}</em>` : ''}
+            </div>
         `;
       });
 
       html += `
+          </div>
         </div>
-        </div>
-          `;
+      `;
     });
 
     aipContentContainer.innerHTML = html;
@@ -822,25 +961,26 @@ class Application {
 
     rulesData.categories.forEach((category: any) => {
       const sectionId = this.buildRuleSectionId(code, category.name);
-      const toggleId = `rules - toggle - ${sectionId} `;
+      const toggleId = `rules-toggle-${sectionId}`;
 
       html += `
-        < div class="rules-section" data - category="${this.escapeAttribute(category.name || 'General')}" >
-          <div class="rules-section-header" onclick = "window.toggleRuleSection('${sectionId}')" >
+        <div class="rules-section" data-category="${this.escapeAttribute(category.name || 'General')}">
+          <div class="rules-section-header" onclick="window.toggleRuleSection('${sectionId}')">
             <span>
-            <i class="fas fa-chevron-right rules-section-toggle" id = "${toggleId}" > </i>
+              <i class="fas fa-chevron-right rules-section-toggle" id="${toggleId}"></i>
               ${this.escapeHtml(category.name || 'General')} (${category.count || 0})
-      </span>
-        </div>
-        < div class="rules-section-content" id = "${sectionId}" >
-          `;
+            </span>
+          </div>
+          <div class="rules-section-content" id="${sectionId}">
+      `;
 
       if (category.rules && Array.isArray(category.rules)) {
         category.rules.forEach((rule: any) => {
           const question = this.escapeHtml(rule.question_text || 'Untitled rule');
-          const answerText = this.escapeHtml(this.stripHtml(rule.answer_html) || 'No answer available.');
+          // Render HTML content instead of stripping and escaping
+          const answerText = this.renderHtmlContent(rule.answer_html || 'No answer available.');
           const tagsHtml = (rule.tags || [])
-            .map((tag: any) => `< span class="badge bg-secondary" > ${this.escapeHtml(String(tag))} </span>`)
+            .map((tag: any) => `<span class="badge bg-secondary">${this.escapeHtml(String(tag))}</span>`)
             .join(' ');
           const linksHtml = (rule.links || [])
             .map((link: any) => {
@@ -914,6 +1054,19 @@ class Application {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = String(html);
     return tempDiv.textContent || tempDiv.innerText || '';
+  }
+
+  /**
+   * Render HTML content safely. If content contains HTML tags, render them.
+   * Otherwise, escape the content for safety.
+   */
+  private renderHtmlContent(content: any): string {
+    if (!content) {
+      return '';
+    }
+    const contentStr = String(content);
+    // Simple check: if it looks like HTML (contains tags), render it; otherwise escape
+    return /<[^>]+>/.test(contentStr) ? contentStr : this.escapeHtml(contentStr);
   }
 
   private getProcedureBadgeClass(procedureType?: string, approachType?: string): string {

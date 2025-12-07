@@ -146,8 +146,6 @@ Please provide a clear, well-formatted answer to the pilot's question.""")
             ]
 
             logger.info(f"Synthesized answer using {len(retrieved_rules)} rules for countries: {countries}")
-            logger.info(f"Final answer preview (first 200 chars): {answer[:200]}...")
-            logger.info(f"Final answer preview (last 200 chars): ...{answer[-200:]}")
 
             return {
                 "answer": answer,

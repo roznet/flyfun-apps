@@ -2,449 +2,453 @@
 
 ## Overview
 
-This document describes the Docker deployment setup for the Euro AIP application, including the web server and MCP server.
+This document describes the Docker deployment setup for the Euro AIP application, including the web server, MCP server, and ChromaDB vector database.
 
-## Architecture
-
-The deployment consists of:
-- **Web Server**: FastAPI application serving the web UI and API
-  - Runs as non-root user (UID 2000, user `flyfun`)
-  - Dockerfile: `web/Dockerfile`
+**Services:**
+- **Web Server**: FastAPI application (port 8000)
 - **MCP Server**: Model Context Protocol server for LLM integration
-  - Runs as non-root user (UID 2001, user `flyfun-mcp`)
-  - Dockerfile: `mcp_server/Dockerfile`
-- **Shared Data**: Mounted volumes for data files, output, cache, and logs
+- **ChromaDB**: Vector database for RAG (port 8001)
 
-## Directory Structure
+---
 
-```
-.
-├── web/
-│   └── Dockerfile          # Web server container
-├── mcp_server/
-│   └── Dockerfile          # MCP server container
-├── docker-compose.yml      # Orchestration
-├── .env                    # Environment configuration (create from env.sample)
-├── env.sample              # Template for .env
-├── .dockerignore           # Files to exclude from builds
-├── data/                   # Data files (airports.db, rules.json) - mounted as volume
-├── out/                    # Output files (ga_meta.sqlite, rules_vector_db) - mounted as volume
-└── logs/                   # Log files - mounted as volume
-```
+## Initial Setup
 
-## Quick Start
+### 1. Prerequisites
+- Docker and Docker Compose installed
+- Git (to clone the repository)
 
-### 1. Prepare Environment
+### 2. Clone and Prepare
 
 ```bash
-# Copy environment template
-cp env.sample .env
+# Clone repository
+git clone <repository-url>
+cd flyfun-apps
 
-# Edit .env with your configuration
-# - Set OPENAI_API_KEY
-# - IMPORTANT: Update paths to use container paths (not host paths):
-#   AIRPORTS_DB=/app/data/airports.db
-#   RULES_JSON=/app/data/rules.json
-#   GA_META_DB=/app/out/ga_meta.sqlite
-#   VECTOR_DB_PATH=/app/out/rules_vector_db
-# - Remove or ignore WORKING_DIR (not used in Docker)
-# - Configure security settings
-```
-
-**Note:** The `docker-compose.yml` will override paths to use container paths, but setting them correctly in `.env` avoids confusion.
-
-### 2. Prepare Data Files and Directories
-
-Ensure you have the required data files:
-- `data/airports.db` - Airport database
-- `data/rules.json` - Rules JSON file
-
-```bash
-# Create directories if they don't exist
+# Create required directories
 mkdir -p data out logs
 
-# Ensure data files are in place
-ls -la data/airports.db data/rules.json
-
-# Set permissions for writable directories (containers run as UID 2000/2001)
-# Option 1: Make directories world-writable (less secure, but simple)
+# Set permissions (development - use proper ownership for production)
 chmod 777 out logs
-
-# Option 2: Create directories with specific ownership (more secure)
-# This requires matching the UID/GID on your host system
-# sudo chown -R 2000:2000 out logs
-# chmod 755 out logs
 ```
 
-**Note on Permissions**: The containers run as non-root users:
-- Web server: UID 2000 (user `flyfun`)
-- MCP server: UID 2001 (user `flyfun-mcp`)
+### 3. Prepare Data Files
 
-For writable volumes (`out`, `logs`), ensure they're writable by these UIDs or use world-writable permissions (777) for development.
+**Required:**
+- `data/airports.db` - Airport database (must exist, ~7.5MB)
+- `data/rules.json` - Aviation rules JSON (generate from Excel if needed)
 
-### 3. Build and Run
+**Optional:**
+- `out/ga_meta.sqlite` - GA friendliness database (build if you have export data)
+
+### 4. Configure Environment
+
+```bash
+# Copy template
+cp env.sample .env
+
+# Edit .env with your settings
+nano .env
+```
+
+**Required in `.env`:**
+```bash
+OPENAI_API_KEY=your-openai-api-key-here
+ENVIRONMENT=production  # or 'development'
+```
+
+**Note:** Paths are automatically set by `docker-compose.yml` - you don't need to configure them in `.env` for Docker.
+
+### 5. Configure Security
+
+```bash
+# Copy Docker-specific security config
+cp web/server/security_config.docker.py web/server/security_config.py
+```
+
+**Edit `web/server/security_config.py`:**
+
+1. **ALLOWED_DIRS** - Use container paths:
+   ```python
+   ALLOWED_DIRS = ["/app/data", "/app/out", "/app/logs", "/app"]
+   ```
+
+2. **ALLOWED_ORIGINS** - Add your production domains:
+   ```python
+   ALLOWED_ORIGINS = ["https://maps.flyfun.aero", "https://flyfun.aero"]
+   ```
+
+3. **ALLOWED_HOSTS** - Add domains + Docker service names:
+   ```python
+   ALLOWED_HOSTS = ["maps.flyfun.aero", "flyfun.aero", "web-server", "flyfun-web-server"]
+   ```
+
+4. **FORCE_HTTPS** - Set to `False` (HTTPS handled by reverse proxy):
+   ```python
+   FORCE_HTTPS = False
+   ```
+
+### 6. Build and Start
 
 ```bash
 # Build images
 docker-compose build
 
-# Start services
+# Start all services
 docker-compose up -d
+
+# Check status
+docker-compose ps
 
 # View logs
 docker-compose logs -f
-
-# Stop services
-docker-compose down
 ```
 
-## Configuration
+### 7. Build Vector Database
 
-### Environment Variables
+After starting services, build the RAG vector database:
 
-All configuration is done through the `.env` file at the project root. Key variables:
-
-**Important:** Paths in `.env` should use **container paths** when running in Docker (e.g., `/app/data/airports.db`), not host paths. The `docker-compose.yml` automatically overrides paths to use container paths, but it's best to set them correctly in `.env` for clarity.
-
-#### Common
-- `ENVIRONMENT`: `development` or `production`
-- `AIRPORTS_DB`: Path to airports database (inside container: `/app/data/airports.db`)
-- `RULES_JSON`: Path to rules JSON (inside container: `/app/data/rules.json`)
-- `LOG_LEVEL`: Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
-
-#### Web Server
-- `WEB_PORT`: Port to expose (default: `8000`)
-- `GA_META_DB`: Path to GA meta database (default: `/app/out/ga_meta.sqlite`)
-- `GA_META_READONLY`: Whether GA database is read-only (default: `true`)
-- `AVIATION_AGENT_ENABLED`: Enable aviation agent (default: `true`)
-- `VECTOR_DB_PATH`: Path to vector database (default: `/app/out/rules_vector_db`)
-
-#### MCP Server
-- `AIRPORTS_DB`: Path to airports database (inside container: `/app/data/airports.db`)
-- `RULES_JSON`: Path to rules JSON (inside container: `/app/data/rules.json`)
-- `LOG_LEVEL`: Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
-
-#### Security
-- `OPENAI_API_KEY`: OpenAI API key (required)
-
-### Volume Mappings
-
-The `docker-compose.yml` maps host directories to container paths:
-
-| Host Directory | Container Path | Purpose | Access |
-|---------------|---------------|---------|--------|
-| `./data` | `/app/data` | Data files (airports.db, rules.json) | Read-only |
-| `./out` | `/app/out` | Output files (ga_meta.sqlite, rules_vector_db) | Read-write |
-| `./logs` | `/app/logs` | Log files | Read-write |
-
-You can customize these in `.env`:
 ```bash
-DATA_DIR=./data
-OUTPUT_DIR=./out
-LOGS_DIR=./logs
+docker exec -it flyfun-web-server python /app/tools/xls_to_rules.py \
+    --out /app/data/rules.json \
+    --build-rag
 ```
 
-## Data Files
+This builds the ChromaDB vector database from `rules.json` (persists in `out/chromadb_data/`).
 
-### Required Files
-
-1. **airports.db**: Airport database (SQLite)
-   - Location: `data/airports.db`
-   - Size: ~7.5MB (stored in Git LFS)
-   - Read-only in containers
-
-2. **rules.json**: Aviation rules metadata
-   - Location: `data/rules.json`
-   - Read-only in containers
-
-### Output Files
-
-1. **ga_meta.sqlite**: GA friendliness database
-   - Location: `out/ga_meta.sqlite` (created by build tools)
-   - Read-write in containers (if `GA_META_READONLY=false`)
-   - Read-only in production web server (default)
-
-2. **Vector DB**: Rules vector database for RAG
-   - Location: `out/rules_vector_db/`
-   - Created automatically on first use
-   - Read-write in containers
-
-## Building Images
-
-### Web Server
+### 8. Verify Setup
 
 ```bash
-docker build -f web/Dockerfile -t flyfun-web-server .
+# Check health
+curl http://localhost:8000/health
+curl http://localhost:8001/api/v2/heartbeat  # ChromaDB
+
+# Test API
+curl http://localhost:8000/api/airports/EGLL
+
+# Check logs
+docker-compose logs web-server | grep "Loaded model"
 ```
 
-### MCP Server
+---
+
+## Updates
+
+### Code Changes
+
+**When you change application code** (Python files, TypeScript, `requirements.txt`, etc.):
 
 ```bash
-docker build -f mcp_server/Dockerfile -t flyfun-mcp-server .
-```
+# Pull latest code
+git pull
 
-### Both (via docker-compose)
+# Rebuild image (compiles TypeScript, installs dependencies)
+docker-compose build web-server
 
-```bash
-docker-compose build
-```
-
-## Running Services
-
-### Start All Services
-
-```bash
-docker-compose up -d
-```
-
-### Start Individual Services
-
-```bash
-# Web server only
+# Restart with new image
 docker-compose up -d web-server
 
-# MCP server only
-docker-compose up -d mcp-server
+# Verify
+docker-compose logs web-server --tail=20
+curl http://localhost:8000/health
 ```
 
-### View Logs
+**Quick update (no rebuild needed):**
+- Changes to `.env`, `security_config.py`, or files in `tools/` only require restart:
+  ```bash
+  docker-compose restart web-server
+  ```
+
+**What requires rebuild vs restart:**
+- **Rebuild needed:** `web/server/*.py`, `web/client/`, `shared/`, `requirements.txt`
+- **Restart only:** `.env`, `security_config.py`, `tools/`, data files in `data/`
+
+### Update airports.db
+
+**Replace the database file:**
 
 ```bash
-# All services
-docker-compose logs -f
+# Stop services (optional, but safer)
+docker-compose stop web-server mcp-server
 
-# Specific service
-docker-compose logs -f web-server
-docker-compose logs -f mcp-server
+# Replace the file on host
+cp /path/to/new/airports.db data/airports.db
+
+# Restart services
+docker-compose start web-server mcp-server
+
+# Verify
+docker exec flyfun-web-server ls -la /app/data/airports.db
+curl http://localhost:8000/api/airports/EGLL
 ```
 
-### Stop Services
+**Note:** The `data/` directory is mounted as a volume, so file changes are immediately available in containers.
+
+### Update ga_meta.sqlite
+
+**Option 1: Build from export data (recommended)**
 
 ```bash
-docker-compose down
+# If you have airfield.directory export JSON
+docker exec -it flyfun-web-server python /app/tools/build_ga_friendliness.py \
+    --export /path/to/export.json \
+    --output /app/out/ga_meta.sqlite
 ```
 
-### Restart Services
+**Option 2: Replace existing file**
 
 ```bash
-docker-compose restart
+# Stop web-server (if GA_META_READONLY=false, otherwise optional)
+docker-compose stop web-server
+
+# Replace file on host
+cp /path/to/new/ga_meta.sqlite out/ga_meta.sqlite
+
+# Restart
+docker-compose start web-server
 ```
 
-## Health Checks
+**Note:** The file is in `out/ga_meta.sqlite` on the host, mounted into containers.
 
-The web server includes a health check endpoint:
-- URL: `http://localhost:8000/health`
-- Returns: `{"status": "healthy", "timestamp": "..."}`
+### Rebuild RAG (Vector Database)
 
-Docker Compose automatically monitors health:
+**When `rules.json` is updated:**
+
 ```bash
-# Check health status
-docker-compose ps
+# Rebuild vector database from rules.json
+docker exec -it flyfun-web-server python /app/tools/xls_to_rules.py \
+    --out /app/data/rules.json \
+    --build-rag
 ```
 
-## Development
+**When Excel files are updated:**
 
-### Local Development with Docker
-
-1. **Mount source code as volume** (for live reload):
-   ```yaml
-   # Add to docker-compose.yml under web-server volumes:
-   - ./web/server:/app/web/server:ro
-   - ./shared:/app/shared:ro
-   - ./out:/app/out:rw  # For vector DB and ga_meta.sqlite
-   ```
-
-2. **Use development environment**:
+1. Place Excel files in `data/` directory:
    ```bash
-   ENVIRONMENT=development docker-compose up
+   cp /path/to/definitions.xlsx data/
+   cp /path/to/GB-rules.xlsx data/
+   cp /path/to/FR-rules.xlsx data/
    ```
 
-### Debugging
+2. Rebuild rules.json and vector database:
+   ```bash
+   docker exec -it flyfun-web-server python /app/tools/xls_to_rules.py \
+       --out /app/data/rules.json \
+       --defs /app/data/definitions.xlsx \
+       --add GB "/app/data/GB-rules.xlsx" \
+       --add FR "/app/data/FR-rules.xlsx" \
+       --build-rag
+   ```
+
+**Note:** ChromaDB data persists in `out/chromadb_data/`. Rebuilding replaces the existing vector database.
+
+### Update rules.json Only
+
+If you only need to update `rules.json` without rebuilding the vector database:
 
 ```bash
-# Execute command in running container
-docker-compose exec web-server bash
-docker-compose exec mcp-server bash
+# Replace file on host
+cp /path/to/new/rules.json data/rules.json
 
-# View environment variables
-docker-compose exec web-server env
-
-# Check file permissions
-docker-compose exec web-server ls -la /app/data
+# Restart web-server to pick up changes
+docker-compose restart web-server
 ```
 
-## Production Deployment
+To update the vector database after updating `rules.json`, see "Rebuild RAG" above.
 
-### Security Considerations
+### Full Service Update
 
-1. **API Keys**: Never commit `.env` file with real API keys
-2. **File Permissions**: Ensure data files have correct permissions
-3. **Network**: Use Docker networks to isolate services
-4. **HTTPS**: Use reverse proxy (nginx/traefik) for HTTPS
-5. **Secrets**: Consider using Docker secrets or external secret management
-
-### Reverse Proxy Setup
-
-Example nginx configuration:
-
-```nginx
-server {
-    listen 80;
-    server_name maps.flyfun.aero;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-### Environment-Specific Configuration
-
-Create separate `.env` files for different environments:
+To update all services (web, MCP, ChromaDB):
 
 ```bash
-# Development
-cp env.sample .env.dev
-# Edit .env.dev
+# Pull latest code
+git pull
 
-# Production
-cp env.sample .env.prod
-# Edit .env.prod
+# Rebuild all images
+docker-compose build
 
-# Use specific env file
-docker-compose --env-file .env.prod up -d
+# Restart all services
+docker-compose up -d
+
+# Verify
+docker-compose ps
+docker-compose logs --tail=50
 ```
+
+---
 
 ## Troubleshooting
 
 ### Container Won't Start
 
-1. **Check logs**:
-   ```bash
-   docker-compose logs web-server
-   ```
+```bash
+# Check logs
+docker-compose logs web-server
 
-2. **Check data files exist**:
-   ```bash
-   ls -la data/airports.db data/rules.json
-   ```
+# Check data files exist
+ls -la data/airports.db data/rules.json
 
-3. **Check file permissions**:
-   ```bash
-   docker-compose exec web-server ls -la /app/data
-   ```
+# Check file permissions
+docker exec flyfun-web-server ls -la /app/data
+```
 
 ### Database Errors
 
-1. **Read-only database error**:
-   - Check `GA_META_READONLY` setting
-   - Ensure output directory is writable by UID 2000 (web server)
-   - Check file permissions: `ls -la out/`
-   - Fix permissions: `chmod 777 out` or `chown -R 2000:2000 out`
-   - Verify vector DB path: `ls -la out/rules_vector_db/`
+**Read-only database error:**
+```bash
+# Check permissions
+ls -la out/
 
-2. **Database not found**:
-   - Verify `AIRPORTS_DB` path in `.env`
-   - Check volume mount in `docker-compose.yml`
-   - Ensure file exists in `data/` directory
+# Fix permissions
+chmod 777 out logs
+# Or use proper ownership: chown -R 2000:2000 out logs
+```
 
-3. **Permission denied errors**:
-   - Containers run as non-root (UID 2000/2001)
-   - Ensure writable volumes (`out`, `logs`) have correct permissions
-   - Check container user: `docker-compose exec web-server id`
-   - Fix: `chmod 777 out logs` or match UID/GID on host
+**ChromaDB connection errors:**
+```bash
+# Verify ChromaDB is running
+docker-compose ps chromadb
+
+# Check ChromaDB logs
+docker-compose logs chromadb
+
+# Test connectivity from web-server
+docker exec flyfun-web-server curl http://chromadb:8000/api/v1/heartbeat
+```
+
+**Vector database not found:**
+```bash
+# Rebuild vector database
+docker exec -it flyfun-web-server python /app/tools/xls_to_rules.py \
+    --out /app/data/rules.json \
+    --build-rag
+
+# Verify rules.json exists
+ls -la data/rules.json
+
+# Check ChromaDB data
+ls -la out/chromadb_data/
+```
+
+### Airport Data Not Showing
+
+**If API works but UI doesn't update:**
+1. Open browser DevTools (F12)
+2. Check Console tab for JavaScript errors
+3. Check Network tab - verify API calls return 200 status
+4. Verify model loaded: `docker-compose logs web-server | grep "Loaded model"`
+5. Test API directly: `curl http://localhost:8000/api/airports/EGLL`
+
+**If API doesn't work:**
+- Check if database exists: `docker exec flyfun-web-server ls -la /app/data/airports.db`
+- Check logs: `docker-compose logs web-server --tail=50`
+- Verify CORS settings in `security_config.py`
 
 ### Port Conflicts
 
-If port 8000 is already in use:
+**Web server port (8000) in use:**
 ```bash
 # Change in .env
 WEB_PORT=8001
+# Then restart: docker-compose up -d
+```
 
-# Or in docker-compose.yml
-ports:
-  - "8001:8000"
+**ChromaDB port (8001) in use:**
+```bash
+# Change in .env
+CHROMADB_PORT=8002
+# Then restart: docker-compose up -d
 ```
 
 ### Build Failures
 
-1. **euro_aip installation fails**:
-   - Check internet connection
-   - Verify git repository URL in Dockerfile
-   - Consider using local copy or submodule
-
-2. **Dependencies fail**:
-   ```bash
-   # Rebuild without cache
-   docker-compose build --no-cache
-   ```
-
-## Migration from Non-Docker Setup
-
-### Step 1: Update Environment Loading
-
-The code now uses `shared/env_loader.py` which:
-- Supports both `.env` and `{env}.env` files
-- Works with Docker (loads from root `.env`)
-- Works with local development (loads from component directories)
-
-### Step 2: Consolidate Configuration
-
-Move from multiple `dev.env` files to single root `.env`:
-- Old: `web/server/dev.env`, `mcp_server/dev.env`
-- New: `.env` at root (used by both services)
-
-### Step 3: Update Paths
-
-Paths in `.env` are container paths:
-- Old: `/Users/you/flyfun/data/airports.db`
-- New: `/app/data/airports.db` (mapped from host `./data/airports.db`)
-
-### Step 4: Test
-
 ```bash
-# Build and test
-docker-compose build
-docker-compose up -d
+# Rebuild without cache
+docker-compose build --no-cache
 
-# Verify services are running
-docker-compose ps
-curl http://localhost:8000/health
+# Check specific service logs
+docker-compose build web-server 2>&1 | tee build.log
 ```
 
-## Testing
+### Permission Errors
 
-See `designs/DOCKER_TESTING_GUIDE.md` for comprehensive testing instructions, including:
-- Pre-flight checks
-- Build and runtime tests
-- Functionality verification
-- Troubleshooting guide
+Containers run as non-root (UID 2000/2001):
 
-**Quick Test:**
 ```bash
-# Build and start
-docker-compose build
+# Check container user
+docker exec flyfun-web-server id
+
+# Fix permissions on writable directories
+chmod 777 out logs
+# Or: chown -R 2000:2000 out logs
+```
+
+### Services Not Communicating
+
+```bash
+# Check network
+docker network inspect flyfun-network
+
+# Verify service names resolve
+docker exec flyfun-web-server ping chromadb
+
+# Check internal URLs (use service names, not localhost)
+docker exec flyfun-web-server curl http://chromadb:8000/api/v1/heartbeat
+```
+
+---
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Start services
 docker-compose up -d
 
-# Check health
-curl http://localhost:8000/health
+# Stop services
+docker-compose down
+
+# Restart service
+docker-compose restart web-server
 
 # View logs
-docker-compose logs -f
+docker-compose logs -f web-server
 
-# Stop
-docker-compose down
+# Execute command in container
+docker exec -it flyfun-web-server bash
+
+# Check status
+docker-compose ps
+
+# Health check
+curl http://localhost:8000/health
 ```
 
-## Next Steps
+### Directory Structure
 
-- [ ] Set up CI/CD for automated builds
-- [ ] Configure monitoring and alerting
-- [ ] Set up backup strategy for data files
-- [ ] Document production deployment process
-- [ ] Add support for multiple environments (staging, production)
+```
+.
+├── data/              # Read-only: airports.db, rules.json
+├── out/               # Writable: ga_meta.sqlite, chromadb_data/
+├── logs/              # Writable: application logs
+├── .env               # Environment configuration
+└── docker-compose.yml # Service orchestration
+```
 
+### Volume Mappings
+
+| Host | Container | Purpose |
+|------|-----------|---------|
+| `./data` | `/app/data` | Data files (read-only) |
+| `./out` | `/app/out` | Output files (read-write) |
+| `./logs` | `/app/logs` | Log files (read-write) |
+| `./tools` | `/app/tools` | Utility scripts (read-only) |
+| `./out/chromadb_data` | `/chroma/chroma` | ChromaDB storage |
+
+---
+
+## Additional Resources
+
+- Reverse proxy setup: See "Production Deployment" section for nginx configuration
+- Development workflow: Mount source code as volumes for live reload (development only)
+- Health checks: `http://localhost:8000/health` for web server status

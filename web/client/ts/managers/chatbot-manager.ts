@@ -14,12 +14,12 @@ export class ChatbotManager {
   private quickActionsContainer: HTMLElement | null = null;
   private expandButton: HTMLButtonElement | null = null;
   private clearButton: HTMLButtonElement | null = null;
-  
+
   private sessionId: string | null = null;
-  private messageHistory: Array<{role: string; content: string}> = [];
+  private messageHistory: Array<{ role: string; content: string }> = [];
   private isProcessing: boolean = false;
   private llmIntegration: LLMIntegration;
-  
+
   constructor(llmIntegration: LLMIntegration) {
     this.llmIntegration = llmIntegration;
     this.initializeUI();
@@ -27,7 +27,7 @@ export class ChatbotManager {
     this.loadQuickActions();
     this.addWelcomeMessage();
   }
-  
+
   /**
    * Initialize UI elements
    */
@@ -38,18 +38,18 @@ export class ChatbotManager {
     this.quickActionsContainer = document.getElementById('quick-actions-container-new');
     this.expandButton = document.getElementById('chatbot-expand-btn-new') as HTMLButtonElement;
     this.clearButton = document.getElementById('chatbot-clear-btn-new') as HTMLButtonElement;
-    
+
     if (!this.chatInput || !this.sendButton || !this.chatMessages) {
       console.error('ChatbotManager: Required UI elements not found');
     }
   }
-  
+
   /**
    * Attach event listeners
    */
   private attachEventListeners(): void {
     if (!this.chatInput || !this.sendButton) return;
-    
+
     // Auto-resize textarea
     this.chatInput.addEventListener('input', () => {
       if (this.chatInput) {
@@ -57,7 +57,7 @@ export class ChatbotManager {
         this.chatInput.style.height = Math.min(this.chatInput.scrollHeight, 150) + 'px';
       }
     });
-    
+
     // Send on Enter (without Shift)
     this.chatInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -65,26 +65,26 @@ export class ChatbotManager {
         this.sendMessage();
       }
     });
-    
+
     // Send button click
     this.sendButton.addEventListener('click', () => {
       this.sendMessage();
     });
-    
+
     // Expand button
     if (this.expandButton) {
       this.expandButton.addEventListener('click', () => {
         this.toggleExpand();
       });
     }
-    
+
     // Clear button
     if (this.clearButton) {
       this.clearButton.addEventListener('click', () => {
         this.clearConversation();
       });
     }
-    
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
@@ -93,28 +93,28 @@ export class ChatbotManager {
       }
     });
   }
-  
+
   /**
    * Send message
    */
   async sendMessage(): Promise<void> {
     if (!this.chatInput || !this.chatMessages) return;
-    
+
     const message = this.chatInput.value.trim();
     if (!message || this.isProcessing) return;
-    
+
     // Add user message to UI
     this.addMessage('user', message);
-    
+
     // Clear input
     this.chatInput.value = '';
     this.chatInput.style.height = 'auto';
-    
+
     // Update UI state
     this.isProcessing = true;
     this.updateSendButton(true);
     const loadingId = this.addLoadingIndicator();
-    
+
     try {
       await this.sendMessageStreaming(message, loadingId);
     } catch (error: any) {
@@ -125,47 +125,56 @@ export class ChatbotManager {
       this.updateSendButton(false);
     }
   }
-  
+
   /**
    * Send message with streaming
    */
   private async sendMessageStreaming(message: string, loadingId: string): Promise<void> {
     let doneReceived = false;
-    
+
     // Build messages array from history + current message
     const messages = [...this.messageHistory];
     messages.push({
       role: 'user',
       content: message
     });
-    
+
     console.log('ChatbotManager: Sending message with history', {
       messageHistoryLength: this.messageHistory.length,
       messagesLength: messages.length,
       sessionId: this.sessionId
     });
-    
-    // Call aviation agent streaming API
-    const response = await fetch('/api/aviation-agent/chat/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.sessionId ? { 'X-Session-ID': this.sessionId } : {})
-      },
-      credentials: 'include',
-      body: JSON.stringify({ messages })
-    });
-    
+
+    // Call aviation agent streaming API with 120s timeout for cold start
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    let response: Response;
+    try {
+      response = await fetch('/api/aviation-agent/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.sessionId ? { 'X-Session-ID': this.sessionId } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify({ messages }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     // Extract session ID from headers if present
     const sessionIdHeader = response.headers.get('X-Session-ID');
     if (sessionIdHeader) {
       this.sessionId = sessionIdHeader;
     }
-    
+
     let loadingRemoved = false;
     let thinkingContent = '';
     let messageContent = '';
@@ -173,11 +182,16 @@ export class ChatbotManager {
     let filterProfile: any = null;
     let visualizationApplied = false;
     let filterProfileApplied = false;
-    
+    let showRulesReceived = false;
+
+    // Dispatch event to reset rules panel at start of new query
+    // It will be updated if RAG is used, otherwise stays hidden/reset
+    window.dispatchEvent(new CustomEvent('reset-rules-panel'));
+
     // Create message div for streaming
     const messageDiv = document.createElement('div');
     messageDiv.className = 'chat-message assistant-message';
-    
+
     // Thinking section
     const thinkingSection = document.createElement('div');
     thinkingSection.className = 'thinking-section expanded';
@@ -191,42 +205,42 @@ export class ChatbotManager {
     `;
     const thinkingContentDiv = document.createElement('div');
     thinkingContentDiv.className = 'thinking-content';
-    
+
     thinkingHeader.addEventListener('click', () => {
       thinkingSection.classList.toggle('expanded');
     });
-    
+
     thinkingSection.appendChild(thinkingHeader);
     thinkingSection.appendChild(thinkingContentDiv);
-    
+
     // Answer section
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
     contentDiv.style.display = 'none';
-    
+
     messageDiv.appendChild(thinkingSection);
     messageDiv.appendChild(contentDiv);
-    
+
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
-    
+
     if (!reader) {
       throw new Error('Response body is not readable');
     }
-    
+
     let buffer = '';
-    
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       buffer += decoder.decode(value, { stream: true });
       const events = buffer.split('\n\n');
       buffer = events.pop() || ''; // Keep incomplete event in buffer
-      
+
       for (const eventBlock of events) {
         if (!eventBlock.trim()) continue;
-        
+
         try {
           // Parse SSE format: "event: <type>\ndata: <json>"
           const eventMatch = eventBlock.match(/^event: (.+)\ndata: (.+)$/s);
@@ -239,12 +253,12 @@ export class ChatbotManager {
             }
             continue;
           }
-          
+
           const eventType = eventMatch[1].trim();
           const eventData = JSON.parse(eventMatch[2]);
-          
+
           console.log('ChatbotManager: Received SSE event', { eventType, hasContent: !!eventData.content });
-          
+
           switch (eventType) {
             case 'thinking':
               // First thinking event: remove loading, add message to DOM
@@ -256,18 +270,18 @@ export class ChatbotManager {
                 thinkingSection.style.display = 'block';
                 loadingRemoved = true;
               }
-              
+
               // Stream thinking content
               thinkingContent += eventData.content || '';
               thinkingContentDiv.innerHTML = this.formatMessage(thinkingContent);
               this.scrollToBottom();
               break;
-              
+
             case 'thinking_done':
               // Collapse thinking section when done
               thinkingSection.classList.remove('expanded');
               break;
-              
+
             case 'message':
               // First message event: remove loading if not done, show answer section
               if (!loadingRemoved) {
@@ -277,22 +291,22 @@ export class ChatbotManager {
                 }
                 loadingRemoved = true;
               }
-              
+
               // Ensure message div is in DOM (might not be added yet if no thinking event)
               if (this.chatMessages && !this.chatMessages.contains(messageDiv)) {
                 this.chatMessages.appendChild(messageDiv);
               }
-              
+
               // Auto-collapse thinking when first real answer content arrives
               if (messageContent === '' && thinkingSection.style.display === 'block') {
                 thinkingSection.classList.remove('expanded');
                 contentDiv.style.display = 'block';
               }
-              
+
               // Accumulate answer content
               const chunk = eventData.content || '';
               messageContent += chunk;
-              
+
               // Always show answer section and update content whenever we receive a chunk
               // Even if it's just whitespace, show it - formatting will handle it
               if (chunk !== null && chunk !== undefined) {
@@ -305,10 +319,10 @@ export class ChatbotManager {
                   hasContent: messageContent.trim().length > 0
                 });
               }
-              
+
               this.scrollToBottom();
               break;
-              
+
             case 'ui_payload':
               // UI payload contains visualization and filter_profile
               if (eventData.visualization) {
@@ -336,49 +350,69 @@ export class ChatbotManager {
                 }
               }
 
+              // Handle show_rules for RAG responses - display country rules in right panel
+              if (eventData.show_rules) {
+                const { countries } = eventData.show_rules;
+                if (countries && countries.length > 0) {
+                  console.log('ChatbotManager: Received show_rules for countries', countries);
+                  // Add rules indicator
+                  const rulesDiv = document.createElement('div');
+                  rulesDiv.className = 'message-rules-indicator';
+                  rulesDiv.innerHTML = `<small><i class="fas fa-gavel"></i> Showing rules for ${countries.join(', ')}</small>`;
+                  messageDiv.appendChild(rulesDiv);
+
+                  // Dispatch event to display country rules with category filter
+                  const categoriesByCountry = eventData.show_rules.categories_by_country || {};
+                  window.dispatchEvent(new CustomEvent('show-country-rules', {
+                    detail: { countries, categoriesByCountry }
+                  }));
+                  showRulesReceived = true;
+                }
+              }
+
               // Handle suggested queries
               if (eventData.suggested_queries && eventData.suggested_queries.length > 0) {
                 this.renderSuggestedQueries(eventData.suggested_queries, messageDiv);
               }
               break;
-              
+
             case 'tool_call_end':
               // Tool call completed - may contain filter_profile in result
               if (eventData.result && eventData.result.filter_profile) {
                 filterProfile = eventData.result.filter_profile;
               }
-              
+
               // Add tool indicator
               const toolsDiv = document.createElement('div');
               toolsDiv.className = 'message-tools';
               toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${eventData.name || 'tool'}</small>`;
               messageDiv.appendChild(toolsDiv);
               break;
-              
+
             case 'done':
               // Message complete - reset button state immediately
               doneReceived = true;
               this.isProcessing = false;
               this.updateSendButton(false);
-              
+
               if (!loadingRemoved) {
                 this.removeLoadingIndicator(loadingId);
                 if (this.chatMessages) {
                   this.chatMessages.appendChild(messageDiv);
                 }
               }
-              
+
               // Ensure message div is added to DOM before finishing
               if (this.chatMessages && !this.chatMessages.contains(messageDiv)) {
                 this.chatMessages.appendChild(messageDiv);
               }
-              
+
               // Ensure content div is visible if we have content
               if (messageContent && contentDiv.style.display === 'none') {
                 contentDiv.style.display = 'block';
                 contentDiv.innerHTML = this.formatMessage(messageContent);
               }
-              
+
               // Add to history (use trimmed content)
               const assistantContent = messageContent.trim() || thinkingContent.trim();
               if (assistantContent) {
@@ -396,7 +430,7 @@ export class ChatbotManager {
                   thinkingContent: thinkingContent
                 });
               }
-              
+
               // Apply visualization if present (only if not already applied)
               if (visualization && !visualizationApplied) {
                 this.llmIntegration.handleVisualization(visualization);
@@ -414,7 +448,7 @@ export class ChatbotManager {
                 this.llmIntegration.applyFilterProfile(visualization.filter_profile);
                 filterProfileApplied = true;
               }
-              
+
               // Break out of inner loop
               break;
           }
@@ -426,25 +460,25 @@ export class ChatbotManager {
           });
           // Don't break on parse errors - continue processing other events
         }
-        
+
         // If we processed a 'done' event, exit the loop
         if (doneReceived) {
           break;
         }
       }
-      
+
       // Exit outer loop if done
       if (doneReceived) {
         break;
       }
     }
-    
+
     // Ensure message div is in DOM with content before finishing
     if (this.chatMessages && messageDiv && !this.chatMessages.contains(messageDiv)) {
       console.log('ChatbotManager: Adding message div to DOM at end of stream');
       this.chatMessages.appendChild(messageDiv);
     }
-    
+
     // Ensure content is visible if we have any (final check)
     if (messageContent) {
       contentDiv.style.display = 'block';
@@ -459,14 +493,14 @@ export class ChatbotManager {
         messageDivInDOM: this.chatMessages?.contains(messageDiv)
       });
     }
-    
+
     // Ensure button is reset even if done event wasn't received properly
     if (this.isProcessing) {
       console.warn('Stream completed but button still processing - resetting');
       this.isProcessing = false;
       this.updateSendButton(false);
     }
-    
+
     console.log('ChatbotManager: Streaming complete', {
       doneReceived,
       messageContentLength: messageContent.length,
@@ -474,27 +508,27 @@ export class ChatbotManager {
       finalHistoryLength: this.messageHistory.length
     });
   }
-  
+
   /**
    * Update message content during streaming
    */
   private updateMessageContent(messageDiv: HTMLElement, thinking: string, content: string): void {
     let html = '';
-    
+
     if (thinking) {
       html += `<div class="thinking-content"><i class="fas fa-cog fa-spin"></i> ${this.escapeHtml(thinking)}</div>`;
     }
-    
+
     if (content) {
       // Convert markdown-like formatting to HTML
       const formatted = this.formatMessage(content);
       html += `<div class="message-content">${formatted}</div>`;
     }
-    
+
     messageDiv.innerHTML = html;
     this.scrollToBottom();
   }
-  
+
   /**
    * Format message content (basic markdown support)
    */
@@ -519,16 +553,16 @@ export class ChatbotManager {
 
     return html;
   }
-  
+
   /**
    * Add message to chat
    */
   private addMessage(role: 'user' | 'assistant', content: string, metadata: any = null): void {
     if (!this.chatMessages) return;
-    
+
     const messageDiv = document.createElement('div');
     messageDiv.className = `chat-message ${role}-message`;
-    
+
     if (role === 'user') {
       messageDiv.innerHTML = `
         <div class="message-content">${this.escapeHtml(content)}</div>
@@ -541,17 +575,17 @@ export class ChatbotManager {
         <div class="message-content">${formatted}</div>
       `;
     }
-    
+
     this.chatMessages.appendChild(messageDiv);
     this.scrollToBottom();
   }
-  
+
   /**
    * Add welcome message
    */
   private addWelcomeMessage(): void {
     if (!this.chatMessages) return;
-    
+
     const welcomeDiv = document.createElement('div');
     welcomeDiv.className = 'chat-message assistant-message welcome-message';
     welcomeDiv.innerHTML = `
@@ -560,34 +594,34 @@ export class ChatbotManager {
         <ul>
           <li>Finding airports and their details</li>
           <li>Planning routes between airports</li>
-          <li>Filtering airports by criteria</li>
           <li>Answering questions about aviation rules and procedures</li>
         </ul>
         <p>Try asking me something like:</p>
         <ul>
           <li>"Show me airports in France"</li>
-          <li>"Find airports between LFPO and EDDM"</li>
+          <li>"Find airports between EGTK and LFMD</li>
           <li>"What are the border crossing airports in Germany?"</li>
+          <li>"What the rule for an IFR flight from an uncontrolled airfield in France?"</li>
         </ul>
       </div>
     `;
     this.chatMessages.appendChild(welcomeDiv);
   }
-  
+
   /**
    * Load quick actions
    */
   private async loadQuickActions(): Promise<void> {
     if (!this.quickActionsContainer) return;
-    
+
     try {
       const response = await fetch('/api/aviation-agent/quick-actions');
       if (!response.ok) return;
-      
+
       const data = await response.json();
       if (data.actions && Array.isArray(data.actions)) {
         this.quickActionsContainer.innerHTML = '';
-        
+
         data.actions.forEach((action: any) => {
           const button = document.createElement('button');
           button.className = 'btn btn-sm btn-outline-primary quick-action-btn';
@@ -605,7 +639,7 @@ export class ChatbotManager {
       console.error('Error loading quick actions:', error);
     }
   }
-  
+
   /**
    * Use quick action
    */
@@ -617,19 +651,19 @@ export class ChatbotManager {
     this.chatInput.style.height = 'auto';
     this.chatInput.style.height = Math.min(this.chatInput.scrollHeight, 150) + 'px';
   }
-  
+
   /**
    * Apply filter profile from LLM response
    */
   private applyFilterProfile(filterProfile: any): void {
     if (!filterProfile) return;
-    
+
     // Use LLMIntegration to apply filter profile
     // This will update the store and UI
     console.log('Applying filter profile:', filterProfile);
     this.llmIntegration.applyFilterProfile(filterProfile);
   }
-  
+
   /**
    * Toggle expand/collapse
    */
@@ -637,7 +671,7 @@ export class ChatbotManager {
     const mainRow = document.querySelector('.main-content-row');
     if (mainRow) {
       mainRow.classList.toggle('expanded');
-      
+
       // Update button icon
       if (this.expandButton) {
         const icon = this.expandButton.querySelector('i');
@@ -647,7 +681,7 @@ export class ChatbotManager {
             : 'fas fa-expand';
         }
       }
-      
+
       // Invalidate map size after layout change (with delay to allow CSS transition)
       setTimeout(() => {
         if ((window as any).visualizationEngine) {
@@ -659,7 +693,7 @@ export class ChatbotManager {
       }, 300); // Match CSS transition duration
     }
   }
-  
+
   /**
    * Clear conversation
    */
@@ -709,7 +743,7 @@ export class ChatbotManager {
       if (checkbox) checkbox.checked = false;
     });
   }
-  
+
   /**
    * Update send button state
    */
@@ -721,13 +755,13 @@ export class ChatbotManager {
       icon.className = disabled ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane';
     }
   }
-  
+
   /**
    * Add loading indicator
    */
   private addLoadingIndicator(): string {
     if (!this.chatMessages) return '';
-    
+
     const loadingId = `loading-${Date.now()}`;
     const loadingDiv = document.createElement('div');
     loadingDiv.id = loadingId;
@@ -744,7 +778,7 @@ export class ChatbotManager {
     this.scrollToBottom();
     return loadingId;
   }
-  
+
   /**
    * Remove loading indicator
    */
@@ -755,7 +789,7 @@ export class ChatbotManager {
       loadingEl.remove();
     }
   }
-  
+
   /**
    * Scroll to bottom
    */
@@ -763,11 +797,11 @@ export class ChatbotManager {
     if (!this.chatMessages) return;
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
   }
-  
+
   /**
    * Render suggested queries
    */
-  private renderSuggestedQueries(suggestions: Array<{text: string; tool: string; category: string; priority: number}>, messageDiv: HTMLElement): void {
+  private renderSuggestedQueries(suggestions: Array<{ text: string; tool: string; category: string; priority: number }>, messageDiv: HTMLElement): void {
     if (!suggestions || suggestions.length === 0) return;
 
     const suggestionsContainer = document.createElement('div');

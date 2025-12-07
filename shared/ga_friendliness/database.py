@@ -321,14 +321,9 @@ def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
         if not db_path.exists():
             raise StorageError(f"Database not found (readonly mode): {db_path}")
         
-        # Open with URI for read-only mode
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        # Just open it, like DatabaseStorage does - simple and works without write permissions
+        conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
-        
-        # Set read-only pragma for safety
-        conn.execute("PRAGMA query_only = ON")
-        
-        # No WAL mode or schema checks in read-only mode
         return conn
     
     # Write mode: create database and enable WAL for concurrent access

@@ -40,8 +40,7 @@ from security_config import (
 
 # Import configuration helper functions (logic only)
 from config_helpers import (
-    get_safe_db_path, get_safe_rules_path, get_safe_ga_meta_db_path,
-    get_ga_friendliness_readonly
+    get_safe_db_path, get_safe_rules_path, get_safe_ga_meta_db_path
 )
 
 # Import API routes
@@ -49,26 +48,24 @@ from api import airports, procedures, filters, statistics, rules, aviation_agent
 
 from shared.rules_manager import RulesManager
 
-# Configure logging with both file and console output
+# Configure logging with file output only (uvicorn handles console)
 # Use /app/logs in Docker, /tmp/flyfun-logs for local development
 log_dir = Path(os.getenv("LOG_DIR", "/tmp/flyfun-logs"))
 log_dir.mkdir(exist_ok=True, parents=True)
 log_file = log_dir / "web_server.log"
 
-# Create handlers
+# Create file handler only (uvicorn's default handlers handle console)
 file_handler = logging.FileHandler(log_file)
-console_handler = logging.StreamHandler()
-
-# Set format
 formatter = logging.Formatter(LOG_FORMAT)
 file_handler.setFormatter(formatter)
-console_handler.setFormatter(formatter)
 
-# Configure root logger
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    handlers=[file_handler, console_handler]
-)
+# Configure root logger - only add file handler to avoid duplicate console output
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, LOG_LEVEL))
+# Only add if not already added
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file) for h in root_logger.handlers):
+    root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 logger.info(f"Logging to file: {log_file}")
 
@@ -141,12 +138,12 @@ async def lifespan(app: FastAPI):
         rules.set_rules_manager(rules_manager)
 
         # Initialize GA friendliness service (optional)
+        # Web server only reads, so always use readonly=True
         ga_meta_db_path = get_safe_ga_meta_db_path()
-        ga_readonly = get_ga_friendliness_readonly()
-        ga_service = ga_friendliness.GAFriendlinessService(ga_meta_db_path, readonly=ga_readonly)
+        ga_service = ga_friendliness.GAFriendlinessService(ga_meta_db_path, readonly=True)
         ga_friendliness.set_service(ga_service)
         if ga_service.enabled:
-            logger.info(f"GA Friendliness service enabled (readonly={ga_readonly}): {ga_meta_db_path}")
+            logger.info(f"GA Friendliness service enabled (readonly): {ga_meta_db_path}")
         else:
             logger.info("GA Friendliness service disabled (no database configured)")
 
@@ -217,6 +214,8 @@ app.add_middleware(
 )
 
 # Force HTTPS in production
+# Note: In Docker deployments, HTTPS termination happens at reverse proxy level
+# Container should accept HTTP, so FORCE_HTTPS is typically False in Docker
 if FORCE_HTTPS:
     app.add_middleware(HTTPSRedirectMiddleware)
 

@@ -62,13 +62,22 @@ def build_agent_graph(
         # NOTE: ChromaDB requires local filesystem (not CIFS/NFS)
         # Vector DB is stored at /root/Projects/flyfun/rules_vector_db
         try:
+            # Get RulesManager from ToolContext for multi-country lookups
+            tool_context = settings.build_tool_context(load_rules=True)
+            rules_manager = tool_context.rules_manager
+            
             rag_system = RulesRAG(
-                vector_db_path=settings.vector_db_path,
+                vector_db_path=settings.vector_db_path if not settings.vector_db_url else None,
+                vector_db_url=settings.vector_db_url,
                 embedding_model=settings.embedding_model,
                 enable_reformulation=settings.enable_query_reformulation,
-                llm=router_llm
+                llm=router_llm,
+                rules_manager=rules_manager
             )
-            logger.info(f"✓ RAG system initialized: {settings.vector_db_path}")
+            if settings.vector_db_url:
+                logger.info(f"✓ RAG system initialized with service: {settings.vector_db_url}")
+            else:
+                logger.info(f"✓ RAG system initialized: {settings.vector_db_path}")
         except Exception as e:
             logger.warning(f"Could not initialize RAG system: {e}")
             logger.warning("Rules path will be disabled")
@@ -172,11 +181,24 @@ def build_agent_graph(
                 "thinking": f"Retrieved {len(retrieved_rules)} relevant regulations. Countries: {', '.join(countries) if countries else 'N/A'}"
             }
 
+            # Build ui_payload with show_rules for frontend to display country rules
+            # result["sources"] contains categories grouped by country: {country: [categories]}
+            ui_payload = {
+                "show_rules": {
+                    "countries": countries,
+                    "categories_by_country": result.get("sources", {}),  # {country: [categories...]}
+                    "rules_used_count": len(result.get("rules_used", []))
+                }
+            }
+
             # Include suggested queries if they were generated
             suggested_queries = state.get("suggested_queries")
             if suggested_queries:
-                response["ui_payload"] = {"suggested_queries": suggested_queries}
+                ui_payload["suggested_queries"] = suggested_queries
                 logger.info(f"Including {len(suggested_queries)} suggested queries in rules response")
+
+            response["ui_payload"] = ui_payload
+            logger.info(f"Rules response includes show_rules for countries: {countries}")
 
             return response
         except Exception as e:
