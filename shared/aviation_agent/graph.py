@@ -181,11 +181,24 @@ def build_agent_graph(
                 "thinking": f"Retrieved {len(retrieved_rules)} relevant regulations. Countries: {', '.join(countries) if countries else 'N/A'}"
             }
 
+            # Build ui_payload with show_rules for frontend to display country rules
+            # result["sources"] contains categories grouped by country: {country: [categories]}
+            ui_payload = {
+                "show_rules": {
+                    "countries": countries,
+                    "categories_by_country": result.get("sources", {}),  # {country: [categories...]}
+                    "rules_used_count": len(result.get("rules_used", []))
+                }
+            }
+
             # Include suggested queries if they were generated
             suggested_queries = state.get("suggested_queries")
             if suggested_queries:
-                response["ui_payload"] = {"suggested_queries": suggested_queries}
+                ui_payload["suggested_queries"] = suggested_queries
                 logger.info(f"Including {len(suggested_queries)} suggested queries in rules response")
+
+            response["ui_payload"] = ui_payload
+            logger.info(f"Rules response includes show_rules for countries: {countries}")
 
             return response
         except Exception as e:

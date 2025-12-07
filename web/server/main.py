@@ -48,26 +48,24 @@ from api import airports, procedures, filters, statistics, rules, aviation_agent
 
 from shared.rules_manager import RulesManager
 
-# Configure logging with both file and console output
+# Configure logging with file output only (uvicorn handles console)
 # Use /app/logs in Docker, /tmp/flyfun-logs for local development
 log_dir = Path(os.getenv("LOG_DIR", "/tmp/flyfun-logs"))
 log_dir.mkdir(exist_ok=True, parents=True)
 log_file = log_dir / "web_server.log"
 
-# Create handlers
+# Create file handler only (uvicorn's default handlers handle console)
 file_handler = logging.FileHandler(log_file)
-console_handler = logging.StreamHandler()
-
-# Set format
 formatter = logging.Formatter(LOG_FORMAT)
 file_handler.setFormatter(formatter)
-console_handler.setFormatter(formatter)
 
-# Configure root logger
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    handlers=[file_handler, console_handler]
-)
+# Configure root logger - only add file handler to avoid duplicate console output
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, LOG_LEVEL))
+# Only add if not already added
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == str(log_file) for h in root_logger.handlers):
+    root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 logger.info(f"Logging to file: {log_file}")
 

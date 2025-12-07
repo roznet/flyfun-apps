@@ -114,17 +114,63 @@ def search_airports(
     q = query.upper().strip()
     matches: List[Airport] = []
 
-    for a in ctx.model.airports.values():
-        if (
-            (q in a.ident)
-            or (a.name and q in a.name.upper())
-            or (getattr(a, "iata_code", None) and q in a.iata_code)
-            or (a.municipality and q in a.municipality.upper())
-        ):
-            matches.append(a)
-            if len(matches) >= 200:  # Get more candidates before filtering
-                break
+    # Country name to ISO-2 code mapping for common country searches
+    country_name_map = {
+        "GERMANY": "DE", "FRANCE": "FR", "UNITED KINGDOM": "GB", "UK": "GB",
+        "SPAIN": "ES", "ITALY": "IT", "NETHERLANDS": "NL", "BELGIUM": "BE",
+        "SWITZERLAND": "CH", "AUSTRIA": "AT", "POLAND": "PL", "PORTUGAL": "PT",
+        "GREECE": "GR", "IRELAND": "IE", "SWEDEN": "SE", "NORWAY": "NO",
+        "DENMARK": "DK", "FINLAND": "FI", "CZECH REPUBLIC": "CZ", "CZECHIA": "CZ",
+        "HUNGARY": "HU", "CROATIA": "HR", "SLOVENIA": "SI", "SLOVAKIA": "SK",
+        "ROMANIA": "RO", "BULGARIA": "BG", "TURKEY": "TR", "MALTA": "MT",
+        "LUXEMBOURG": "LU", "ICELAND": "IS", "ESTONIA": "EE", "LATVIA": "LV",
+        "LITHUANIA": "LT", "CYPRUS": "CY", "SERBIA": "RS", "ALBANIA": "AL",
+        "MONTENEGRO": "ME", "NORTH MACEDONIA": "MK", "BOSNIA": "BA",
+        "GUERNSEY": "GG", "JERSEY": "JE",
+    }
+    
+    # Check if query is a country name
+    country_code = country_name_map.get(q)
+    
+    if country_code:
+        # Search by country code
+        for a in ctx.model.airports.values():
+            if (a.iso_country or "").upper() == country_code:
+                matches.append(a)
+                if len(matches) >= 200:
+                    break
+    else:
+        # Standard search: ICAO, name, IATA, municipality, or ISO country
+        for a in ctx.model.airports.values():
+            if (
+                (q in a.ident)
+                or (a.name and q in a.name.upper())
+                or (getattr(a, "iata_code", None) and q in a.iata_code)
+                or (a.municipality and q in a.municipality.upper())
+                or ((a.iso_country or "").upper() == q)  # Also check ISO country code
+            ):
+                matches.append(a)
+                if len(matches) >= 200:  # Get more candidates before filtering
+                    break
 
+    # If no matches found, try geocoding the query as a location name
+    if not matches:
+        geocode = _geoapify_geocode(query)
+        if geocode:
+            # Find airports near the geocoded location (within 50nm by default)
+            center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
+            for airport in ctx.model.airports.values():
+                if not getattr(airport, "navpoint", None):
+                    continue
+                try:
+                    _, distance_nm = airport.navpoint.haversine_distance(center_point)
+                except Exception:
+                    continue
+                if distance_nm <= 50.0:  # Default search radius
+                    matches.append(airport)
+                    if len(matches) >= 200:
+                        break
+    
     # Apply filters using FilterEngine
     if filters:
         filter_engine = FilterEngine(context=ctx)
