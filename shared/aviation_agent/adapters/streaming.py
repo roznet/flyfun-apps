@@ -37,6 +37,12 @@ async def stream_aviation_agent(
     total_input_tokens = 0
     total_output_tokens = 0
     final_state = None
+    
+    # Track if we've seen streaming from rules_agent's LLM
+    # This helps us decide whether to emit the full answer or just references
+    # We track this by checking if streaming happens between rules_rag and rules_agent completion
+    rules_agent_streamed = False
+    rules_rag_completed = False
 
     try:
         # Use LangGraph's astream_events for fine-grained streaming
@@ -135,10 +141,19 @@ async def stream_aviation_agent(
                         total_input_tokens += usage.prompt_tokens or 0
                         total_output_tokens += usage.completion_tokens or 0
             
+            elif kind == "on_chain_end" and event.get("name") == "rules_rag":
+                # Rules RAG completed - mark this so we can detect rules_agent streaming
+                rules_rag_completed = True
+            
             # Capture LLM streaming - LangGraph uses on_chat_model_stream for ChatOpenAI
             # This is emitted when the LLM streams chunks inside a chain.invoke() call
             # We want to capture this from the formatter's LLM, not the planner's
             elif kind == "on_chat_model_stream":
+                # If we've seen rules_rag complete but not rules_agent, this streaming is likely from rules_agent
+                if rules_rag_completed and not rules_agent_streamed:
+                    rules_agent_streamed = True
+                    logger.debug("Detected streaming from rules_agent LLM")
+                
                 # Only capture if it's from the formatter (not planner)
                 # The name will be the LLM instance name, but we can check the parent chain
                 # For now, capture all chat_model_stream events (planner doesn't stream)
@@ -193,16 +208,29 @@ async def stream_aviation_agent(
                     logger.warning(f"Rules agent output is not a dict: {type(output)}")
                     output = {}
 
-                # Emit the complete answer with references as a message event
-                # This is critical - the LLM streams tokens during generation, but the references
-                # are appended AFTER streaming completes, so we need to emit the full answer here
+                # Handle answer emission based on whether LLM streamed or not
                 if output.get("rules_answer"):
                     answer_with_refs = output["rules_answer"]
-                    logger.info(f"Emitting rules answer with references ({len(answer_with_refs)} chars)")
-                    yield {
-                        "event": "message",
-                        "data": {"content": answer_with_refs}
-                    }
+                    refs_marker = "\n\n---\n\n### References\n\n"
+                    
+                    if rules_agent_streamed:
+                        # LLM answer was already streamed, only emit references if they exist
+                        if refs_marker in answer_with_refs:
+                            refs_section = answer_with_refs.split(refs_marker, 1)[1]
+                            logger.info(f"LLM streamed, emitting references section only ({len(refs_section)} chars)")
+                            yield {
+                                "event": "message",
+                                "data": {"content": refs_section}
+                            }
+                        else:
+                            logger.debug("LLM streamed, no references section to emit")
+                    else:
+                        # LLM didn't stream, emit the full answer (including references if present)
+                        logger.info(f"LLM did not stream, emitting full answer ({len(answer_with_refs)} chars)")
+                        yield {
+                            "event": "message",
+                            "data": {"content": answer_with_refs}
+                        }
 
                 # Emit thinking if available
                 if output.get("thinking"):
