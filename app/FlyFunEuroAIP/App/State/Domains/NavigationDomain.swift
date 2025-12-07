@@ -19,6 +19,8 @@ final class NavigationDomain {
     // MARK: - Left Overlay Mode
     /// Controls what's shown in the left overlay (search/filter or chat)
     var leftOverlayMode: LeftOverlayMode = .search
+    /// Whether the left overlay panel is visible (for iPad/Mac - slides in from left)
+    var showingLeftOverlay: Bool = false
     
     // MARK: - Bottom Tab State
     /// Selected bottom tab (Airport Info, AIP, Rules)
@@ -151,10 +153,24 @@ final class NavigationDomain {
     
     func showSearchInLeftOverlay() {
         leftOverlayMode = .search
+        showingLeftOverlay = true
     }
     
     func showChatInLeftOverlay() {
         leftOverlayMode = .chat
+        showingLeftOverlay = true
+    }
+    
+    func showLeftOverlay() {
+        showingLeftOverlay = true
+    }
+    
+    func hideLeftOverlay() {
+        showingLeftOverlay = false
+    }
+    
+    func toggleLeftOverlayVisibility() {
+        showingLeftOverlay.toggle()
     }
     
     // MARK: - Bottom Tab Actions

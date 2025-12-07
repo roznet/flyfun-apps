@@ -139,21 +139,50 @@ struct RegularLayout: View {
     @Environment(\.appState) private var state
     
     var body: some View {
-        HStack(spacing: 0) {
-            // Left Overlay (Search/Chat)
-            LeftOverlayContainer()
+        ZStack {
+            // Full screen map
+            AirportMapView()
+                .ignoresSafeArea()
             
-            // Map (fills remaining space)
-            ZStack {
-                AirportMapView()
-                
-                // Bottom Tab Bar (overlay)
-                VStack {
-                    Spacer()
-                    BottomTabBar()
+            // Semi-transparent backdrop when overlay is visible (tap to dismiss)
+            if state?.navigation.showingLeftOverlay == true {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        state?.navigation.hideLeftOverlay()
+                    }
+                    .transition(.opacity)
+            }
+            
+            // Left Overlay (slides in from left when visible)
+            HStack(spacing: 0) {
+                if state?.navigation.showingLeftOverlay == true {
+                    LeftOverlayContainer()
+                        .transition(.move(edge: .leading))
+                        .zIndex(1) // Ensure overlay is above backdrop
                 }
+                Spacer()
+            }
+            
+            // Bottom Tab Bar (overlay)
+            VStack {
+                Spacer()
+                BottomTabBar()
+            }
+            
+            // Floating Action Buttons (top-right corner)
+            VStack {
+                HStack {
+                    Spacer()
+                    RegularFloatingActionButtons()
+                        .padding(.trailing, 16)
+                        .padding(.top, 8)
+                }
+                .padding(.top, 8) // Safe area padding
+                Spacer()
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: state?.navigation.showingLeftOverlay)
     }
 }
 
@@ -223,6 +252,52 @@ struct FloatingActionButtons: View {
                 color: state?.airports.filters.hasActiveFilters == true ? .orange : .gray
             ) {
                 state?.navigation.toggleFilters()
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
+// MARK: - Floating Action Buttons (iPad/Mac)
+
+struct RegularFloatingActionButtons: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Search button
+            FloatingActionButton(
+                icon: "magnifyingglass",
+                label: "Search",
+                color: .blue
+            ) {
+                state?.navigation.showSearchInLeftOverlay()
+            }
+            
+            // Chat button
+            FloatingActionButton(
+                icon: "bubble.left.and.bubble.right",
+                label: "Chat",
+                color: .green
+            ) {
+                state?.navigation.showChatInLeftOverlay()
+            }
+            
+            // Filters button (if has active filters, show indicator)
+            FloatingActionButton(
+                icon: state?.airports.filters.hasActiveFilters == true 
+                    ? "line.3.horizontal.decrease.circle.fill"
+                    : "line.3.horizontal.decrease.circle",
+                label: "Filters",
+                color: state?.airports.filters.hasActiveFilters == true ? .orange : .gray
+            ) {
+                // Show search overlay (filters are accessed from search) and open filter sheet
+                state?.navigation.showSearchInLeftOverlay()
+                // Small delay to let overlay animate in, then show filter sheet
+                Task {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    state?.navigation.showFilters()
+                }
             }
         }
         .padding(.top, 8)

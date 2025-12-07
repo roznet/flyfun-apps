@@ -58,6 +58,14 @@ struct LeftOverlayContainer: View {
                         .foregroundStyle(state?.airports.filters.hasActiveFilters == true ? .blue : .secondary)
                 }
             }
+            
+            // Close button (for iPad/Mac - to dismiss overlay)
+            Button {
+                state?.navigation.hideLeftOverlay()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .background(.regularMaterial)
