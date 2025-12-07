@@ -967,28 +967,53 @@
         /* Expand airport content to fill space when legend is hidden (map collapsed) */
         .map-data-row.map-collapsed .right-panel {
             gap: 0;
+            height: 100% !important;
+            min-height: 100%;
         }
 
         /* Make airport content expand to fill all available space when legend is hidden */
         .map-data-row.map-collapsed .right-panel #airport-content {
-            flex: 1 1 auto;
+            flex: 1 1 100% !important;
             min-height: 0;
-            max-height: 100%;
+            max-height: none !important;
+            height: 100%;
         }
 
         /* Ensure tab content expands fully */
         .map-data-row.map-collapsed .right-panel .tab-content {
+            flex: 1 1 auto !important;
+            min-height: 0;
+            height: 100%;
+        }
+
+        /* Ensure tab pane content expands */
+        .map-data-row.map-collapsed .right-panel .tab-pane-content {
+            height: 100%;
+        }
+
+        /* Ensure details panel expands when legend is hidden */
+        .map-data-row.map-collapsed .right-panel #airport-details {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Remove max-height constraint on airport-info when map is collapsed */
+        .map-data-row.map-collapsed .right-panel .airport-info {
+            max-height: none !important;
             flex: 1 1 auto;
             min-height: 0;
+            height: 100%;
         }
 
         /* Ensure no-selection message also expands when legend is hidden */
         .map-data-row.map-collapsed .right-panel #no-selection {
-            flex: 1 1 auto;
+            flex: 1 1 100% !important;
             display: flex;
             align-items: center;
             justify-content: center;
             min-height: 0;
+            height: 100%;
         }
 
         /* Right panel expands when map is collapsed */
@@ -997,6 +1022,7 @@
             max-width: calc(100% - 55px) !important;
             min-width: calc(100% - 55px) !important;
             width: calc(100% - 55px) !important;
+            height: 100% !important;
             box-sizing: border-box !important;
         }
 
@@ -1081,6 +1107,11 @@
 
         /* Hide collapse map button when data panel is collapsed */
         .right-panel-col.collapsed ~ .map-column-col .map-collapse-btn {
+            display: none !important;
+        }
+
+        /* Hide map expand button when data panel is collapsed (only show data expand button) */
+        .right-panel-col.collapsed ~ .map-column-col .map-expand-btn {
             display: none !important;
         }
 
