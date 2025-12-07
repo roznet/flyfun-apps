@@ -74,6 +74,8 @@ struct AirportMapView: View {
             #endif
         }
         .onMapCameraChange(frequency: .onEnd) { context in
+            // Update visibleRegion when map camera changes to keep it in sync
+            state?.airports.visibleRegion = context.region
             state?.airports.onRegionChange(context.region)
         }
         .onChange(of: selectedAirportID) { _, newValue in
@@ -113,8 +115,18 @@ struct AirportMapView: View {
     
     // MARK: - Computed Properties
     
+    /// Get airports to display on map
+    /// Priority: searchResults (if search active) > airports (route/region-based)
     private var airports: [RZFlight.Airport] {
-        state?.airports.airports ?? []
+        guard let state = state else { return [] }
+        
+        // If search is active and has results, show search results
+        if state.airports.isSearchActive && !state.airports.searchResults.isEmpty {
+            return state.airports.searchResults
+        }
+        
+        // Otherwise show the main airports array (route results or region-based)
+        return state.airports.airports
     }
     
     private var highlights: [String: MapHighlight] {

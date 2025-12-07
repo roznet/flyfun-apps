@@ -136,7 +136,9 @@ final class AirportDomain {
         if isRouteQuery(query) {
             try await searchRoute(query)
         } else {
-            // Regular search - set search active to preserve results
+            // Regular search - clear route state and set search active to preserve results
+            activeRoute = nil
+            highlights = highlights.filter { !$0.key.hasPrefix("route-") }
             isSearchActive = true
             searchResults = try await repository.searchAirports(query: query, limit: 50)
         }
@@ -155,12 +157,16 @@ final class AirportDomain {
         // Mark search as active to prevent region loading from overwriting results
         isSearchActive = true
         
+        // Clear previous route state
+        activeRoute = nil
+        highlights = highlights.filter { !$0.key.hasPrefix("route-") }
+        
         let result = try await repository.airportsNearRoute(
             from: from, to: to, distanceNm: 50, filters: filters
         )
         airports = result.airports
         
-        // Build route coordinates
+        // Build route coordinates - ensure we have valid coordinates
         if let depAirport = try await repository.airportDetail(icao: from),
            let arrAirport = try await repository.airportDetail(icao: to) {
             activeRoute = RouteVisualization(
@@ -168,9 +174,30 @@ final class AirportDomain {
                 departure: from,
                 destination: to
             )
+            
+            // Update visibleRegion to match route bounds
+            let minLat = min(depAirport.coord.latitude, arrAirport.coord.latitude)
+            let maxLat = max(depAirport.coord.latitude, arrAirport.coord.latitude)
+            let minLon = min(depAirport.coord.longitude, arrAirport.coord.longitude)
+            let maxLon = max(depAirport.coord.longitude, arrAirport.coord.longitude)
+            
+            visibleRegion = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: (minLat + maxLat) / 2,
+                    longitude: (minLon + maxLon) / 2
+                ),
+                span: MKCoordinateSpan(
+                    latitudeDelta: (maxLat - minLat) * 1.5,
+                    longitudeDelta: (maxLon - minLon) * 1.5
+                )
+            )
+            
+            fitMapToRoute()
+        } else {
+            Logger.app.warning("Could not load route airports: \(from) or \(to) not found")
+            // Still show airports even if route line can't be drawn
         }
         
-        fitMapToRoute()
         Logger.app.info("Route search active - showing \(airports.count) airports within 50nm")
     }
     
@@ -188,11 +215,16 @@ final class AirportDomain {
     // MARK: - Map Control
     
     func focusMap(on coordinate: CLLocationCoordinate2D, span: Double = 2.0) {
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
+        )
+        
+        // Sync visibleRegion with mapPosition
+        visibleRegion = region
+        
         withAnimation(.snappy) {
-            mapPosition = .region(MKCoordinateRegion(
-                center: coordinate,
-                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
-            ))
+            mapPosition = .region(region)
         }
     }
     
@@ -213,8 +245,13 @@ final class AirportDomain {
             longitudeDelta: (maxLon - minLon) * 1.5
         )
         
+        let region = MKCoordinateRegion(center: center, span: span)
+        
+        // Sync visibleRegion with mapPosition
+        visibleRegion = region
+        
         withAnimation(.snappy) {
-            mapPosition = .region(MKCoordinateRegion(center: center, span: span))
+            mapPosition = .region(region)
         }
     }
     
@@ -433,11 +470,22 @@ final class AirportDomain {
         isSearchActive = false
         searchResults = []
         
-        if let region = visibleRegion {
-            try await loadAirportsInRegion(region)
+        // Clear route state when filters are applied
+        activeRoute = nil
+        highlights = highlights.filter { !$0.key.hasPrefix("route-") }
+        
+        // Use current visible region, or fallback to default Europe region
+        // visibleRegion is kept in sync by onMapCameraChange, so it should be current
+        let region: MKCoordinateRegion
+        if let visible = visibleRegion {
+            region = visible
         } else {
-            try await load()
+            // Fallback to default Europe region if visibleRegion hasn't been set yet
+            region = .europe
+            visibleRegion = region
         }
+        
+        try await loadAirportsInRegion(region)
     }
     
     func resetFilters() {
