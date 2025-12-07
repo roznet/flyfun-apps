@@ -560,14 +560,14 @@ export class ChatbotManager {
         <ul>
           <li>Finding airports and their details</li>
           <li>Planning routes between airports</li>
-          <li>Filtering airports by criteria</li>
           <li>Answering questions about aviation rules and procedures</li>
         </ul>
         <p>Try asking me something like:</p>
         <ul>
           <li>"Show me airports in France"</li>
-          <li>"Find airports between LFPO and EDDM"</li>
+          <li>"Find airports between EGTK and LFMD</li>
           <li>"What are the border crossing airports in Germany?"</li>
+          <li>"What the rule for an IFR flight from an uncontrolled airfield in France?"</li>
         </ul>
       </div>
     `;
