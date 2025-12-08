@@ -77,6 +77,7 @@ def build_agent_graph(
                 enable_reranking=behavior_config.reranking.enabled,
                 reranking_provider=behavior_config.reranking.provider,
                 reranking_config=behavior_config.reranking,
+                retrieval_config=behavior_config.rag.retrieval,
                 llm=router_llm,
                 rules_manager=rules_manager
             )

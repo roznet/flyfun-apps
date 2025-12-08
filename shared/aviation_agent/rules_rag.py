@@ -380,6 +380,7 @@ class RulesRAG:
         enable_reranking: bool = False,
         reranking_provider: str = "cohere",
         reranking_config: Optional[Any] = None,
+        retrieval_config: Optional[Any] = None,
         llm: Optional[Any] = None,
         rules_manager: Optional[Any] = None,
     ):
@@ -394,6 +395,7 @@ class RulesRAG:
             enable_reranking: Whether to use reranking
             reranking_provider: Reranking provider ("cohere", "openai", or "none")
             reranking_config: RerankingConfig object with provider-specific settings
+            retrieval_config: RetrievalConfig object with retrieval parameters (top_k, similarity_threshold, rerank_candidates_multiplier)
             llm: Optional LLM instance for reformulation
             rules_manager: Optional RulesManager instance for multi-country lookups
         """
@@ -415,6 +417,7 @@ class RulesRAG:
         self.enable_reranking = enable_reranking
         self.reranking_provider = reranking_provider if enable_reranking else "none"
         self.reranking_config = reranking_config
+        self.retrieval_config = retrieval_config
         
         if enable_reranking and reranking_provider == "cohere":
             from .behavior_config import RerankingConfig
@@ -610,10 +613,8 @@ class RulesRAG:
             # Take top_k * multiplier candidates for reranking to give reranker more options
             from .behavior_config import RetrievalConfig
             multiplier = 2  # Default
-            if self.reranking_config and hasattr(self.reranking_config, 'retrieval'):
-                # This is a bit of a hack - we need to get the retrieval config from the behavior config
-                # For now, use default multiplier
-                pass
+            if self.retrieval_config and hasattr(self.retrieval_config, 'rerank_candidates_multiplier'):
+                multiplier = self.retrieval_config.rerank_candidates_multiplier
             candidates = question_matches[:top_k * multiplier]
             if candidates:
                 question_matches = self.reranker.rerank(
