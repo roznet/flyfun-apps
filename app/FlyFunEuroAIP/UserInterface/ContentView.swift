@@ -171,7 +171,9 @@ struct RegularLayout: View {
             HStack(spacing: 0) {
                 if state?.navigation.showingLeftOverlay == true {
                     LeftOverlayContainer()
-                        .transition(.move(edge: .leading))
+                        .padding(.leading, 8)
+                        .padding(.vertical, 8)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                         .zIndex(1) // Ensure overlay is above backdrop
                 }
                 Spacer()

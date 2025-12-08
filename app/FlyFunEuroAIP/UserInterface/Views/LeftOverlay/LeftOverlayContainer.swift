@@ -291,6 +291,8 @@ struct LeftOverlayContainer: View {
         }
         .frame(width: overlayWidth)
         .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.15), radius: 20, x: 4, y: 0)
     }
     
     // MARK: - Toolbar
