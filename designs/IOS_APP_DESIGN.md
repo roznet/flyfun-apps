@@ -252,7 +252,7 @@ import MapKit
 /// 
 /// IMPORTANT: Filtering is done HERE, not in FilterConfig.
 /// This keeps FilterConfig pure (no DB dependencies).
-protocol AirportRepositoryProtocol {
+protocol AirportRepositoryProtocol: Sendable {
     // MARK: - Region-Based Queries (for map performance)
     
     /// Get airports within a bounding box - PRIMARY method for map display
@@ -282,22 +282,42 @@ protocol AirportRepositoryProtocol {
     /// Apply cheap in-memory filters only (no DB access)
     func applyInMemoryFilters(_ filters: FilterConfig, to airports: [Airport]) -> [Airport]
     
-    // MARK: - Extended Data
-    func countryRules(for countryCode: String) async throws -> CountryRules?
-    
     // MARK: - Metadata
     func availableCountries() async throws -> [String]
-    func filterMetadata() async throws -> FilterMetadata
+    
+    /// Get set of ICAOs that are border crossing points
+    func borderCrossingICAOs() async throws -> Set<String>
 }
 
 // MARK: - Bounding Box for Region Queries
 
 /// Geographic bounding box for region-based queries
 struct BoundingBox: Sendable, Equatable {
-    let minLatitude: Double
-    let maxLatitude: Double
-    let minLongitude: Double
-    let maxLongitude: Double
+    /// Southwest corner (minimum latitude and longitude)
+    let minCoord: CLLocationCoordinate2D
+    /// Northeast corner (maximum latitude and longitude)
+    let maxCoord: CLLocationCoordinate2D
+    
+    // MARK: - Convenience Accessors
+    
+    var minLatitude: Double { minCoord.latitude }
+    var maxLatitude: Double { maxCoord.latitude }
+    var minLongitude: Double { minCoord.longitude }
+    var maxLongitude: Double { maxCoord.longitude }
+    
+    // MARK: - Initializers
+    
+    init(minCoord: CLLocationCoordinate2D, maxCoord: CLLocationCoordinate2D) {
+        self.minCoord = minCoord
+        self.maxCoord = maxCoord
+    }
+    
+    init(minLatitude: Double, maxLatitude: Double, minLongitude: Double, maxLongitude: Double) {
+        self.minCoord = CLLocationCoordinate2D(latitude: minLatitude, longitude: minLongitude)
+        self.maxCoord = CLLocationCoordinate2D(latitude: maxLatitude, longitude: maxLongitude)
+    }
+    
+    // MARK: - Queries
     
     /// Check if a coordinate is within this bounding box
     func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
@@ -306,16 +326,25 @@ struct BoundingBox: Sendable, Equatable {
         coordinate.longitude >= minLongitude &&
         coordinate.longitude <= maxLongitude
     }
+    
+    /// Check if an airport is within this bounding box
+    func contains(_ airport: RZFlight.Airport) -> Bool {
+        contains(airport.coord)
+    }
 }
 
 extension MKCoordinateRegion {
     /// Convert region to bounding box
     var boundingBox: BoundingBox {
         BoundingBox(
-            minLatitude: center.latitude - span.latitudeDelta / 2,
-            maxLatitude: center.latitude + span.latitudeDelta / 2,
-            minLongitude: center.longitude - span.longitudeDelta / 2,
-            maxLongitude: center.longitude + span.longitudeDelta / 2
+            minCoord: CLLocationCoordinate2D(
+                latitude: center.latitude - span.latitudeDelta / 2,
+                longitude: center.longitude - span.longitudeDelta / 2
+            ),
+            maxCoord: CLLocationCoordinate2D(
+                latitude: center.latitude + span.latitudeDelta / 2,
+                longitude: center.longitude + span.longitudeDelta / 2
+            )
         )
     }
     
@@ -711,36 +740,100 @@ extension Runway {
 ```swift
 import RZUtilsSwift
 
+// MARK: - Data Source Strategy
+
+/// Strategy for choosing data source based on connectivity
+enum DataSourceStrategy: String, Sendable {
+    case localOnly      // Always use local (offline mode)
+    case remotePreferred  // Try remote first, fallback to local
+    case localPreferred   // Try local first, use remote for missing data
+}
+
+// MARK: - Unified Repository
+
 /// Main repository that switches between offline/online sources
+/// Uses strategy pattern for flexible data source selection
 @Observable
+@MainActor
 final class AirportRepository: AirportRepositoryProtocol {
+    // MARK: - State
     private(set) var connectivityMode: ConnectivityMode = .offline
+    private(set) var strategy: DataSourceStrategy = .localOnly
     
+    // MARK: - Dependencies
     private let localDataSource: LocalAirportDataSource
-    private let remoteDataSource: RemoteAirportDataSource
+    private var remoteDataSource: RemoteAirportDataSource?
     private let connectivityMonitor: ConnectivityMonitor
-    private let log = RZSLog(AirportRepository.self)
     
-    private var activeSource: AirportRepositoryProtocol {
-        switch connectivityMode {
-        case .offline: return localDataSource
-        case .online, .hybrid: return remoteDataSource
-        }
+    // MARK: - Configuration
+    
+    /// Base URL for the API (configurable)
+    static var apiBaseURL: String = "https://maps.flyfun.aero"
+    
+    // MARK: - Init
+    
+    init(localDataSource: LocalAirportDataSource, connectivityMonitor: ConnectivityMonitor) {
+        self.localDataSource = localDataSource
+        self.connectivityMonitor = connectivityMonitor
     }
     
-    func getAirports(filters: FilterConfig, limit: Int) async throws -> [Airport] {
-        log.debug("getAirports: mode=\(connectivityMode), filters=\(filters)")
+    // MARK: - Remote Setup
+    
+    /// Initialize the remote data source (call when online)
+    func setupRemoteDataSource() {
+        guard remoteDataSource == nil else { return }
+        
         do {
-            return try await activeSource.getAirports(filters: filters, limit: limit)
+            remoteDataSource = try RemoteAirportDataSource(baseURLString: Self.apiBaseURL)
+            Logger.app.info("Remote data source initialized")
         } catch {
-            log.warning("Remote failed, falling back to local: \(error)")
-            // Fallback to local on network error (hybrid mode)
-            if connectivityMode == .hybrid {
-                return try await localDataSource.getAirports(filters: filters, limit: limit)
-            }
-            throw error
+            Logger.app.error("Failed to initialize remote data source: \(error.localizedDescription)")
         }
     }
+    
+    /// Update strategy based on connectivity and user preference
+    func updateStrategy(preferRemote: Bool = false) {
+        switch connectivityMode {
+        case .offline:
+            strategy = .localOnly
+        case .online, .hybrid:
+            strategy = preferRemote ? .remotePreferred : .localPreferred
+            // Lazily initialize remote data source when we go online
+            if strategy != .localOnly {
+                setupRemoteDataSource()
+            }
+        }
+        Logger.app.info("Repository strategy: \(strategy.rawValue)")
+    }
+    
+    // MARK: - Connectivity Observation
+    
+    func startObservingConnectivity() {
+        Task {
+            for await mode in connectivityMonitor.modeStream {
+                self.connectivityMode = mode
+                self.updateStrategy()
+                Logger.sync.info("Repository connectivity: \(mode.rawValue)")
+            }
+        }
+    }
+    
+    // MARK: - Active Data Source
+    
+    /// Get the active data source based on current strategy
+    private var activeDataSource: AirportRepositoryProtocol {
+        switch strategy {
+        case .localOnly, .localPreferred:
+            return localDataSource
+        case .remotePreferred:
+            return remoteDataSource ?? localDataSource
+        }
+    }
+    
+    // MARK: - AirportRepositoryProtocol Implementation
+    
+    // Note: Current implementation uses localDataSource for most queries
+    // Remote data source integration is in progress
 }
 ```
 
@@ -799,32 +892,86 @@ Only create app-level types for things NOT in RZFlight:
 /// App-specific: Filter configuration for UI binding
 /// PURE DATA - no DB dependencies, no apply() method
 struct FilterConfig: Codable, Equatable, Sendable {
+    // MARK: - Geographic Filters
     var country: String?
+    
+    // MARK: - Feature Filters
     var hasProcedures: Bool?
-    var hasAIPData: Bool?
     var hasHardRunway: Bool?
+    var hasLightedRunway: Bool?
     var pointOfEntry: Bool?
-    var hasAvgas: Bool?
-    var hasJetA: Bool?
+    
+    // MARK: - Runway Filters
     var minRunwayLengthFt: Int?
     var maxRunwayLengthFt: Int?
-    var maxLandingFee: Int?
+    
+    // MARK: - Approach Filters
+    var hasILS: Bool?
+    var hasRNAV: Bool?
+    var hasPrecisionApproach: Bool?
+    
+    // MARK: - AIP Filters
     var aipField: String?
-    var aipValue: String?
-    var aipOperator: AIPOperator?
     
-    enum AIPOperator: String, Codable, Sendable {
-        case contains, equals, notEmpty, startsWith, endsWith
-    }
-    
+    // MARK: - Default
     static let `default` = FilterConfig()
     
-    /// Check if any filters are active
+    // MARK: - Computed Properties
+    
+    /// Returns true if any filter is active
     var hasActiveFilters: Bool {
-        country != nil || hasProcedures != nil || hasAIPData != nil ||
-        hasHardRunway != nil || pointOfEntry != nil || hasAvgas != nil ||
-        hasJetA != nil || minRunwayLengthFt != nil || maxRunwayLengthFt != nil ||
-        maxLandingFee != nil || aipField != nil
+        country != nil ||
+        hasProcedures == true ||
+        hasHardRunway == true ||
+        hasLightedRunway == true ||
+        pointOfEntry == true ||
+        minRunwayLengthFt != nil ||
+        maxRunwayLengthFt != nil ||
+        hasILS == true ||
+        hasRNAV == true ||
+        hasPrecisionApproach == true ||
+        aipField != nil
+    }
+    
+    /// Count of active filters
+    var activeFilterCount: Int {
+        var count = 0
+        if country != nil { count += 1 }
+        if hasProcedures == true { count += 1 }
+        if hasHardRunway == true { count += 1 }
+        if hasLightedRunway == true { count += 1 }
+        if pointOfEntry == true { count += 1 }
+        if minRunwayLengthFt != nil { count += 1 }
+        if maxRunwayLengthFt != nil { count += 1 }
+        if hasILS == true { count += 1 }
+        if hasRNAV == true { count += 1 }
+        if hasPrecisionApproach == true { count += 1 }
+        if aipField != nil { count += 1 }
+        return count
+    }
+    
+    /// Human-readable description of active filters
+    var description: String {
+        var parts: [String] = []
+        if let country = country { parts.append("Country: \(country)") }
+        if hasProcedures == true { parts.append("Has procedures") }
+        if hasHardRunway == true { parts.append("Hard runway") }
+        if hasLightedRunway == true { parts.append("Lighted runway") }
+        if pointOfEntry == true { parts.append("Border crossing") }
+        if let min = minRunwayLengthFt { parts.append("Runway ≥ \(min)ft") }
+        if let max = maxRunwayLengthFt { parts.append("Runway ≤ \(max)ft") }
+        if hasILS == true { parts.append("Has ILS") }
+        if hasRNAV == true { parts.append("Has RNAV") }
+        if hasPrecisionApproach == true { parts.append("Precision approach") }
+        if let field = aipField { parts.append("AIP field: \(field)") }
+        return parts.isEmpty ? "No filters" : parts.joined(separator: ", ")
+    }
+    
+    // MARK: - Mutating Helpers
+    
+    /// Reset all filters to defaults
+    mutating func reset() {
+        self = .default
     }
     
     // NOTE: No apply(to:db:) method!
@@ -833,12 +980,20 @@ struct FilterConfig: Codable, Equatable, Sendable {
 }
 
 /// App-specific: Map visualization highlight
-struct MapHighlight: Identifiable {
+struct MapHighlight: Identifiable, Sendable, Equatable {
     let id: String
     let coordinate: CLLocationCoordinate2D
-    let color: Color
-    let radius: Double
+    let color: HighlightColor
+    let radius: Double  // meters
     let popup: String?
+    
+    enum HighlightColor: String, Sendable, Equatable {
+        case blue, red, green, orange, purple
+    }
+    
+    static func == (lhs: MapHighlight, rhs: MapHighlight) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 /// App-specific: Route visualization
@@ -1012,13 +1167,16 @@ struct ParameterDefinition: Codable {
 ### 4.3 ChatbotService Protocol
 
 ```swift
-/// Protocol for chatbot implementations
+/// Protocol for chatbot services (online/offline)
 protocol ChatbotService: Sendable {
-    var isOnline: Bool { get }
-    var capabilities: ChatbotCapabilities { get }
+    /// Send a message and stream the response
+    func sendMessage(
+        _ message: String,
+        history: [ChatMessage]
+    ) -> AsyncThrowingStream<ChatEvent, Error>
     
-    func sendMessage(_ message: String) -> AsyncThrowingStream<ChatEvent, Error>
-    func clearHistory()
+    /// Check if the service is available
+    func isAvailable() async -> Bool
 }
 
 /// Chatbot capabilities (varies by mode)
@@ -1517,41 +1675,88 @@ enum ChatbotServiceFactory {
 ### 4.9 Chatbot Events
 
 ```swift
-/// Events streamed from chatbot
+/// SSE events from the aviation agent streaming API
 enum ChatEvent: Sendable {
-    case thinking(String)              // Reasoning/planning
-    case toolCall(name: String, args: [String: Any])  // Tool execution
-    case content(String)               // Response text chunk
-    case visualization(VisualizationPayload)  // Map visualization
-    case done(TokenUsage?)             // Completion
+    /// Planner selected a tool
+    case plan(PlanData)
+    
+    /// Planning reasoning/thinking
+    case thinking(content: String)
+    
+    /// Tool execution starting
+    case toolCallStart(name: String, arguments: [String: Any])
+    
+    /// Tool execution completed
+    case toolCallEnd(name: String, result: ToolResult)
+    
+    /// Streaming message content (character by character)
+    case message(content: String)
+    
+    /// Thinking phase complete
+    case thinkingDone
+    
+    /// Visualization data for the map
+    case uiPayload(ChatVisualizationPayload)
+    
+    /// Final answer with complete state
+    case finalAnswer(state: [String: Any])
+    
+    /// Stream complete
+    case done(sessionId: String?, tokens: TokenUsage?)
+    
+    /// Error occurred
+    case error(message: String)
+    
+    /// Unknown event type
+    case unknown(event: String, data: String)
 }
 
-/// Visualization payload (matches web app)
+/// Visualization payload from chatbot API - instructs map what to display
+/// Note: This is different from the internal VisualizationPayload in AirportDomain
+struct ChatVisualizationPayload: Sendable {
+    /// Kind of visualization (airport, route, list, etc.)
+    let kind: Kind
+    
+    /// Visualization data (markers, routes, highlights)
+    let visualization: VisualizationData?
+    
+    /// Filter configuration suggested by the chatbot
+    let filters: ChatFilters?
+    
+    /// List of airport ICAOs to highlight
+    let airports: [String]?
+    
+    /// Raw data from API
+    let raw: [String: Any]
+    
+    enum Kind: String, Sendable {
+        case airport
+        case route
+        case list
+        case search
+        case unknown
+    }
+    
+    init(from dict: [String: Any]) {
+        // Parses from API response dictionary
+        // See implementation for full parsing logic
+    }
+}
+
+/// Internal visualization payload (for programmatic use in AirportDomain)
 struct VisualizationPayload: Sendable {
-    let kind: VisualizationKind
-    let airports: [Airport]?
-    let route: RouteVisualization?
-    let point: PointVisualization?
-    let filterProfile: FilterConfig?
-    
-    enum VisualizationKind: String, Sendable {
+    enum Kind: Sendable {
         case markers
-        case routeWithMarkers = "route_with_markers"
-        case markerWithDetails = "marker_with_details"
-        case pointWithMarkers = "point_with_markers"
+        case routeWithMarkers
+        case markerWithDetails
+        case regionFocus
     }
     
-    static func markers(airports: [Airport]) -> VisualizationPayload {
-        VisualizationPayload(kind: .markers, airports: airports, route: nil, point: nil, filterProfile: nil)
-    }
-    
-    static func markerWithDetails(airport: Airport) -> VisualizationPayload {
-        VisualizationPayload(kind: .markerWithDetails, airports: [airport], route: nil, point: nil, filterProfile: nil)
-    }
-    
-    static func routeWithMarkers(route: RouteVisualization, airports: [Airport]) -> VisualizationPayload {
-        VisualizationPayload(kind: .routeWithMarkers, airports: airports, route: route, point: nil, filterProfile: nil)
-    }
+    let kind: Kind
+    let airports: [RZFlight.Airport]
+    let route: RouteVisualization?
+    let point: CLLocationCoordinate2D?
+    let filterProfile: FilterConfig?
 }
 ```
 
@@ -1644,37 +1849,45 @@ import RZFlight
 @Observable
 @MainActor
 final class AirportDomain {
-    
     // MARK: - Dependencies
-    private let repository: AirportRepository
+    /// Exposed for views that need to call repository methods directly (e.g., CountryPicker)
+    let repository: AirportRepositoryProtocol
     
-    // MARK: - Airport Data
-    /// Airports in current visible region (region-based loading for performance)
-    var airports: [Airport] = []
-    var selectedAirport: Airport?
-    
-    // MARK: - Filters
-    /// Current filter config (pure data, no DB logic)
-    var filters: FilterConfig = .default
-    
-    // MARK: - Search
-    var searchQuery: String = ""
-    var searchResults: [Airport] = []
+    // MARK: - Airport Data (already filtered by repository)
+    var airports: [RZFlight.Airport] = []
+    var selectedAirport: RZFlight.Airport?
+    var searchResults: [RZFlight.Airport] = []
     var isSearching: Bool = false
     
+    // MARK: - Filters (pure data, no DB logic)
+    var filters: FilterConfig = .default
+    
     // MARK: - Map State
-    var mapPosition: MapCameraPosition = .automatic
-    var visibleRegion: MKCoordinateRegion?  // Track visible region for data loading
+    var mapPosition: MapCameraPosition = .region(.europe)
+    var visibleRegion: MKCoordinateRegion?
     var legendMode: LegendMode = .airportType
     var highlights: [String: MapHighlight] = [:]
     var activeRoute: RouteVisualization?
     
-    /// Debounce region changes to avoid excessive queries
+    // MARK: - Procedure Lines
+    /// Procedure lines for visualization (keyed by airport ICAO)
+    var procedureLines: [String: [RZFlight.Airport.ProcedureLine]] = [:]
+    private var procedureLinesLoadingTask: Task<Void, Never>?
+    
+    // MARK: - Cached Lookups (for legend coloring)
+    /// Set of ICAOs that are border crossing points - loaded once at startup
+    var borderCrossingICAOs: Set<String> = []
+    
+    // MARK: - Region Loading
     private var regionUpdateTask: Task<Void, Never>?
+    
+    // MARK: - Search State
+    /// Track when search results are active to prevent region-based loading from overwriting them
+    var isSearchActive: Bool = false
     
     // MARK: - Init
     
-    init(repository: AirportRepository) {
+    init(repository: AirportRepositoryProtocol) {
         self.repository = repository
     }
     
@@ -1682,7 +1895,13 @@ final class AirportDomain {
     
     /// Called when map region changes - loads airports for visible area
     /// Uses debouncing to avoid excessive queries during pan/zoom
+    /// Respects search state: won't overwrite search results unless search is cleared
     func onRegionChange(_ region: MKCoordinateRegion) {
+        // Don't load if search is active - preserve search results
+        guard !isSearchActive else {
+            return
+        }
+        
         regionUpdateTask?.cancel()
         regionUpdateTask = Task {
             // Debounce: wait 300ms after last region change
@@ -1704,27 +1923,52 @@ final class AirportDomain {
             filters: filters,
             limit: 500  // Cap markers for performance
         )
+        Logger.app.info("Loaded \(self.airports.count) airports in region")
+        
+        // Load procedure lines if in procedure legend mode
+        if legendMode == .procedures {
+            await loadProcedureLines()
+        }
     }
     
     /// Initial load - loads airports for default Europe view
     func load() async throws {
+        // Load border crossing ICAOs for legend coloring
+        borderCrossingICAOs = try await repository.borderCrossingICAOs()
+        Logger.app.info("Loaded \(self.borderCrossingICAOs.count) border crossing ICAOs")
+        
         let defaultRegion = MKCoordinateRegion.europe
         visibleRegion = defaultRegion
         try await loadAirportsInRegion(defaultRegion)
     }
     
+    /// Check if an airport is a border crossing (uses cached set)
+    func isBorderCrossing(_ airport: RZFlight.Airport) -> Bool {
+        borderCrossingICAOs.contains(airport.icao)
+    }
+    
     func search(query: String) async throws {
         guard !query.isEmpty else {
             searchResults = []
+            isSearchActive = false
+            // Clear search state - allow region loading to resume
+            if visibleRegion != nil {
+                try? await loadAirportsInRegion(visibleRegion!)
+            }
             return
         }
         
         isSearching = true
         defer { isSearching = false }
         
+        // Check if it's a route query (e.g., "EGTF LFMD")
         if isRouteQuery(query) {
             try await searchRoute(query)
         } else {
+            // Regular search - clear route state and set search active to preserve results
+            activeRoute = nil
+            highlights = highlights.filter { !$0.key.hasPrefix("route-") }
+            isSearchActive = true
             searchResults = try await repository.searchAirports(query: query, limit: 50)
         }
     }
@@ -1769,7 +2013,33 @@ final class AirportDomain {
         Task { try? await load() }
     }
     
-    /// Apply visualization from chatbot
+    /// Apply visualization from chatbot (ChatVisualizationPayload from API)
+    func applyVisualization(_ chatPayload: ChatVisualizationPayload) {
+        Logger.app.info("Applying chat visualization: \(chatPayload.kind.rawValue)")
+        
+        // Clear previous chat highlights
+        clearChatHighlights()
+        
+        // Apply filters if provided
+        if let chatFilters = chatPayload.filters {
+            filters = chatFilters.toFilterConfig()
+        }
+        
+        // Apply visualization data
+        if let viz = chatPayload.visualization {
+            // Handle markers, routes, center point, etc.
+            // (See implementation for full details)
+        }
+        
+        // Handle airports list (for highlighting)
+        if let airportICAOs = chatPayload.airports {
+            for icao in airportICAOs {
+                // Add highlights for each airport
+            }
+        }
+    }
+    
+    /// Apply internal visualization payload (for programmatic use)
     func applyVisualization(_ payload: VisualizationPayload) {
         switch payload.kind {
         case .markers:
@@ -1823,58 +2093,80 @@ final class AirportDomain {
 #### ChatDomain
 
 ```swift
-/// Domain: Chat messages, streaming, LLM interaction
+/// Domain: Chat messages and streaming state
+/// This is a composed part of AppState, not a standalone ViewModel.
 @Observable
 @MainActor
 final class ChatDomain {
-    
-    // MARK: - Dependencies
-    private var chatbotService: ChatbotService
-    
     // MARK: - State
     var messages: [ChatMessage] = []
     var input: String = ""
     var isStreaming: Bool = false
     var currentThinking: String?
+    var currentToolCall: String?
+    var error: String?
     
-    // MARK: - Callbacks (for cross-domain communication)
-    var onVisualization: ((VisualizationPayload) -> Void)?
+    /// Tools used during current streaming session
+    private var toolsUsed: [String] = []
+    
+    // MARK: - Cross-Domain Callback
+    /// Called when chat produces a visualization payload
+    /// AppState wires this to AirportDomain.applyVisualization
+    /// Note: Uses ChatVisualizationPayload (from API), not internal VisualizationPayload
+    var onVisualization: ((ChatVisualizationPayload) -> Void)?
+    
+    // MARK: - Dependencies
+    private var chatbotService: ChatbotService?
     
     // MARK: - Init
     
-    init(chatbotService: ChatbotService) {
-        self.chatbotService = chatbotService
+    init() {}
+    
+    /// Initialize with a chatbot service
+    func configure(service: ChatbotService) {
+        self.chatbotService = service
     }
     
     // MARK: - Actions
     
+    /// Send a message to the chatbot
     func send() async {
-        guard !input.isEmpty else { return }
+        let userMessage = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userMessage.isEmpty else { return }
         
-        let userMessage = ChatMessage(role: .user, content: input)
-        messages.append(userMessage)
+        // Check if service is available
+        guard let service = chatbotService else {
+            Logger.app.warning("Chatbot service not configured")
+            addOfflineResponse(for: userMessage)
+            return
+        }
+        
+        // Add user message
+        messages.append(ChatMessage(role: .user, content: userMessage))
         input = ""
-        isStreaming = true
+        error = nil
         
-        var assistantContent = ""
+        isStreaming = true
+        currentThinking = nil
+        currentToolCall = nil
+        toolsUsed = []  // Reset tools for new message
         
         do {
-            for try await event in chatbotService.sendMessage(userMessage.content) {
-                switch event {
-                case .thinking(let thought):
-                    currentThinking = thought
-                case .content(let chunk):
-                    assistantContent += chunk
-                    updateStreamingMessage(assistantContent)
-                case .visualization(let payload):
-                    onVisualization?(payload)  // Notify AppState
-                case .done:
-                    finalizeMessage(assistantContent)
-                case .toolCall:
-                    break
-                }
+            // Stream response from service
+            var accumulatedContent = ""
+            
+            for try await event in service.sendMessage(userMessage, history: messages.dropLast()) {
+                await handleEvent(event, accumulatedContent: &accumulatedContent)
             }
+            
+            // Ensure we have a final message
+            if !accumulatedContent.isEmpty {
+                finishStreaming()
+            }
+            
         } catch {
+            Logger.app.error("Chat error: \(error.localizedDescription)")
+            self.error = error.localizedDescription
             messages.append(ChatMessage(
                 role: .assistant,
                 content: "Sorry, I encountered an error: \(error.localizedDescription)"
@@ -1883,77 +2175,207 @@ final class ChatDomain {
         
         isStreaming = false
         currentThinking = nil
+        currentToolCall = nil
     }
     
+    /// Handle a streaming event
+    private func handleEvent(_ event: ChatEvent, accumulatedContent: inout String) async {
+        switch event {
+        case .thinking(let content):
+            currentThinking = content
+        case .thinkingDone:
+            currentThinking = nil
+        case .toolCallStart(let name, _):
+            currentToolCall = name
+            if !toolsUsed.contains(name) {
+                toolsUsed.append(name)
+            }
+        case .toolCallEnd(let name, _):
+            if currentToolCall == name {
+                currentToolCall = nil
+            }
+        case .message(let content):
+            accumulatedContent += content
+            updateLastAssistantMessage(accumulatedContent)
+        case .uiPayload(let payload):
+            onVisualization?(payload)  // Notify AppState
+        case .done:
+            break
+        case .error(let message):
+            error = message
+        case .unknown:
+            break
+        }
+    }
+    
+    /// Clear chat history
     func clear() {
         messages = []
-        chatbotService.clearHistory()
+        currentThinking = nil
+        currentToolCall = nil
+        error = nil
     }
     
-    func updateService(_ service: ChatbotService) {
-        self.chatbotService = service
-    }
-    
-    // MARK: - Private
-    
-    private func updateStreamingMessage(_ content: String) {
-        if let lastIndex = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
-            messages[lastIndex].content = content
-        } else {
+    /// Update the last assistant message (for streaming)
+    func updateLastAssistantMessage(_ content: String) {
+        guard let lastIndex = messages.lastIndex(where: { $0.role == .assistant }) else {
             messages.append(ChatMessage(role: .assistant, content: content, isStreaming: true))
+            return
         }
+        messages[lastIndex] = ChatMessage(
+            role: .assistant,
+            content: content,
+            isStreaming: true
+        )
     }
     
-    private func finalizeMessage(_ content: String) {
-        if let lastIndex = messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
-            messages[lastIndex].content = content
-            messages[lastIndex].isStreaming = false
-        }
+    /// Finish streaming for the last message
+    func finishStreaming() {
+        guard let lastIndex = messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        let message = messages[lastIndex]
+        messages[lastIndex] = ChatMessage(
+            role: message.role,
+            content: message.content,
+            isStreaming: false,
+            toolsUsed: toolsUsed
+        )
+        isStreaming = false
     }
 }
 ```
 
+**Note on Visualization Payloads:**
+- `ChatVisualizationPayload`: From API responses (SSE `ui_payload` events), parsed from JSON
+- `VisualizationPayload`: Internal type in `AirportDomain` for programmatic map updates
+- `ChatDomain` uses `ChatVisualizationPayload` and passes it to `AirportDomain.applyVisualization(_:)` which converts it appropriately
+
 #### NavigationDomain
 
 ```swift
-/// Domain: Navigation state, tabs, sheets
+/// Domain: Navigation state, tabs, sheets, overlays
 @Observable
 @MainActor
 final class NavigationDomain {
-    
-    // MARK: - State
-    var path = NavigationPath()
+    // MARK: - Tab State
     var selectedTab: Tab = .map
+    
+    // MARK: - Left Overlay Mode
+    /// Controls what's shown in the left overlay (search/filter or chat)
+    var leftOverlayMode: LeftOverlayMode = .search
+    /// Whether the left overlay panel is visible (for iPad/Mac - slides in from left)
+    var showingLeftOverlay: Bool = false
+    
+    // MARK: - Bottom Tab State
+    /// Selected bottom tab (Airport Info, AIP, Rules)
+    var selectedBottomTab: BottomTab = .airportInfo
+    /// Whether the bottom tab bar is visible (can be hidden even when airport is selected)
+    var showingBottomTabBar: Bool = false
+    
+    // MARK: - Sheet State
     var showingChat: Bool = false
+    var showingSearchSheet: Bool = false
     var showingFilters: Bool = false
     var showingSettings: Bool = false
+    var showingAirportDetail: Bool = false
     
-    enum Tab: String, CaseIterable, Identifiable {
-        case map, search, chat, settings
+    // MARK: - Navigation Path (for programmatic navigation)
+    var path = NavigationPath()
+    
+    // MARK: - Types
+    
+    enum Tab: String, CaseIterable, Identifiable, Sendable {
+        case map = "Map"
+        case search = "Search"
+        case chat = "Chat"
+        case settings = "Settings"
+        
         var id: String { rawValue }
+        
+        var systemImage: String {
+            switch self {
+            case .map: return "map"
+            case .search: return "magnifyingglass"
+            case .chat: return "bubble.left.and.bubble.right"
+            case .settings: return "gear"
+            }
+        }
+    }
+    
+    enum LeftOverlayMode: String, Sendable {
+        case search
+        case chat
+        case filters
+    }
+    
+    enum BottomTab: String, CaseIterable, Identifiable, Sendable {
+        case airportInfo = "Airport"
+        case aip = "AIP"
+        case rules = "Rules"
+        
+        var id: String { rawValue }
+        
+        var systemImage: String {
+            switch self {
+            case .airportInfo: return "airplane"
+            case .aip: return "doc.text"
+            case .rules: return "book"
+            }
+        }
+        
+        var displayName: String {
+            rawValue
+        }
     }
     
     // MARK: - Actions
     
-    func navigate(to destination: any Hashable) {
-        path.append(destination)
-    }
-    
-    func pop() {
-        guard !path.isEmpty else { return }
-        path.removeLast()
-    }
-    
-    func popToRoot() {
-        path = NavigationPath()
+    func navigate(to tab: Tab) {
+        selectedTab = tab
     }
     
     func showChat() {
         showingChat = true
     }
     
-    func showFilters() {
-        showingFilters = true
+    func hideChat() {
+        showingChat = false
+    }
+    
+    func toggleChat() {
+        showingChat.toggle()
+    }
+    
+    // Left overlay actions
+    func showSearchInLeftOverlay() {
+        leftOverlayMode = .search
+        showingLeftOverlay = true
+    }
+    
+    func showChatInLeftOverlay() {
+        leftOverlayMode = .chat
+        showingLeftOverlay = true
+    }
+    
+    func showFiltersInLeftOverlay() {
+        leftOverlayMode = .filters
+        showingLeftOverlay = true
+    }
+    
+    func hideLeftOverlay() {
+        showingLeftOverlay = false
+    }
+    
+    // Bottom tab actions
+    func selectBottomTab(_ tab: BottomTab) {
+        selectedBottomTab = tab
+    }
+    
+    func showBottomTabBar() {
+        showingBottomTabBar = true
+    }
+    
+    func hideBottomTabBar() {
+        showingBottomTabBar = false
     }
 }
 ```
@@ -2252,10 +2674,10 @@ final class SettingsDomain {
 
 // MARK: - Unit Types
 
-enum DistanceUnit: String, CaseIterable, Identifiable {
+enum DistanceUnit: String, CaseIterable, Identifiable, Sendable {
     case nauticalMiles = "nm"
     case kilometers = "km"
-    case statuteMiles = "mi"
+    case miles = "mi"
     
     var id: String { rawValue }
     
@@ -2263,7 +2685,7 @@ enum DistanceUnit: String, CaseIterable, Identifiable {
         switch self {
         case .nauticalMiles: return "Nautical Miles"
         case .kilometers: return "Kilometers"
-        case .statuteMiles: return "Statute Miles"
+        case .miles: return "Miles"
         }
     }
     
@@ -2271,7 +2693,7 @@ enum DistanceUnit: String, CaseIterable, Identifiable {
         switch self {
         case .nauticalMiles: return "NM"
         case .kilometers: return "km"
-        case .statuteMiles: return "mi"
+        case .miles: return "mi"
         }
     }
     
@@ -2279,7 +2701,7 @@ enum DistanceUnit: String, CaseIterable, Identifiable {
         switch self {
         case .nauticalMiles: return nm
         case .kilometers: return nm * 1.852
-        case .statuteMiles: return nm * 1.15078
+        case .miles: return nm * 1.15078
         }
     }
 }
@@ -2650,10 +3072,10 @@ struct MapViewCoordinator {
 ## 5b. Legend Mode
 
 ```swift
-enum LegendMode: String, CaseIterable, Identifiable {
+enum LegendMode: String, CaseIterable, Identifiable, Sendable, Codable {
     case airportType = "Airport Type"
-    case procedurePrecision = "Procedure Precision"
     case runwayLength = "Runway Length"
+    case procedures = "IFR Procedures"
     case country = "Country"
     
     var id: String { rawValue }
@@ -2809,153 +3231,172 @@ struct ContentView: View {
     }
 }
 
-// MARK: - iPad/Mac Layout (NavigationSplitView + Inspector)
+// MARK: - Regular Layout (iPad/Mac)
 
 struct RegularLayout: View {
     @Environment(\.appState) private var state
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            // Sidebar: Search + Results
-            SearchSidebar()
-                .navigationTitle("Airports")
-        } content: {
-            // Main: Map (always visible)
-            AirportMapView()
-                .navigationTitle("")
-                .toolbar(.hidden, for: .navigationBar)
-        } detail: {
-            // Detail: Airport Detail or empty state
-            if let airport = state?.selectedAirport {
-                AirportDetailView(airport: airport)
-            } else {
-                ContentUnavailableView(
-                    "Select an Airport",
-                    systemImage: "airplane.circle",
-                    description: Text("Choose an airport from the map or search to see details")
-                )
-            }
-        }
-        .inspector(isPresented: Binding(
-            get: { state?.showingFilters ?? false },
-            set: { state?.showingFilters = $0 }
-        )) {
-            FilterPanel()
-                .inspectorColumnWidth(min: 280, ideal: 320, max: 400)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    state?.showingFilters.toggle()
-                } label: {
-                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                
-                Button {
-                    state?.showingChat.toggle()
-                } label: {
-                    Label("Chat", systemImage: "bubble.left.and.bubble.right")
-                }
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { state?.showingChat ?? false },
-            set: { state?.showingChat = $0 }
-        )) {
-            NavigationStack {
-                ChatView()
-                    .navigationTitle("Aviation Assistant")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { state?.showingChat = false }
-                        }
-                    }
-            }
-            .presentationDetents([.medium, .large])
-        }
-    }
-}
-
-// MARK: - iPhone Layout (Map + Bottom Sheet)
-
-struct CompactLayout: View {
-    @Environment(\.appState) private var state
-    @State private var sheetDetent: PresentationDetent = .fraction(0.25)
-    
-    var body: some View {
-        ZStack(alignment: .top) {
-            // Full-screen map
+        ZStack {
+            // Full screen map
             AirportMapView()
                 .ignoresSafeArea()
             
-            // Floating search bar
-            SearchBarCompact()
-                .padding(.horizontal)
-                .padding(.top, 8)
+            // Semi-transparent backdrop when overlay is visible (tap to dismiss)
+            if state?.navigation.showingLeftOverlay == true {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        state?.navigation.hideLeftOverlay()
+                    }
+                    .transition(.opacity)
+            }
             
-            // Floating chat button
+            // Left Overlay (slides in from left when visible)
+            HStack(spacing: 0) {
+                if state?.navigation.showingLeftOverlay == true {
+                    LeftOverlayContainer()
+                        .padding(.leading, 8)
+                        .padding(.vertical, 8)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        .zIndex(1) // Ensure overlay is above backdrop
+                }
+                Spacer()
+            }
+            
+            // Bottom Tab Bar (overlay)
             VStack {
                 Spacer()
+                BottomTabBar()
+            }
+            
+            // Floating Action Buttons (top-right corner)
+            VStack {
                 HStack {
                     Spacer()
-                    FloatingChatButton()
-                        .padding(.trailing)
-                        .padding(.bottom, 160) // Above sheet
+                    RegularFloatingActionButtons()
+                        .padding(.trailing, 16)
+                        .padding(.top, 8)
+                }
+                .padding(.top, 8) // Safe area padding
+                Spacer()
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: state?.navigation.showingLeftOverlay)
+    }
+}
+
+/// Left overlay container that shows either Search/Filter or Chat based on navigation state
+struct LeftOverlayContainer: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Toolbar with close button
+            overlayToolbar
+            
+            // Content area - shows Search, Chat, or Filters
+            Group {
+                switch state?.navigation.leftOverlayMode ?? .search {
+                case .search:
+                    SearchView()
+                case .chat:
+                    ChatView()
+                case .filters:
+                    FilterPanelContent()
                 }
             }
         }
-        .sheet(isPresented: .constant(true)) {
-            CompactSheetContent()
-                .presentationDetents([.fraction(0.25), .medium, .large], selection: $sheetDetent)
-                .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                .interactiveDismissDisabled()
+        .frame(width: overlayWidth)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.15), radius: 20, x: 4, y: 0)
+    }
+}
+
+// MARK: - Compact Layout (iPhone)
+
+struct CompactLayout: View {
+    @Environment(\.appState) private var state
+    
+    var body: some View {
+        ZStack {
+            // Map as background
+            AirportMapView()
+                .ignoresSafeArea()
+            
+            // Bottom Tab Bar (overlay)
+            VStack {
+                Spacer()
+                BottomTabBar()
+            }
+            
+            // Floating Action Buttons (top-right corner)
+            VStack {
+                HStack {
+                    Spacer()
+                    FloatingActionButtons()
+                        .padding(.trailing, 16)
+                        .padding(.top, 8)
+                }
+                .padding(.top, 8) // Safe area padding
+                Spacer()
+            }
         }
     }
 }
 
-// MARK: - Compact Sheet Content
-
-struct CompactSheetContent: View {
+/// Bottom tab bar that shows airport detail information in tabs
+struct BottomTabBar: View {
     @Environment(\.appState) private var state
     
     var body: some View {
-        NavigationStack(path: Binding(
-            get: { state?.navigationPath ?? NavigationPath() },
-            set: { state?.navigationPath = $0 }
-        )) {
-            VStack(spacing: 0) {
-                // Segmented control for content switching
-                Picker("View", selection: Binding(
-                    get: { state?.selectedTab ?? .map },
-                    set: { state?.selectedTab = $0 }
-                )) {
-                    Label("Results", systemImage: "list.bullet").tag(AppState.Tab.search)
-                    Label("Filters", systemImage: "slider.horizontal.3").tag(AppState.Tab.map)
-                    Label("Chat", systemImage: "bubble.left").tag(AppState.Tab.chat)
-                }
-                .pickerStyle(.segmented)
-                .padding()
-                
-                // Content based on selection
-                Group {
-                    switch state?.selectedTab ?? .search {
-                    case .search, .map:
-                        if state?.selectedAirport != nil {
-                            AirportDetailView(airport: state!.selectedAirport!)
-                        } else {
-                            SearchResultsList()
+        Group {
+            // Only show if an airport is selected AND tab bar is visible
+            if state?.airports.selectedAirport != nil && (state?.navigation.showingBottomTabBar ?? false) {
+                VStack(spacing: 0) {
+                    // Tab content with close button
+                    ZStack(alignment: .topTrailing) {
+                        tabContent
+                            .frame(height: tabContentHeight)
+                        
+                        // Close button
+                        Button {
+                            state?.navigation.hideBottomTabBar()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                                .background(.ultraThinMaterial, in: Circle())
                         }
-                    case .chat:
-                        ChatView()
-                    case .settings:
-                        FilterPanel()
+                        .padding(8)
                     }
+                    
+                    // Tab bar
+                    tabBar
                 }
+                .background(.ultraThinMaterial)
+                .transition(.move(edge: .bottom))
             }
-            .navigationDestination(for: Airport.self) { airport in
-                AirportDetailView(airport: airport)
+        }
+        .onChange(of: state?.airports.selectedAirport) { oldValue, newValue in
+            if newValue != nil {
+                state?.navigation.showBottomTabBar()
+            }
+        }
+    }
+    
+    private var tabContent: some View {
+        Group {
+            if let airport = state?.airports.selectedAirport {
+                switch state?.navigation.selectedBottomTab ?? .airportInfo {
+                case .airportInfo:
+                    AirportInfoTab(airport: airport)
+                case .aip:
+                    AIPTab(airport: airport)
+                case .rules:
+                    RulesTab(airport: airport)
+                }
             }
         }
     }
@@ -4638,5 +5079,80 @@ GET  /api/sync/delta?from={version}         Delta update
 - `designs/UI_FILTER_STATE_DESIGN.md` - Web state management
 - `designs/CHATBOT_WEBUI_DESIGN.md` - Chatbot architecture
 - `designs/GA_FRIENDLINESS_DESIGN.md` - GA friendliness features
+
+---
+
+## Appendix C: Implementation Status (as of Review)
+
+### ✅ Implemented
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Architecture** |
+| AppState with composed domains | ✅ Complete | All 5 domains implemented (Airport, Chat, Navigation, System, Settings) |
+| Repository pattern | ✅ Complete | Local and Remote data sources, strategy pattern |
+| Connectivity monitoring | ✅ Complete | AsyncStream-based, ConnectionType tracking |
+| **Data Layer** |
+| LocalAirportDataSource | ✅ Complete | Uses KnownAirports, bulk loads extended data |
+| RemoteAirportDataSource | ⚠️ Partial | Structure exists, full integration in progress |
+| AirportRepository | ✅ Complete | Strategy-based switching, connectivity observation |
+| **State Management** |
+| AirportDomain | ✅ Complete | Region-based loading, procedure lines, border crossing cache |
+| ChatDomain | ✅ Complete | SSE streaming, visualization callbacks |
+| NavigationDomain | ✅ Complete | Left overlay, bottom tabs, sheets |
+| SystemDomain | ✅ Complete | Connectivity, errors, loading |
+| SettingsDomain | ✅ Complete | Unit preferences, session persistence |
+| **UI Components** |
+| Map view | ✅ Complete | Region-based loading, procedure lines, highlights |
+| Left overlay | ✅ Complete | Search/Chat/Filters switching |
+| Bottom tab bar | ✅ Complete | Airport Info/AIP/Rules tabs |
+| Chat view | ✅ Complete | Streaming, thinking indicators, tool calls |
+| Filter panel | ✅ Complete | Integrated with FilterConfig |
+| **Chatbot** |
+| OnlineChatbotService | ✅ Complete | SSE parsing, event handling |
+| ChatEvent parsing | ✅ Complete | All event types supported |
+| Visualization handling | ✅ Complete | ChatVisualizationPayload → AirportDomain |
+| Offline chatbot | ❌ Not started | POST-1.0 feature |
+
+### ⚠️ Differences from Design
+
+1. **UI Layout**: Uses ZStack with overlays instead of NavigationSplitView
+   - Left overlay slides in from left (iPad/Mac)
+   - Bottom tab bar overlays map
+   - More flexible for cross-platform consistency
+
+2. **FilterConfig**: Simplified from design
+   - Removed: `hasAIPData`, `hasAvgas`, `hasJetA`, `maxLandingFee`, `aipValue`, `aipOperator`
+   - Added: `hasLightedRunway`, `hasILS`, `hasRNAV`, `hasPrecisionApproach`
+   - Focus on core filtering needs
+
+3. **BoundingBox**: Uses `minCoord`/`maxCoord` instead of separate lat/lon
+   - More type-safe with CLLocationCoordinate2D
+   - Convenience accessors for lat/lon
+
+4. **ChatEvent**: More detailed than design
+   - Includes `plan`, `toolCallStart`, `toolCallEnd`, `thinkingDone`, `finalAnswer`
+   - Better alignment with actual API events
+
+5. **Visualization Payloads**: Two types
+   - `ChatVisualizationPayload`: From API (parsed from JSON)
+   - `VisualizationPayload`: Internal (for programmatic use)
+   - Clear separation of concerns
+
+6. **DistanceUnit**: Uses `miles` instead of `statuteMiles`
+   - Simpler naming convention
+
+### 🔄 In Progress
+
+- Remote data source full integration
+- Database sync service
+- AIP entry caching
+
+### 📋 Planned (POST-1.0)
+
+- Offline chatbot with LLM backend abstraction
+- Apple Intelligence integration
+- Database delta updates
+- Map tile offline caching
 
 
