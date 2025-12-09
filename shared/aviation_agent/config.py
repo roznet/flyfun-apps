@@ -135,7 +135,7 @@ class AviationAgentSettings(BaseSettings):
     )
     agent_config_name: Optional[str] = Field(
         default="default",
-        description="Name of agent behavior config file (without .json). Loads from data/aviation_agent_configs/",
+        description="Name of agent behavior config file (without .json). Loads from configs/aviation_agent/",
         alias="AVIATION_AGENT_CONFIG",
     )
 
@@ -201,7 +201,7 @@ def get_behavior_config(config_name: str = "default") -> "AgentBehaviorConfig":
     """
     from .behavior_config import AgentBehaviorConfig
     
-    config_dir = PROJECT_ROOT / "data" / "aviation_agent_configs"
+    config_dir = PROJECT_ROOT / "configs" / "aviation_agent"
     config_file = config_dir / f"{config_name}.json"
 
     if config_file.exists():

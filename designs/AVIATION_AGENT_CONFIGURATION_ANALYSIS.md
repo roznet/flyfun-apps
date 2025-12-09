@@ -25,10 +25,10 @@ If not set, defaults to `default.json`.
 
 ### 2. Create a New Configuration
 
-Copy `data/aviation_agent_configs/default.json` to create a new config:
+Copy `configs/aviation_agent/default.json` to create a new config:
 
 ```bash
-cp data/aviation_agent_configs/default.json data/aviation_agent_configs/my_experiment.json
+cp configs/aviation_agent/default.json configs/aviation_agent/my_experiment.json
 ```
 
 Edit `my_experiment.json` to customize settings, then use:
@@ -39,7 +39,7 @@ export AVIATION_AGENT_CONFIG=my_experiment
 
 ### 3. Modify Prompts
 
-Edit prompt files in `data/aviation_agent_configs/prompts/`:
+Edit prompt files in `configs/aviation_agent/prompts/`:
 - `planner_v1.md` - Planner system prompt
 - `formatter_v1.md` - Formatter system prompt
 - `rules_agent_v1.md` - Rules agent system prompt
@@ -185,8 +185,8 @@ File paths to system prompt markdown files (relative to config directory):
 ## Directory Structure
 
 ```
-data/
-  aviation_agent_configs/
+configs/
+  aviation_agent/
     default.json              # Default configuration
     experiment_a.json          # A/B test variant A
     experiment_b.json          # A/B test variant B
@@ -331,7 +331,7 @@ data/
 ### Configuration Loading
 
 Configs are loaded via `get_behavior_config()` in `shared/aviation_agent/config.py`:
-- Loads from `data/aviation_agent_configs/{config_name}.json`
+- Loads from `configs/aviation_agent/{config_name}.json`
 - Falls back to `default.json` if specified config not found
 - Falls back to hardcoded defaults if no config files exist
 - Cached per config name (supports multiple configs in parallel)

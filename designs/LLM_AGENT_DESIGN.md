@@ -205,7 +205,7 @@ The agent uses a **two-tier configuration system**:
    - `COHERE_API_KEY` - For reranking (if using Cohere)
    - `OPENAI_API_KEY` - For LLMs and embeddings
 
-2. **Behavior Configuration** (JSON files in `data/aviation_agent_configs/`):
+2. **Behavior Configuration** (JSON files in `configs/aviation_agent/`):
    - **LLM Settings**: Models, temperatures, streaming per component (planner, formatter, router, rules)
    - **Feature Flags**: Routing, query reformulation, reranking, next query prediction
    - **RAG Settings**: Embedding model, retrieval parameters (top_k, similarity_threshold)
@@ -433,7 +433,7 @@ def formatter_node(state: AgentState) -> Dict[str, Any]:
 
 ### Behavior Configuration
 
-All behavioral settings are controlled via JSON configuration files in `data/aviation_agent_configs/`:
+All behavioral settings are controlled via JSON configuration files in `configs/aviation_agent/`:
 
 - **LLM Configuration**: Models, temperatures, streaming per component
 - **Feature Flags**: Routing, query reformulation, reranking, next query prediction
@@ -443,7 +443,7 @@ All behavioral settings are controlled via JSON configuration files in `data/avi
 
 ### Prompt Loading
 
-System prompts are stored as markdown files in `data/aviation_agent_configs/prompts/`:
+System prompts are stored as markdown files in `configs/aviation_agent/prompts/`:
 - `planner_v1.md` - Planner system prompt
 - `formatter_v1.md` - Formatter system prompt
 - `rules_agent_v1.md` - Rules agent system prompt
