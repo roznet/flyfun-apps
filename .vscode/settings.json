@@ -19,8 +19,8 @@
     ],
     "cursorpyright.analysis.typeCheckingMode": "basic",
     "files.associations": {
-        "env.sample": "dotenv",
-        "*.env.sample": "dotenv",
-        ".env.sample": "dotenv"
+        "env.sample": "properties",
+        "*.env.sample": "properties",
+        ".env.sample": "properties"
     }
 }
