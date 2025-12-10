@@ -130,7 +130,7 @@ COUNTRY_ALIASES = {
 # Keywords for fast pre-filter routing
 RULES_KEYWORDS = [
     "rules", "regulations", "allowed", "required", "requirement", "requirements",
-    "customs", "clearance", "schengen", "border", "poe", "point of entry",
+    "clearance", "schengen", "border", "poe", "point of entry",
     "flight plan", "fpl", "ifr", "vfr", "ppr", "prior permission",
     "procedures", "rules", "law", "legal", "permitted", "permissible",
     "must", "need to", "do i", "can i", "am i", "should i",
@@ -141,6 +141,14 @@ DATABASE_KEYWORDS = [
     "near", "close to", "around", "between", "from", "to",
     "with avgas", "with jet", "runway", "facilities",
     "route", "distance", "navigation", "map",
+    # Notification queries for specific airports go to DATABASE
+    "notification", "notify", "notice", "h24", "<24h", "less than 24",
+]
+
+# Keywords that indicate notification queries - when combined with ICAO codes, route to DATABASE
+NOTIFICATION_KEYWORDS = [
+    "notification", "notify", "customs", "notice", "when should i",
+    "how much notice", "how early", "prior notice", "h24", "24h",
 ]
 
 
@@ -350,6 +358,20 @@ class QueryRouter:
         """
         # Extract countries first
         countries = self.country_extractor.extract(query, conversation)
+        
+        # PRIORITY: Check for ICAO code + notification keywords → DATABASE
+        # This overrides all other routing for specific airport notification queries
+        has_icao = bool(re.search(r'\b[A-Z]{4}\b', query))
+        notification_score = self._keyword_score(query, NOTIFICATION_KEYWORDS)
+        
+        if has_icao and notification_score >= 1:
+            logger.info(f"ICAO + notification detected → forcing DATABASE path")
+            return RouterDecision(
+                path="database",
+                countries=countries,
+                confidence=0.95,
+                reasoning=f"ICAO code with notification keywords ({notification_score}) → use notification tool"
+            )
         
         # Fast keyword pre-filter
         rules_score = self._keyword_score(query, RULES_KEYWORDS)

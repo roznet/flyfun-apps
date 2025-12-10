@@ -168,6 +168,8 @@ def _determine_kind(tool_name: str) -> str | None:
         "get_airport_pricing",
         "get_pilot_reviews",
         "get_fuel_prices",
+        "get_notification_for_airport",
+        "find_airports_by_notification",
     }:
         return "airport"
     

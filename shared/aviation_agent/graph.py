@@ -345,10 +345,71 @@ def build_agent_graph(
         plan = state.get("plan")
         if not plan:
             return {"error": "No plan available"}
+        
         try:
+            # Execute the tool
+            tool_calls = plan.get_tool_calls()
+            
+            if not tool_calls:
+                return {"error": "No tools selected in plan"}
+            
+            # Single tool execution
             result = tool_runner.run(plan)
+            
+            # POST-PROCESSING: Enrich airport results with notification data
+            # Check if this is a location/route tool and query mentions notifications
+            messages = state.get("messages", [])
+            user_query = messages[-1].content.lower() if messages and hasattr(messages[-1], 'content') else ""
+            
+            notification_keywords = ["notification", "notify", "customs", "notice", "prior", "how early", "when should"]
+            wants_notifications = any(kw in user_query for kw in notification_keywords)
+            
+            location_tools = {"find_airports_near_location", "find_airports_near_route", "search_airports"}
+            first_tool = tool_calls[0].tool_name if tool_calls else plan.selected_tool
+            
+            if wants_notifications and first_tool in location_tools and result.get("airports"):
+                logger.info(f"📋 POST-PROCESSING: Enriching {len(result['airports'])} airports with notification data")
+                
+                # Import notification query function
+                from shared.ga_notification_agent.notification_query import get_notification_for_airport
+                
+                # Extract day_of_week from query if mentioned
+                day_of_week = None
+                for day in ["saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"]:
+                    if day in user_query:
+                        day_of_week = day.capitalize()
+                        break
+                
+                # Enrich each airport with notification data
+                enriched_airports = []
+                notification_summaries = []
+                
+                for airport in result["airports"][:15]:  # Limit to first 15 airports
+                    icao = airport.get("ident") or airport.get("icao")
+                    if icao:
+                        notif = get_notification_for_airport(icao, day_of_week)
+                        airport["notification"] = notif
+                        if notif.get("found"):
+                            summary = notif.get("day_specific_rule") or notif.get("summary") or f"{notif.get('hours_notice', '?')}h notice"
+                            notification_summaries.append(f"**{icao}**: {summary[:100]}")
+                    enriched_airports.append(airport)
+                
+                # Update result with enriched data
+                result["airports"] = enriched_airports
+                result["notifications_enriched"] = True
+                
+                # Append notification summary to pretty output
+                if notification_summaries:
+                    result["pretty"] = result.get("pretty", "") + "\n\n**Notification Requirements" + (f" ({day_of_week}):" if day_of_week else ":") + "**\n" + "\n".join(notification_summaries)
+                else:
+                    result["pretty"] = result.get("pretty", "") + "\n\n**Notification Requirements:** No parsed notification data available for these airports."
+                
+                logger.info(f"📋 Enriched {len(notification_summaries)} airports with notification data")
+            
             return {"tool_result": result}
+            
         except Exception as e:
+            logger.error(f"Tool execution error: {e}", exc_info=True)
             return {"error": str(e)}
 
     # Build formatter chain directly - this allows LangGraph to capture streaming

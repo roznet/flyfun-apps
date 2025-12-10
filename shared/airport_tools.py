@@ -21,6 +21,10 @@ from euro_aip.storage.enrichment_storage import EnrichmentStorage
 from .rules_manager import RulesManager
 from .filtering import FilterEngine
 from .prioritization import PriorityEngine
+from .ga_notification_agent.notification_query import (
+    get_notification_for_airport as _get_notification_for_airport,
+    find_airports_by_notification as _find_airports_by_notification,
+)
 
 
 ToolCallable = Callable[..., Dict[str, Any]]
@@ -1171,6 +1175,26 @@ def find_airports_near_location(
     }
 
 
+def get_notification_for_airport(
+    ctx: ToolContext,
+    icao: str,
+    day_of_week: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get customs/immigration notification requirements for a specific airport. Use when user asks about notification requirements, customs, or when to notify for a specific airport."""
+    return _get_notification_for_airport(icao, day_of_week)
+
+
+def find_airports_by_notification(
+    ctx: ToolContext,
+    max_hours_notice: Optional[int] = None,
+    notification_type: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 20
+) -> Dict[str, Any]:
+    """Find airports filtered by notification requirements. Use when user asks for airports with specific notice periods (e.g., '<24h notice') or notification types (H24, on_request)."""
+    return _find_airports_by_notification(max_hours_notice, notification_type, country, limit)
+
+
 def _tool_description(func: Callable) -> str:
     return (func.__doc__ or "").strip()
 
@@ -1491,6 +1515,60 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                 "description": _tool_description(list_rule_countries),
                 "parameters": {"type": "object", "properties": {}},
                 "expose_to_llm": False,
+            },
+        ),
+        (
+            "get_notification_for_airport",
+            {
+                "name": "get_notification_for_airport",
+                "handler": get_notification_for_airport,
+                "description": _tool_description(get_notification_for_airport),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "icao": {
+                            "type": "string",
+                            "description": "Airport ICAO code (e.g., LFRG, LFPT).",
+                        },
+                        "day_of_week": {
+                            "type": "string",
+                            "description": "Optional day to get specific rules for (e.g., Saturday, Monday).",
+                        },
+                    },
+                    "required": ["icao"],
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        (
+            "find_airports_by_notification",
+            {
+                "name": "find_airports_by_notification",
+                "handler": find_airports_by_notification,
+                "description": _tool_description(find_airports_by_notification),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_hours_notice": {
+                            "type": "integer",
+                            "description": "Maximum hours notice required (e.g., 24 for less than 24h).",
+                        },
+                        "notification_type": {
+                            "type": "string",
+                            "description": "Type filter: 'h24', 'hours', 'on_request', 'business_day'.",
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "ISO-2 country code (e.g., FR, DE, GB).",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results to return.",
+                            "default": 20,
+                        },
+                    },
+                },
+                "expose_to_llm": True,
             },
         ),
     ])
