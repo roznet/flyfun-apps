@@ -56,8 +56,33 @@ The agent uses a **routing-based architecture** that intelligently directs queri
 
 ### Agent State Flow
 
-**With Routing Enabled:**
+```mermaid
+graph TD
+  user[User] --> router[Router Node]
+  router --> rules["rules"]
+  router --> database["database"]
+  router --> both[Both]
+  
+  rules --> rag[RAG]
+  rag --> rulesAgent[Rules Agent]
+  rulesAgent --> ui(UI)
+  
+  database --> planner[Planner]
+  planner --> tool[Tool]
+  tool --> formatter[Formatter]
+  formatter --> ui(UI)
+  
+  both --> plannerBoth[Planner]
+  plannerBoth --> toolBoth[Tool]
+  toolBoth --> bothRag[RAG]
+  bothRag --> bothRulesAgent[Rules Agent]
+  bothRulesAgent --> bothFormatter[Formatter for Both Path]
+  bothFormatter --> ui(UI)
+
 ```
+
+**With Routing Enabled:**
+
 ┌────────┐     ┌─────────────┐
 │ User   │ --> │ Router Node │
 └────────┘     └─────────────┘
