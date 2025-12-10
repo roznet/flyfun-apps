@@ -41,8 +41,8 @@ This is a **conceptual design document**. For detailed implementation architectu
    - Heavy work (LLM/NLP, aggregation, scoring) runs offline when building `ga_meta.sqlite`.
    - Runtime services (web API, MCP tools, iOS apps) simply:
      - ATTACH `euro_aip.sqlite` and `ga_meta.sqlite`,
-     - read precomputed data,
-     - optionally recompute persona scores when needed.
+     - read base feature scores from `ga_airfield_stats`,
+     - compute persona scores dynamically from base features.
 
 5. **Versioned and rebuildable**
    - The whole enrichment DB is treated as a **build artifact**:
@@ -71,22 +71,28 @@ This is a **conceptual design document**. For detailed implementation architectu
 
 - **Database**: `ga_meta.sqlite`
   - Contains:
-    - Aggregated per-airport GA stats.
+    - Aggregated per-airport GA stats (base feature scores).
     - Parsed review tags.
     - Airport-level summaries.
-    - AIP notification requirements (optional, from euro_aip).
-    - (Optionally) precomputed persona-specific scores.
+    - Persona scores computed dynamically at runtime from base features.
 
-- **Config / Data Files** (JSON format)
+- **Config / Data Files** (JSON format, optional)
   - `ontology.json` - Defines aspects & labels for review parsing (cost, staff, bureaucracy, etc.).
+    - **Built-in defaults available** - library includes default ontology if file not provided
   - `personas.json` - Defines pilot personas and their weights on features.
+    - **Built-in defaults available** - library includes default personas if file not provided
   - `feature_mappings.json` - Configurable mappings from label distributions to feature scores (optional).
+    - Falls back to hard-coded defaults if not provided
 
 - **Offline Pipelines**
-  - Ingestion from review sources (airfield.directory, CSV, etc.).
-  - NLP/LLM extraction from free-text reviews → structured tags.
-  - Optional: AIP rule parsing from euro_aip (notification requirements, handling rules).
-  - Aggregation → normalized feature scores.
+  - Ingestion from multiple review sources:
+    - `AirfieldDirectorySource` - airfield.directory export JSON
+    - `AirportJsonDirectorySource` - Per-airport JSON files (e.g., EGTF.json)
+    - `CSVReviewSource` - CSV files with reviews
+    - `CompositeReviewSource` - Combines multiple sources
+    - `AirportsDatabaseSource` - IFR metadata, hotel/restaurant info from airports.db
+  - NLP/LLM extraction from free-text reviews → structured tags (LangChain-based).
+  - Aggregation → normalized feature scores (with optional time decay and Bayesian smoothing).
   - Persona scoring → scores per airport/persona.
   - Airport-level text summaries & tags.
 
@@ -134,7 +140,8 @@ ATTACH DATABASE 'ga_meta.sqlite'  AS ga;
 SELECT
   aip.airport.icao,
   aip.airport.name,
-  ga.ga_airfield_stats.score_ifr_touring
+  ga.ga_airfield_stats.review_cost_score,
+  ga.ga_airfield_stats.aip_ops_ifr_score
 FROM aip.airport
 LEFT JOIN ga.ga_airfield_stats
   ON ga.ga_airfield_stats.icao = aip.airport.icao;
@@ -150,12 +157,16 @@ One row per airport (per ICAO). Main query table for GA friendliness.
 CREATE TABLE ga_airfield_stats (
     icao                TEXT PRIMARY KEY,
 
-    -- Aggregate review info
-    rating_avg          REAL,          -- average rating from source (e.g. 1–5)
-    rating_count        INTEGER,       -- number of ratings
-    last_review_utc     TEXT,          -- timestamp of latest review
+    -- ============================================
+    -- REVIEW AGGREGATE INFO
+    -- ============================================
+    rating_avg          REAL,          -- Average rating from source (e.g. 1–5)
+    rating_count        INTEGER,       -- Number of ratings
+    last_review_utc     TEXT,          -- Timestamp of latest review
 
-    -- Fee info (aggregated GA bands by MTOW ranges)
+    -- ============================================
+    -- FEE INFO (from review sources)
+    -- ============================================
     fee_band_0_749kg    REAL,          -- 0-749 kg MTOW
     fee_band_750_1199kg REAL,          -- 750-1199 kg MTOW
     fee_band_1200_1499kg REAL,         -- 1200-1499 kg MTOW
@@ -165,39 +176,63 @@ CREATE TABLE ga_airfield_stats (
     fee_currency        TEXT,
     fee_last_updated_utc TEXT,
 
-    -- Binary/boolean-style flags (derived from source + PIREPs + AIP if needed)
-    mandatory_handling  INTEGER,       -- 0/1
-    ifr_procedure_available INTEGER,   -- 0/1: True if instrument approach procedures exist (ILS, RNAV, VOR, etc.)
-    night_available     INTEGER,       -- 0/1
+    -- ============================================
+    -- AIP RAW DATA (from airports.db/AIP)
+    -- ============================================
+    -- IFR capabilities
+    aip_ifr_available        INTEGER,   -- 0=no IFR, 1=IFR permitted (no procedures), 2=non-precision (VOR/NDB), 3=RNP/RNAV, 4=ILS
+    aip_night_available     INTEGER,   -- 0/1
+    
+    -- Hospitality (encoded from AIP)
+    aip_hotel_info          INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
+    aip_restaurant_info     INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
 
-    -- Normalized feature scores (0.0–1.0)
-    ga_cost_score       REAL,
-    ga_review_score     REAL,
-    ga_hassle_score     REAL,
-    ga_ops_ifr_score    REAL,
-    ga_ops_vfr_score    REAL,
-    ga_access_score     REAL,
-    ga_fun_score        REAL,
-    ga_hospitality_score REAL,       -- Availability/proximity of restaurant and accommodation
-    notification_hassle_score REAL,  -- From AIP notification rules (optional)
+    -- ============================================
+    -- REVIEW-DERIVED FEATURE SCORES (0.0–1.0)
+    -- From parsing review text and extracting tags
+    -- ============================================
+    review_cost_score       REAL,      -- From 'cost' aspect labels
+    review_hassle_score     REAL,      -- From 'bureaucracy' aspect labels
+    review_review_score     REAL,      -- From 'overall_experience' aspect labels
+    review_ops_ifr_score    REAL,      -- From review tags about IFR operations
+    review_ops_vfr_score   REAL,      -- From review tags about VFR/runway quality
+    review_access_score     REAL,      -- From 'transport' aspect labels
+    review_fun_score        REAL,      -- From 'food' and 'overall_experience' aspects
+    review_hospitality_score REAL,     -- From 'restaurant' and 'accommodation' aspects
 
-    -- Persona-specific composite scores (denormalized cache; optional)
-    score_ifr_touring   REAL,
-    score_vfr_budget    REAL,
-    score_training      REAL,
+    -- ============================================
+    -- AIP-DERIVED FEATURE SCORES (0.0–1.0)
+    -- Computed from AIP raw data fields
+    -- ============================================
+    aip_ops_ifr_score       REAL,      -- Computed from aip_ifr_available
+    aip_hospitality_score   REAL,      -- Computed from aip_hotel_info, aip_restaurant_info
 
-    -- Versioning / provenance
+    -- ============================================
+    -- VERSIONING / PROVENANCE
+    -- ============================================
     source_version      TEXT,          -- e.g. 'airfield.directory-2025-11-01'
-    scoring_version     TEXT           -- e.g. 'ga_scores_v1'
+    scoring_version     TEXT           -- e.g. 'ga_scores_v2'
 );
 ```
 
-Notes:
+**Schema Organization:**
 
-- Persona-specific score columns are **optional** and can be:
-  - Precomputed offline.
-  - Or omitted, with scores computed at runtime from base features.
-- `ga_*_score` fields are normalized [0, 1] to allow simple weighted sum scoring.
+1. **Review Aggregate Info** - Raw statistics from review sources (ratings, counts, timestamps)
+2. **Fee Info** - Landing/parking fees by MTOW bands (from review sources)
+3. **AIP Raw Data** - Structured data extracted from AIP/airports.db:
+   - IFR capabilities (IFR available, night ops)
+   - Hospitality encoding (hotel, restaurant: 0=unknown, 1=vicinity, 2=at_airport)
+4. **Review-Derived Feature Scores** - Normalized [0, 1] scores computed from review tag distributions
+5. **AIP-Derived Feature Scores** - Normalized [0, 1] scores computed from AIP raw data
+
+**Note:** Persona-specific composite scores are computed dynamically at runtime from base feature scores, not stored in the database.
+
+**Key Design Principles:**
+
+- **Separation of Sources**: Review-derived and AIP-derived scores are stored separately, allowing personas to prefer one source over another
+- **Transparency**: Raw AIP data is preserved alongside computed scores for debugging and transparency
+- **Persona Flexibility**: Personas can specify source preferences (prefer AIP, prefer review, prefer combined, or require both)
+- **Normalized Scores**: All feature scores are normalized [0, 1] to allow weighted combination in persona scoring
 
 #### 3.2.2 `ga_landing_fees`
 
@@ -237,6 +272,7 @@ CREATE TABLE ga_review_ner_tags (
     aspect          TEXT,      -- e.g. 'cost','staff','bureaucracy','fuel','food'
     label           TEXT,      -- e.g. 'expensive','very_positive','complex'
     confidence      REAL,      -- 0.0–1.0
+    timestamp       TEXT,      -- ISO format timestamp from source review (for time decay)
     created_utc     TEXT
 );
 ```
@@ -268,37 +304,11 @@ Intended usage:
 - Tag-based filtering (optional future extension):
   - e.g. filter airports that have tags like “good restaurant” or “no handling”.
 
-#### 3.2.5 `ga_notification_requirements` (Optional)
-
-Detailed structured notification requirements parsed from AIP data.
-
-```sql
-CREATE TABLE ga_notification_requirements (
-    id                  INTEGER PRIMARY KEY,
-    icao                TEXT NOT NULL,
-    rule_type           TEXT NOT NULL,  -- 'ppr', 'pn', 'customs_notification'
-    weekday_start       INTEGER,         -- 0=Monday, 6=Sunday, NULL=all days
-    weekday_end         INTEGER,         -- NULL=single day, or end of range
-    notification_hours  INTEGER,         -- Hours before flight (24, 48, etc.)
-    notification_type   TEXT NOT NULL,  -- 'hours', 'business_day', 'specific_time', 'h24', 'on_request'
-    specific_time        TEXT,           -- e.g., "1300" for "before 1300"
-    business_day_offset  INTEGER,        -- e.g., -1 for "last business day before"
-    is_obligatory        INTEGER,        -- 0/1
-    raw_text             TEXT,           -- Original AIP text
-    source_section       TEXT,           -- Which AIP section (customs, handling, etc.)
-    created_utc          TEXT,
-    updated_utc          TEXT
-);
-```
-
-**Purpose:**
-- Store detailed breakdown of notification rules for operational use.
-- Examples: "PPR 24 HR weekdays, 48 HR weekends" → two rows with weekday ranges.
-- Supports complex rules: business day requirements, specific times, conditional rules.
-
-#### 3.2.6 `ga_aip_rule_summary` (Optional)
+#### 3.2.5 `ga_aip_rule_summary` (Optional)
 
 High-level summary of AIP notification requirements for scoring.
+
+**Note:** Detailed notification requirements are stored in a separate database/design. This table only contains the normalized score used for GA friendliness scoring.
 
 ```sql
 CREATE TABLE ga_aip_rule_summary (
@@ -313,8 +323,9 @@ CREATE TABLE ga_aip_rule_summary (
 **Purpose:**
 - High-level summary for UI display.
 - Normalized score feeds into `ga_hassle_score` feature.
+- See separate notification requirements design document for detailed rule storage.
 
-#### 3.2.7 `ga_meta_info`
+#### 3.2.6 `ga_meta_info`
 
 General metadata and build info.
 
@@ -340,10 +351,13 @@ Example keys:
 - Primary keys:
   - `ga_airfield_stats(icao)`
   - `ga_review_summary(icao)`
+  - `ga_aip_rule_summary(icao)`
+  - `ga_meta_info(key)`
 - Secondary indexes:
-  - `ga_landing_fees(icao)` (for per-airport lookups).
-  - `ga_review_ner_tags(icao)`.
-  - Optional: `ga_review_ner_tags(icao, aspect)` for aggregation performance.
+  - `ga_landing_fees(icao)` - for per-airport lookups
+  - `ga_review_ner_tags(icao)` - for per-airport tag queries
+  - `ga_review_ner_tags(icao, aspect)` - for aggregation performance
+  - `ga_review_ner_tags(icao, review_id)` - for incremental update change detection
 
 **Geometry (R-tree)** is *not* in `ga_meta.sqlite`. Geometry lives in `euro_aip`. Route-based queries rely on `euro_aip` for spatial filtering and then join to `ga_meta` via `icao`.
 
@@ -457,23 +471,44 @@ For each `icao`:
    - Weight by confidence if configured
    - **Optional: Time decay** - Weight recent reviews more heavily (exponential decay based on review age)
 
-2. **Map to normalized feature scores** [0, 1]:
-   - `ga_cost_score` from `cost` aspect labels
-   - `ga_hassle_score` from `bureaucracy` labels (combined with AIP notification rules if available)
-   - `ga_review_score` from `overall_experience` labels
-   - `ga_fun_score` from `food`, `overall_experience`, etc.
-   - `ga_ops_ifr_score` from review tags + AIP data (if available)
-   - `ga_ops_vfr_score` from review tags + AIP data (if available)
-   - `ga_access_score` from `transport` aspect labels
-   - `ga_hospitality_score` from `restaurant`, `accommodation` aspects (availability/proximity)
+2. **Map to review-derived feature scores** [0, 1]:
+   - `review_cost_score` from `cost` aspect labels
+   - `review_hassle_score` from `bureaucracy` aspect labels
+   - `review_review_score` from `overall_experience` aspect labels
+   - `review_fun_score` from `food`, `overall_experience` aspects
+   - `review_ops_ifr_score` from review tags about IFR operations
+   - `review_ops_vfr_score` from review tags about VFR/runway quality
+   - `review_access_score` from `transport` aspect labels
+   - `review_hospitality_score` from `restaurant`, `accommodation` aspects
    - **Optional: Bayesian smoothing** - For airports with few reviews, smooth scores toward global average to handle small sample sizes
 
 3. **Incorporate numeric ratings:**
    - `rating_avg`, `rating_count` from source
 
-4. **Combine with AIP data** (if available):
-   - `notification_hassle_score` from AIP rules feeds into `ga_hassle_score`
-   - AIP operational data (IFR procedures, runway length) feeds into ops scores
+4. **Compute AIP-derived feature scores** (separate from review scores):
+   - `aip_ops_ifr_score` computed from `aip_ifr_available`
+   - `aip_hospitality_score` computed from `aip_hotel_info`, `aip_restaurant_info`
+   - AIP raw data stored separately: `aip_ifr_available`, `aip_hotel_info`, `aip_restaurant_info`, etc.
+
+**Note:** Review-derived and AIP-derived scores are computed and stored separately. Personas determine how to combine them at scoring time based on source preferences.
+
+**AIP-Derived Score Computation:**
+
+AIP-derived scores are computed from raw AIP data fields:
+
+- **`aip_ops_ifr_score`**: 
+  - Computed from `aip_ifr_available` (0-4 scale)
+  - Formula: `if aip_ifr_available == 0 then 0.1 else (aip_ifr_available / 4.0 * 0.8 + 0.2)`
+  - Maps: 0→0.1, 1→0.4, 2→0.6, 3→0.8, 4→1.0
+
+- **`aip_hospitality_score`**:
+  - Computed from `aip_hotel_info` and `aip_restaurant_info` integer fields
+  - Maps encoded values to scores:
+    - `2` (at_airport) → 1.0
+    - `1` (vicinity) → 0.6
+    - `0` (unknown) → 0.0
+  - Combined: 60% restaurant, 40% accommodation
+  - Formula: `0.6 * restaurant_score + 0.4 * hotel_score`
 
 **Mapping Configuration:**
 - Mappings defined in `feature_mappings.json` (optional)
@@ -504,28 +539,23 @@ For each airport (`icao`):
 
 3. **Store** in `ga_review_summary`.
 
-### 4.7 AIP Rule Parsing (Optional)
+### 4.7 AIP Notification Score Integration (Optional)
 
-**Goal:** Parse structured notification requirements and handling rules from euro_aip database.
+**Goal:** Integrate AIP notification requirement scores into GA friendliness scoring.
 
-**Two-stage processing:**
+**Integration Approach:**
 
-1. **Detailed extraction:**
-   - Parse AIP text (customs, handling sections) using LLM
-   - Extract structured rules: weekday ranges, time requirements, business day rules
-   - Store in `ga_notification_requirements` table
-   - Handles complex patterns: "PPR 24 HR weekdays, 48 HR weekends", "Last business day before 1300"
-
-2. **High-level summarization:**
-   - Generate human-readable summary: "24h weekdays, 48h weekends"
-   - Calculate normalized `notification_score` [0, 1]
-   - Store in `ga_aip_rule_summary`
-   - Feeds into `ga_hassle_score` feature
+- AIP notification requirements are parsed and stored separately (see separate notification requirements design document).
+- The notification parsing system generates a normalized `notification_score` [0, 1] that represents the hassle level of notification requirements.
+- This score is stored in `ga_aip_rule_summary.notification_score` and feeds into the `ga_hassle_score` feature.
+- The `ga_hassle_score` combines:
+  - Review-based bureaucracy scores (from review tags)
+  - AIP notification scores (weighted combination, typically 70% reviews, 30% AIP rules)
 
 **Integration:**
-- Optional feature (works with or without euro_aip)
-- Separate NLP pipeline (rule extraction vs. sentiment extraction)
-- Supports incremental updates (tracks AIP change timestamps)
+- Optional feature (works with or without notification data)
+- Notification scores are read from `ga_aip_rule_summary` table
+- If notification data is not available, `ga_hassle_score` uses only review-based scores
 
 ### 4.8 Incremental Updates
 
@@ -558,27 +588,39 @@ Stored in `ga_meta_info` and `ga_airfield_stats`.
 
 This section defines how **personas** are represented and how GA friendliness scores are computed from base features.
 
-### 5.1 Base Feature Scores
+### 5.1 Feature Score Sources
 
-Scores stored in `ga_airfield_stats` as inputs to persona scoring:
+Scores stored in `ga_airfield_stats` are organized by source:
 
-- `ga_cost_score`       (0–1)
-- `ga_review_score`     (0–1)
-- `ga_hassle_score`     (0–1)
-- `ga_ops_ifr_score`    (0–1)
-- `ga_ops_vfr_score`    (0–1)
-- `ga_access_score`     (0–1)
-- `ga_fun_score`        (0–1)
-- `ga_hospitality_score` (0–1) - Availability/proximity of restaurant and accommodation
+**Review-Derived Scores** (from review tag parsing):
+- `review_cost_score`       (0–1) - From 'cost' aspect labels
+- `review_hassle_score`      (0–1) - From 'bureaucracy' aspect labels
+- `review_review_score`      (0–1) - From 'overall_experience' aspect labels
+- `review_ops_ifr_score`    (0–1) - From review tags about IFR operations
+- `review_ops_vfr_score`    (0–1) - From review tags about VFR/runway quality
+- `review_access_score`     (0–1) - From 'transport' aspect labels
+- `review_fun_score`         (0–1) - From 'food' and 'overall_experience' aspects
+- `review_hospitality_score` (0–1) - From 'restaurant' and 'accommodation' aspects
 
-General idea:
+**AIP-Derived Scores** (computed from AIP raw data):
+- `aip_ops_ifr_score`        (0–1) - Computed from `aip_ifr_available`
+- `aip_hospitality_score`    (0–1) - Computed from `aip_hotel_info`, `aip_restaurant_info`
 
-- Each is a normalized score synthesizing:
-  - PIREP tags,
-  - AIP info, and
-  - Possibly basic derived metrics (e.g. runway length, IFR capability).
-- The exact feature engineering logic (e.g. mapping label distributions → numeric values) can be documented in a separate internal design file if needed. For this high-level design:
-  - treat them as interpretable [0, 1] values.
+**Source Preference Strategy:**
+
+Personas can specify how to combine review-derived and AIP-derived scores for each feature:
+- **`prefer_review`** - Use review score if available, fall back to AIP score
+- **`prefer_aip`** - Use AIP score if available, fall back to review score
+- **`prefer_combined`** - Weighted average of both (e.g., 70% review, 30% AIP)
+- **`require_both`** - Only compute score if both sources are available
+- **`review_only`** - Only use review score (ignore AIP)
+- **`aip_only`** - Only use AIP score (ignore review)
+
+**Note:** Some features are only available from one source:
+- `review_cost_score` - Only from reviews (fees are separate)
+- `review_review_score` - Only from reviews (overall experience)
+- `review_fun_score` - Only from reviews (subjective "fun" factor)
+- `review_access_score` - Only from reviews (transport/accessibility)
 
 ### 5.2 Persona Definitions
 
@@ -586,67 +628,85 @@ Personas are defined in `personas.json` (JSON format):
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "personas": {
     "ifr_touring_sr22": {
       "label": "IFR touring (SR22)",
       "description": "Typical SR22T IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy. Some weight on hospitality for overnight stops.",
       "weights": {
-        "ga_ops_ifr_score": 0.25,
-        "ga_hassle_score": 0.20,
-        "ga_cost_score": 0.20,
-        "ga_review_score": 0.15,
-        "ga_access_score": 0.10,
-        "ga_hospitality_score": 0.10
+        "ops_ifr_score": 0.25,
+        "hassle_score": 0.20,
+        "cost_score": 0.20,
+        "review_score": 0.15,
+        "access_score": 0.10,
+        "hospitality_score": 0.10
+      },
+      "source_preferences": {
+        "ops_ifr_score": "prefer_aip",
+        "hassle_score": "prefer_review",
+        "hospitality_score": "prefer_review",
+        "ops_vfr_score": "prefer_review"
       },
       "missing_behaviors": {
-        "ga_ops_ifr_score": "negative",
-        "ga_hospitality_score": "exclude"
+        "ops_ifr_score": "negative",
+        "hospitality_score": "exclude"
       }
     },
     "vfr_budget": {
       "label": "VFR fun / budget",
       "description": "VFR sightseeing / burger runs: emphasis on cost, fun/vibe, hospitality (good lunch spot), and general GA friendliness.",
       "weights": {
-        "ga_cost_score": 0.30,
-        "ga_fun_score": 0.20,
-        "ga_hospitality_score": 0.20,
-        "ga_review_score": 0.15,
-        "ga_access_score": 0.10,
-        "ga_ops_vfr_score": 0.05
+        "cost_score": 0.30,
+        "fun_score": 0.20,
+        "hospitality_score": 0.20,
+        "review_score": 0.15,
+        "access_score": 0.10,
+        "ops_vfr_score": 0.05
+      },
+      "source_preferences": {
+        "hospitality_score": "prefer_review",
+        "ops_vfr_score": "prefer_review"
       },
       "missing_behaviors": {
-        "ga_hospitality_score": "neutral"
+        "hospitality_score": "neutral"
       }
     },
     "training": {
       "label": "Training field",
       "description": "Regular training/circuit work: solid runway, availability, low hassle, reasonable cost.",
       "weights": {
-        "ga_ops_vfr_score": 0.30,
-        "ga_hassle_score": 0.25,
-        "ga_cost_score": 0.20,
-        "ga_review_score": 0.15,
-        "ga_fun_score": 0.10
+        "ops_vfr_score": 0.30,
+        "hassle_score": 0.25,
+        "cost_score": 0.20,
+        "review_score": 0.15,
+        "fun_score": 0.10
+      },
+      "source_preferences": {
+        "ops_vfr_score": "prefer_combined",
+        "hassle_score": "prefer_review"
       },
       "missing_behaviors": {
-        "ga_hospitality_score": "exclude",
-        "ga_ops_ifr_score": "exclude"
+        "hospitality_score": "exclude",
+        "ops_ifr_score": "exclude"
       }
     },
     "lunch_stop": {
       "label": "Lunch stop / day trip",
       "description": "Day trip destination: emphasis on great restaurant/café, good vibe, easy access, reasonable cost.",
       "weights": {
-        "ga_hospitality_score": 0.35,
-        "ga_fun_score": 0.25,
-        "ga_cost_score": 0.15,
-        "ga_hassle_score": 0.15,
-        "ga_access_score": 0.10
+        "hospitality_score": 0.35,
+        "fun_score": 0.25,
+        "cost_score": 0.15,
+        "hassle_score": 0.15,
+        "access_score": 0.10
+      },
+      "source_preferences": {
+        "hospitality_score": "prefer_combined",
+        "hassle_score": "prefer_review"
       },
       "missing_behaviors": {
-        "ga_hospitality_score": "negative",
-        "ga_ops_ifr_score": "exclude"
+        "hospitality_score": "negative",
+        "ops_ifr_score": "exclude"
       }
     }
   }
@@ -655,8 +715,20 @@ Personas are defined in `personas.json` (JSON format):
 
 **Rules:**
 - Weights should ideally sum to 1.0 (not strictly required)
+- Feature names in weights are **logical names** (e.g., `ops_ifr_score`, `hassle_score`) without source prefix
 - Features not mentioned have weight 0.0
 - Versioned via `personas_version` in `ga_meta_info`
+
+**Source Preferences:**
+- `source_preferences` (optional) - Dict mapping logical feature name to source preference strategy
+- If not specified for a feature, uses default strategy (typically `prefer_combined` with 70% review, 30% AIP)
+- Available strategies:
+  - `prefer_review` - Use review score if available, fall back to AIP score
+  - `prefer_aip` - Use AIP score if available, fall back to review score
+  - `prefer_combined` - Weighted average (default: 70% review, 30% AIP)
+  - `require_both` - Only compute score if both sources are available
+  - `review_only` - Only use review score (ignore AIP)
+  - `aip_only` - Only use AIP score (ignore review)
 
 **Missing Behaviors:**
 - `neutral` (default): Treat missing value as 0.5 (average)
@@ -671,15 +743,36 @@ When a feature has weight 0.0, missing_behavior is irrelevant. Only specify miss
 For airport `icao`, persona `P`:
 
 ```text
-effective_value[f] = resolve_missing(feature_f[icao], missing_behavior_P[f])
+// Step 1: Resolve source preference for each feature
+for each feature f:
+    source_strategy = get_source_preference(P, f) or "prefer_combined"
+    resolved_score[f] = combine_sources(
+        review_score[f],
+        aip_score[f],
+        source_strategy
+    )
+
+// Step 2: Apply missing value behavior
+for each feature f:
+    effective_value[f] = resolve_missing(resolved_score[f], missing_behavior_P[f])
+
+// Step 3: Compute weighted sum
 score_P(icao) = Σ_f ( weight_P[f] * effective_value[f] ) / Σ(active_weights)
 ```
 
 Where:
 
-- `feature_f[icao]` is one of:
-  - `ga_cost_score`, `ga_review_score`, etc.
-- `weight_P[f]` is read from persona config.
+- `review_score[f]` and `aip_score[f]` are read from `ga_airfield_stats`:
+  - `review_cost_score`, `review_hassle_score`, `review_ops_ifr_score`, etc.
+  - `aip_ops_ifr_score`, `aip_hospitality_score`, etc.
+- `combine_sources()` applies the source preference strategy:
+  - `prefer_review`: `review_score` if not NULL, else `aip_score`
+  - `prefer_aip`: `aip_score` if not NULL, else `review_score`
+  - `prefer_combined`: `0.7 * review_score + 0.3 * aip_score` (if both available)
+  - `require_both`: NULL if either is missing
+  - `review_only`: `review_score` (ignore AIP)
+  - `aip_only`: `aip_score` (ignore review)
+- `weight_P[f]` is read from persona config (logical feature names).
 - `missing_behavior_P[f]` determines how to handle NULL feature values:
   - `neutral`: use 0.5
   - `negative`: use 0.0 (required feature)
@@ -689,22 +782,17 @@ Where:
 
 ### 5.4 Where Scores Are Stored
 
-**Hybrid approach:**
+**Runtime Computation:**
 
-1. **Primary persona(s) denormalized:**
-   - One or more common personas stored as columns in `ga_airfield_stats`
-   - Example: `score_ifr_touring`, `score_vfr_budget`
-   - Enables fast SQL sorting/filtering
-
-2. **Other personas computed at runtime:**
-   - Base features stored in `ga_airfield_stats`
-   - Runtime layer computes scores using `personas.json` weights
-   - No schema changes needed for new personas
+- Base feature scores (review-derived and AIP-derived) are stored in `ga_airfield_stats`
+- Persona-specific composite scores are computed dynamically at runtime
+- Runtime layer reads base features and computes persona scores using `personas.json` weights and source preferences
+- No schema changes needed for new personas or persona weight adjustments
 
 **Benefits:**
-- Fast queries for common personas
-- Flexibility for adding new personas
-- Clear separation: base features vs. persona scores
+- Flexibility for adding new personas without database changes
+- Easy experimentation with different persona weights
+- Clear separation: base features (stored) vs. persona scores (computed)
 
 ### 5.5 API / UI Interaction
 
@@ -858,7 +946,8 @@ WITH candidates AS (
         c.icao,
         c.along_nm,
         c.xtrack_nm,
-        g.score_ifr_touring AS persona_score,
+        -- Persona score computed at runtime from base features
+        -- (computation logic not shown - handled by application layer)
         CAST(c.along_nm / 100 AS INTEGER) AS segment
     FROM route_candidates c
     LEFT JOIN ga.ga_airfield_stats g
@@ -870,7 +959,7 @@ ranked AS (
         *,
         ROW_NUMBER() OVER (
             PARTITION BY segment
-            ORDER BY persona_score DESC
+            ORDER BY computed_persona_score DESC  -- Computed at runtime
         ) AS seg_rank
     FROM candidates
 )
@@ -922,34 +1011,74 @@ Exact protocol (HTTP/MCP/etc.) is outside this design; this only defines **what 
 - Independent library (no hard dependency on euro_aip)
 - Uses ICAO codes as linking keys
 - Supports ATTACH DATABASE pattern for joint queries
-- Configurable via JSON files (ontology, personas, feature mappings)
+- Configurable via JSON files (ontology, personas, feature mappings) or built-in defaults
+- Environment variable support via `GA_FRIENDLINESS_` prefix
+
+**Key modules:**
+- `database.py` - Schema creation, versioning, migrations
+- `builder.py` - Main pipeline orchestrator
+- `models.py` - Pydantic models for all data structures
+- `config.py` - Settings and configuration loading (with built-in defaults)
+- `sources.py` - Review source implementations (CSV, JSON, airfield.directory, airports.db)
+- `features.py` - Feature engineering and score mapping
+- `personas.py` - Persona management and score computation
+- `storage.py` - Database storage interface
+- `ontology.py` - Ontology validation and filtering
 
 **Reusable agents at `shared/` level:**
 
-- `shared/ga_review_agent/` - LLM-based review processing (extraction, aggregation, summarization)
-- `shared/ga_notification_requirement_agent/` - AIP notification rule parsing
+- `shared/ga_review_agent/` - LLM-based review processing
+  - `extractor.py` - LangChain-based tag extraction with retry logic
+  - `aggregator.py` - Tag aggregation with optional time decay
+  - `summarizer.py` - LLM-generated airport summaries
 - Both agents follow the same pattern as `shared/aviation_agent/` (same level, reusable in other contexts)
+
+**Note:** AIP notification rule parsing is handled by a separate system (see separate notification requirements design document). The GA friendliness system only consumes the normalized notification scores from `ga_aip_rule_summary`.
 
 ### 7.2 Key Components
 
-- **Review Sources:** Abstract interface for multiple data sources (airfield.directory, CSV, etc.)
+- **Review Sources:** Abstract interface (`ReviewSource`) with multiple implementations:
+  - `AirfieldDirectorySource` - airfield.directory export JSON with caching
+  - `AirportJsonDirectorySource` - Per-airport JSON files (filters AI-generated reviews)
+  - `CSVReviewSource` - CSV files with configurable column mapping
+  - `CompositeReviewSource` - Combines multiple sources
+  - `AirportsDatabaseSource` - IFR metadata, hotel/restaurant info from airports.db
 - **GA Review Agent:** `shared/ga_review_agent/` - LLM-based extraction (LangChain 1.0), aggregation, summarization
-- **GA Notification Requirement Agent:** `shared/ga_notification_requirement_agent/` - Parse notification requirements from euro_aip
+  - Batch processing for efficiency
+  - Token usage tracking
+  - Retry logic for transient failures
+- **AIP Notification Integration:** Reads normalized notification scores from `ga_aip_rule_summary` table
+  - Notification parsing handled by separate system (see notification requirements design document)
+  - Scores integrated into `ga_hassle_score` feature
 - **Feature Engineering:** Configurable mappings from label distributions to scores
-- **Persona Scoring:** Weighted combination of base features
+  - Default mappings built-in
+  - Optional custom mappings via JSON
+- **Persona Scoring:** Weighted combination of base features with missing value handling
+  - Configurable missing behaviors per persona/feature
+  - Runtime computation from base feature scores
 - **Incremental Updates:** Change detection and selective reprocessing
+  - Resume capability (continue from last successful ICAO)
+  - Timestamp-based change detection
 - **CLI Tool:** `tools/build_ga_friendliness.py` for rebuilding database
+  - Multiple source options (--export, --csv, --json-dir, --airports-db)
+  - Incremental and resume modes
+  - Comprehensive metrics output
 
 ### 7.3 Design Decisions
 
 - **JSON config** (not YAML) - simpler, no extra dependencies
+- **Built-in defaults** - Ontology and personas have default implementations, no external files required
+- **Environment variable support** - All settings configurable via `GA_FRIENDLINESS_` prefixed env vars
 - **LangChain 1.0** - modern API, good Pydantic integration
-- **Optional AIP parsing** - works with or without euro_aip
-- **Incremental updates** - efficient for regular updates
-- **Schema versioning** - safe schema evolution
-- **Comprehensive metrics** - track build progress, LLM usage, errors
+- **Optional AIP notification integration** - works with or without notification scores
+- **Multiple source types** - Flexible ingestion from various formats
+- **Incremental updates** - efficient for regular updates with resume capability
+- **Schema versioning** - safe schema evolution with migration support
+- **Comprehensive metrics** - track build progress, LLM usage, token costs, errors
 - **Configurable failure modes** - continue, fail_fast, or skip on errors
 - **Optional statistical extensions** - Time decay and Bayesian smoothing available but disabled by default for backward compatibility
+- **IFR score granularity** - Integer score (0-4) for detailed IFR capability tracking
+- **AIP metadata integration** - Hotel and restaurant info from airports.db stored directly in stats table
 
 ### 7.4 Integration Points
 

@@ -56,78 +56,65 @@ The agent uses a **routing-based architecture** that intelligently directs queri
 
 ### Agent State Flow
 
-```mermaid
-graph TD
-  user[User] --> router[Router Node]
-  router --> rules["rules"]
-  router --> database["database"]
-  router --> both[Both]
-  
-  rules --> rag[RAG]
-  rag --> rulesAgent[Rules Agent]
-  rulesAgent --> ui(UI)
-  
-  database --> planner[Planner]
-  planner --> tool[Tool]
-  tool --> formatter[Formatter]
-  formatter --> ui(UI)
-  
-  both --> plannerBoth[Planner]
-  plannerBoth --> toolBoth[Tool]
-  toolBoth --> bothRag[RAG]
-  bothRag --> bothRulesAgent[Rules Agent]
-  bothRulesAgent --> bothFormatter[Formatter 
-```
-
-
 **With Routing Enabled:**
 
-```
-┌────────┐     ┌─────────────┐
-│ User   │ --> │ Router Node │
-└────────┘     └─────────────┘
-                      │
-        ┌─────────────┼─────────────┐
-        │             │             │
-     "rules"      "database"     "both"
-        │             │             │
-        ▼             ▼             ▼
-   ┌────────┐   ┌──────────┐   ┌──────────┐
-   │ RAG     │   │ Planner  │   │ Planner  │
-   └────────┘   └──────────┘   └──────────┘
-        │             │             │
-        ▼             ▼             ▼
-   ┌─────────────┐ ┌──────────┐ ┌──────────┐
-   │ Rules Agent │ │ Tool     │ │ Tool     │
-   └─────────────┘ └──────────┘ └──────────┘
-        │             │             │
-        │             ▼             ▼
-        │         ┌──────────┐ ┌──────────┐
-        │         │Formatter │ │ RAG      │
-        │         └──────────┘ └──────────┘
-        │             │             │
-        │             │             ▼
-        │             │         ┌──────────┐
-        │             │         │Rules Agent│
-        │             │         └──────────┘
-        │             │             │
-        └─────────────┴─────────────┘
-                      │
-                      ▼
-                   ┌──────────┐
-                   │ Formatter│ (for "both" path)
-                   └──────────┘
-                      │
-                      ▼
-                     UI
+```mermaid
+flowchart TD
+  Start([User Query]) --> Router[Router Node<br/>Classifies Query]
+  
+  Router -->|rules| RulesPath[RAG Node<br/>Vector Search]
+  Router -->|database| DBPath[Planner Node]
+  Router -->|both| BothPath[Planner Node]
+  
+  RulesPath --> PredictR{Predict Next<br/>Queries?}
+  PredictR -->|enabled| PredictRNode[Predict Next Queries<br/>for Rules]
+  PredictR -->|disabled| RulesAgent
+  PredictRNode --> RulesAgent[Rules Agent Node<br/>Synthesizes Answer]
+  RulesAgent --> End1([END])
+  
+  DBPath --> PredictD{Predict Next<br/>Queries?}
+  PredictD -->|enabled| PredictDNode[Predict Next Queries]
+  PredictD -->|disabled| ToolDB
+  PredictDNode --> ToolDB[Tool Runner Node<br/>Execute MCP Tool]
+  ToolDB --> FormatterDB[Formatter Node<br/>Format Answer]
+  FormatterDB --> End2([END])
+  
+  BothPath --> PredictB{Predict Next<br/>Queries?}
+  PredictB -->|enabled| PredictBNode[Predict Next Queries]
+  PredictB -->|disabled| ToolBoth
+  PredictBNode --> ToolBoth[Tool Runner Node<br/>Execute MCP Tool]
+  ToolBoth --> RAGBoth[RAG Node<br/>Retrieve Rules]
+  RAGBoth --> PredictBR{Predict Next<br/>Queries?}
+  PredictBR -->|enabled| PredictBRNode[Predict Next Queries<br/>for Rules]
+  PredictBR -->|disabled| RulesAgentBoth
+  PredictBRNode --> RulesAgentBoth[Rules Agent Node<br/>Synthesize Rules]
+  RulesAgentBoth --> FormatterBoth[Formatter Node<br/>Combine DB + Rules]
+  FormatterBoth --> End3([END])
+  
+  style Router fill:#e1f5ff
+  style RulesAgent fill:#fff4e6
+  style RulesAgentBoth fill:#fff4e6
+  style FormatterDB fill:#e8f5e9
+  style FormatterBoth fill:#e8f5e9
 ```
 
 **Without Routing (Backward Compatible):**
+
+```mermaid
+graph TD
+  Start([User Query]) --> Planner[Planner Node]
+  Planner --> Predict{Predict Next<br/>Queries?}
+  Predict -->|enabled| PredictNode[Predict Next Queries]
+  Predict -->|disabled| Tool
+  PredictNode --> Tool[Tool Runner Node]
+  Tool --> Formatter[Formatter Node]
+  Formatter --> End([END])
+  
+  style Planner fill:#e1f5ff
+  style Formatter fill:#e8f5e9
 ```
-┌────────┐     ┌─────────────┐     ┌───────────────┐
-│ User   │ --> │ Planner Node │ --> │ Tool Runner   │ --> Formatter Node --> UI
-└────────┘     └─────────────┘     └───────────────┘
-```
+
+**Note:** Next Query Prediction nodes are conditionally included in the graph based on the `enable_next_query_prediction` setting in the behavior config. When disabled, the graph skips these nodes and flows directly to the next step.
 
 The UI receives (via SSE streaming):
 
