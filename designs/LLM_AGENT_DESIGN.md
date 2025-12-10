@@ -57,7 +57,7 @@ The agent uses a **routing-based architecture** that intelligently directs queri
 ### Agent State Flow
 
 ```mermaid
-flowchart TD
+graph TD
   user[User] --> router[Router Node]
   router --> rules["rules"]
   router --> database["database"]
