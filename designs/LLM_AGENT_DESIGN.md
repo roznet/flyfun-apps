@@ -57,7 +57,7 @@ The agent uses a **routing-based architecture** that intelligently directs queri
 ### Agent State Flow
 
 ```mermaid
-graph TD
+flowchart TD
   user[User] --> router[Router Node]
   router --> rules["rules"]
   router --> database["database"]
@@ -76,13 +76,13 @@ graph TD
   plannerBoth --> toolBoth[Tool]
   toolBoth --> bothRag[RAG]
   bothRag --> bothRulesAgent[Rules Agent]
-  bothRulesAgent --> bothFormatter[Formatter for Both Path]
-  bothFormatter --> ui(UI)
-
+  bothRulesAgent --> bothFormatter[Formatter 
 ```
+
 
 **With Routing Enabled:**
 
+```
 ┌────────┐     ┌─────────────┐
 │ User   │ --> │ Router Node │
 └────────┘     └─────────────┘
