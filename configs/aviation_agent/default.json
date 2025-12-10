@@ -53,6 +53,9 @@
     "formatter": "prompts/formatter_v1.md",
     "rules_agent": "prompts/rules_agent_v1.md",
     "router": "prompts/router_v1.md"
+  },
+  "examples": {
+    "planner": "examples/planner_examples_v1.json"
   }
 }
 

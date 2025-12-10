@@ -69,6 +69,10 @@ class PromptsConfig(BaseModel):
     router: str
 
 
+class ExamplesConfig(BaseModel):
+    planner: str  # Path to planner examples file, e.g., "examples/planner_examples_v1.json"
+
+
 class AgentBehaviorConfig(BaseModel):
     version: str = "1.0"
     name: Optional[str] = None
@@ -81,6 +85,7 @@ class AgentBehaviorConfig(BaseModel):
     reranking: RerankingConfig
     next_query_prediction: NextQueryPredictionConfig
     prompts: PromptsConfig
+    examples: ExamplesConfig
 
     _config_dir: Optional[Path] = None  # Internal: set by from_file()
 
@@ -99,6 +104,42 @@ class AgentBehaviorConfig(BaseModel):
             raise FileNotFoundError(f"Prompt file not found: {full_path}")
 
         return full_path.read_text(encoding="utf-8")
+
+    def load_examples(self, component: str = "planner") -> list[dict[str, str]]:
+        """
+        Load examples from JSON file for the specified component.
+        
+        Args:
+            component: Component name (e.g., "planner")
+        
+        Returns:
+            List of example dicts with 'question' and 'answer' keys.
+            Returns empty list if file not found or invalid.
+        """
+        # Resolve relative to config directory
+        if not hasattr(self, "_config_dir") or self._config_dir is None:
+            raise ValueError("Config directory not set. Use from_file() to load config.")
+
+        examples_path = getattr(self.examples, component, None)
+        if not examples_path:
+            logger.warning(f"Examples path not configured for component '{component}'")
+            return []
+
+        full_path = self._config_dir / examples_path
+        if not full_path.exists():
+            logger.warning(f"Examples file not found: {full_path}")
+            return []
+
+        try:
+            with open(full_path, encoding="utf-8") as f:
+                examples = json.load(f)
+            if not isinstance(examples, list):
+                logger.warning(f"Examples file must contain a JSON array, got {type(examples)}")
+                return []
+            return examples
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse examples file {full_path}: {e}")
+            return []
 
     @classmethod
     def from_file(cls, path: Path) -> "AgentBehaviorConfig":
@@ -141,6 +182,9 @@ class AgentBehaviorConfig(BaseModel):
                 formatter="prompts/formatter_v1.md",
                 rules_agent="prompts/rules_agent_v1.md",
                 router="prompts/router_v1.md",
+            ),
+            examples=ExamplesConfig(
+                planner="examples/planner_examples_v1.json",
             ),
         )
 

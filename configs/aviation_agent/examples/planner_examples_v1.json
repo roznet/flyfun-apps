@@ -1,0 +1,15 @@
+[
+  {
+    "question": "airports between Paris and LOWI",
+    "answer": "{\"selected_tool\": \"find_airports_near_route\", \"arguments\": {\"from_location\": \"Paris\", \"to_location\": \"LOWI\"}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "airports near Vik, Iceland",
+    "answer": "{\"selected_tool\": \"find_airports_near_location\", \"arguments\": {\"location_query\": \"Vik, Iceland\"}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "route from LFPG to LEMD with AVGAS",
+    "answer": "{\"selected_tool\": \"find_airports_near_route\", \"arguments\": {\"from_location\": \"LFPG\", \"to_location\": \"LEMD\", \"filters\": {\"has_avgas\": true}}, \"answer_style\": \"narrative_markdown\"}"
+  }
+]
+
