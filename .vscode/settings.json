@@ -1,6 +1,5 @@
 {
     "git.ignoreLimitWarning": true,
-    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
     "python.analysis.extraPaths": [
         "${workspaceFolder}",
         "${workspaceFolder}/web/server"
