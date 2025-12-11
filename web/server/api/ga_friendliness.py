@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 from pathlib import Path
 import logging
+import sqlite3
+import os
 
 from .models import GAFriendlySummary
 
@@ -24,6 +26,51 @@ from shared.ga_friendliness.ui_config import get_ui_config
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _get_notification_summary(icao: str) -> Optional[str]:
+    """
+    Fetch customs/immigration notification summary from ga_notifications.db.
+    
+    Returns the parsed and formatted summary from the ga_notification_requirements table.
+    """
+    # Find notification database path
+    possible_paths = [
+        Path(os.environ.get("GA_NOTIFICATIONS_DB", "")),
+        Path(__file__).parent.parent.parent.parent / "data" / "ga_notifications.db",
+        Path("/home/qian/dev/022_Home/flyfun-apps/data/ga_notifications.db"),
+    ]
+    
+    db_path = None
+    for p in possible_paths:
+        if p.exists() and p.stat().st_size > 0:
+            db_path = p
+            break
+    
+    if not db_path:
+        return None
+    
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        
+        # Query parsed notification data
+        cursor = conn.execute(
+            """SELECT summary FROM ga_notification_requirements 
+               WHERE icao = ?""",
+            (icao.upper(),)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row or not row["summary"]:
+            return None
+        
+        return row["summary"].strip()
+        
+    except Exception as e:
+        logger.warning(f"Error fetching notification for {icao}: {e}")
+        return None
 
 
 # --- Response Models ---
@@ -239,7 +286,13 @@ class GAFriendlinessService:
             Full summary response
         """
         if not self._enabled or not self.storage or not self.persona_manager:
-            return AirportGASummaryResponse(icao=icao.upper(), has_data=False)
+            # Still try to get notification data even when GA service is disabled
+            notification_summary = _get_notification_summary(icao)
+            return AirportGASummaryResponse(
+                icao=icao.upper(), 
+                has_data=notification_summary is not None,
+                notification_summary=notification_summary
+            )
         
         try:
             stats = self.storage.get_airfield_stats(icao.upper())
@@ -279,21 +332,9 @@ class GAFriendlinessService:
                 except Exception:
                     pass  # Summary table may not exist
             
-            # Get AIP rule summary if available
-            notification_summary = None
-            hassle_level = None
-            if self.storage.conn:
-                try:
-                    cursor = self.storage.conn.execute(
-                        "SELECT notification_summary, hassle_level FROM ga_aip_rule_summary WHERE icao = ?",
-                        (icao.upper(),)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        notification_summary = row["notification_summary"]
-                        hassle_level = row["hassle_level"]
-                except Exception:
-                    pass  # Summary table may not exist
+            # Get notification/customs summary from ga_notifications.db
+            notification_summary = _get_notification_summary(icao)
+            hassle_level = None  # TODO: compute from notification data if needed
             
             return AirportGASummaryResponse(
                 icao=stats.icao,

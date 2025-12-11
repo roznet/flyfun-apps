@@ -578,7 +578,8 @@ async def get_airport_aip_entries(
                     continue
                 cleaned_lines.append(line)
             
-            entry_dict["value"] = "\n".join(cleaned_lines)
+            # Keep raw text in value, add parsed summary as separate field
+            entry_dict["parsed_summary"] = "\n".join(cleaned_lines)
             entry_dict["parsed_notification"] = True
             entry_dict["notification_confidence"] = parsed_notification.get("confidence")
         

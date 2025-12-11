@@ -1289,17 +1289,19 @@ export class UIManager {
     this.store.getState().setLoading(true);
 
     try {
-      const [detail, procedures, runways, aipEntries, rules] = await Promise.all([
+      const persona = useStore.getState().ga.selectedPersona;
+      const [detail, procedures, runways, aipEntries, rules, gaSummary] = await Promise.all([
         this.apiAdapter.getAirportDetail(airport.ident),
         this.apiAdapter.getAirportProcedures(airport.ident),
         this.apiAdapter.getAirportRunways(airport.ident),
         this.apiAdapter.getAirportAIPEntries(airport.ident),
-        airport.iso_country ? this.apiAdapter.getCountryRules(airport.iso_country) : Promise.resolve(null)
+        airport.iso_country ? this.apiAdapter.getCountryRules(airport.iso_country) : Promise.resolve(null),
+        this.apiAdapter.getGASummary(airport.ident, persona).catch(() => null)
       ]);
 
       // Dispatch event to display airport details
       const event = new CustomEvent('display-airport-details', {
-        detail: { detail, procedures, runways, aipEntries, rules }
+        detail: { detail, procedures, runways, aipEntries, rules, gaSummary }
       });
       window.dispatchEvent(event);
 
