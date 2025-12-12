@@ -562,23 +562,33 @@ async def get_airport_aip_entries(
             cleaned_lines = []
             for line in summary.split("\n"):
                 line = line.strip()
-                # Skip empty lines or lines that are just "Hours:" with nothing after
+                # Skip completely empty lines
                 if not line:
                     continue
-                # Skip lines with empty hours or contact info
-                if line in ("Hours:", "📞", "📧", "| Hours:", "Schengen |", "Non-Schengen only |"):
+                
+                # Clean up empty key-value pairs within the line
+                # Remove "| Hours:" or "Hours:" with no value after
+                import re
+                # Remove patterns like "| Hours:" or "Hours:" at end of line or followed by nothing
+                line = re.sub(r'\|\s*Hours:\s*$', '', line)
+                line = re.sub(r'^Hours:\s*$', '', line)
+                # Remove lines that are just "| Hours:" (at start of line too)
+                line = re.sub(r'^\|\s*Hours:\s*$', '', line)
+                # Remove trailing " |" if nothing meaningful before first |
+                line = re.sub(r'\s*\|\s*$', '', line)
+                line = line.strip()
+                
+                # Skip if line became empty after cleanup
+                if not line:
                     continue
-                # Skip lines ending with "| Hours:" or "Hours:" (empty hours)
-                if line.endswith("| Hours:") or line.endswith("Hours:"):
+                # Skip lines that are only emoji placeholders
+                if line in ("📞", "📧"):
                     continue
-                # Skip lines that are just "something | Hours:" pattern
-                if "| Hours:" in line and line.split("| Hours:")[-1].strip() == "":
-                    continue
-                if line.endswith(" |") and "|" not in line[:-2]:
-                    continue
+                    
                 cleaned_lines.append(line)
             
-            entry_dict["value"] = "\n".join(cleaned_lines)
+            # Keep raw text in value, add parsed summary as separate field
+            entry_dict["parsed_summary"] = "\n".join(cleaned_lines)
             entry_dict["parsed_notification"] = True
             entry_dict["notification_confidence"] = parsed_notification.get("confidence")
         

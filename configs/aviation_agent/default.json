@@ -56,6 +56,20 @@
   },
   "examples": {
     "planner": "examples/planner_examples_v1.json"
+  },
+  "tools": {
+    "search_airports": "tools/search_airports.md",
+    "find_airports_near_location": "tools/find_airports_near_location.md",
+    "find_airports_near_route": "tools/find_airports_near_route.md",
+    "get_airport_details": "tools/get_airport_details.md",
+    "get_border_crossing_airports": "tools/get_border_crossing_airports.md",
+    "get_airport_statistics": "tools/get_airport_statistics.md",
+    "get_airport_pricing": "tools/get_airport_pricing.md",
+    "get_pilot_reviews": "tools/get_pilot_reviews.md",
+    "get_fuel_prices": "tools/get_fuel_prices.md",
+    "list_rules_for_country": "tools/list_rules_for_country.md",
+    "compare_rules_between_countries": "tools/compare_rules_between_countries.md",
+    "get_notification_for_airport": "tools/get_notification_for_airport.md",
+    "find_airports_by_notification": "tools/find_airports_by_notification.md"
   }
 }
-

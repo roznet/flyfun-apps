@@ -677,9 +677,10 @@ class Application {
     runways: any[];
     aipEntries: any[];
     rules: any;
+    gaSummary?: any;
   }): void {
     const airport = data.detail;
-    const { procedures, runways, aipEntries, rules } = data;
+    const { procedures, runways, aipEntries, rules, gaSummary } = data;
 
     const infoContainer = document.getElementById('airport-info');
     const rightPanel = document.getElementById('right-panel');
@@ -782,6 +783,16 @@ class Application {
         </table>
       </div>
     `;
+
+    // Add Customs and Immigration section if available from GA summary
+    if (gaSummary?.notification_summary) {
+      html += `
+        <div class="info-card">
+          <h6><i class="fas fa-passport"></i> Customs and Immigration</h6>
+          <p class="text-muted small" style="white-space: pre-line;">${this.escapeHtml(gaSummary.notification_summary.replace(/\*\*/g, ''))}</p>
+        </div>
+      `;
+    }
 
     // Add runways section
     if (runways && runways.length > 0) {

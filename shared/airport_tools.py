@@ -21,6 +21,10 @@ from euro_aip.storage.enrichment_storage import EnrichmentStorage
 from .rules_manager import RulesManager
 from .filtering import FilterEngine
 from .prioritization import PriorityEngine
+from .ga_notification_agent.notification_query import (
+    get_notification_for_airport as _get_notification_for_airport,
+    find_airports_by_notification as _find_airports_by_notification,
+)
 
 
 ToolCallable = Callable[..., Dict[str, Any]]
@@ -1171,7 +1175,57 @@ def find_airports_near_location(
     }
 
 
+def get_notification_for_airport(
+    ctx: ToolContext,
+    icao: str,
+    day_of_week: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get customs/immigration notification requirements for a specific airport. Use when user asks about notification requirements, customs, or when to notify for a specific airport."""
+    return _get_notification_for_airport(icao, day_of_week)
+
+
+def find_airports_by_notification(
+    ctx: ToolContext,
+    max_hours_notice: Optional[int] = None,
+    notification_type: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 20
+) -> Dict[str, Any]:
+    """Find airports filtered by notification requirements. Use when user asks for airports with specific notice periods (e.g., '<24h notice') or notification types (H24, on_request)."""
+    return _find_airports_by_notification(max_hours_notice, notification_type, country, limit)
+
+
 def _tool_description(func: Callable) -> str:
+    """Get tool description from docstring (legacy function, kept for compatibility)."""
+    return (func.__doc__ or "").strip()
+
+
+def _get_tool_description(func: Callable, tool_name: str) -> str:
+    """Get tool description from config file, falling back to docstring.
+    
+    Args:
+        func: The tool function (for docstring fallback)
+        tool_name: Name of the tool for config lookup
+        
+    Returns:
+        Tool description text from config file, or docstring if not configured.
+    """
+    # Lazy import to avoid circular dependency (config imports airport_tools)
+    try:
+        from shared.aviation_agent.config import get_behavior_config, get_settings
+        settings = get_settings()
+        config = get_behavior_config(settings.agent_config_name or "default")
+        
+        # Try to load from config
+        if config:
+            description = config.load_tool_description(tool_name)
+            if description:
+                return description
+    except Exception:
+        # If config loading fails, fall back to docstring
+        pass
+    
+    # Fallback to docstring
     return (func.__doc__ or "").strip()
 
 
@@ -1183,7 +1237,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "search_airports",
                 "handler": search_airports,
-                "description": _tool_description(search_airports),
+                "description": _get_tool_description(search_airports, "search_airports"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1216,7 +1270,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "find_airports_near_location",
                 "handler": find_airports_near_location,
-                "description": _tool_description(find_airports_near_location),
+                "description": _get_tool_description(find_airports_near_location, "find_airports_near_location"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1249,7 +1303,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "find_airports_near_route",
                 "handler": find_airports_near_route,
-                "description": _tool_description(find_airports_near_route),
+                "description": _get_tool_description(find_airports_near_route, "find_airports_near_route"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1286,7 +1340,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_airport_details",
                 "handler": get_airport_details,
-                "description": _tool_description(get_airport_details),
+                "description": _get_tool_description(get_airport_details, "get_airport_details"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1305,7 +1359,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_border_crossing_airports",
                 "handler": get_border_crossing_airports,
-                "description": _tool_description(get_border_crossing_airports),
+                "description": _get_tool_description(get_border_crossing_airports, "get_border_crossing_airports"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1323,7 +1377,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_airport_statistics",
                 "handler": get_airport_statistics,
-                "description": _tool_description(get_airport_statistics),
+                "description": _get_tool_description(get_airport_statistics, "get_airport_statistics"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1341,7 +1395,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_airport_pricing",
                 "handler": get_airport_pricing,
-                "description": _tool_description(get_airport_pricing),
+                "description": _get_tool_description(get_airport_pricing, "get_airport_pricing"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1360,7 +1414,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_pilot_reviews",
                 "handler": get_pilot_reviews,
-                "description": _tool_description(get_pilot_reviews),
+                "description": _get_tool_description(get_pilot_reviews, "get_pilot_reviews"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1384,7 +1438,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_fuel_prices",
                 "handler": get_fuel_prices,
-                "description": _tool_description(get_fuel_prices),
+                "description": _get_tool_description(get_fuel_prices, "get_fuel_prices"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1403,7 +1457,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "list_rules_for_country",
                 "handler": list_rules_for_country,
-                "description": _tool_description(list_rules_for_country),
+                "description": _get_tool_description(list_rules_for_country, "list_rules_for_country"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1431,7 +1485,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "compare_rules_between_countries",
                 "handler": _compare_rules_between_countries_tool,
-                "description": _tool_description(compare_rules_between_countries),
+                "description": _get_tool_description(compare_rules_between_countries, "compare_rules_between_countries"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1458,7 +1512,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "get_answers_for_questions",
                 "handler": get_answers_for_questions,
-                "description": _tool_description(get_answers_for_questions),
+                "description": _get_tool_description(get_answers_for_questions, "get_answers_for_questions"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1478,7 +1532,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "list_rule_categories_and_tags",
                 "handler": list_rule_categories_and_tags,
-                "description": _tool_description(list_rule_categories_and_tags),
+                "description": _get_tool_description(list_rule_categories_and_tags, "list_rule_categories_and_tags"),
                 "parameters": {"type": "object", "properties": {}},
                 "expose_to_llm": False,
             },
@@ -1488,9 +1542,63 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
             {
                 "name": "list_rule_countries",
                 "handler": list_rule_countries,
-                "description": _tool_description(list_rule_countries),
+                "description": _get_tool_description(list_rule_countries, "list_rule_countries"),
                 "parameters": {"type": "object", "properties": {}},
                 "expose_to_llm": False,
+            },
+        ),
+        (
+            "get_notification_for_airport",
+            {
+                "name": "get_notification_for_airport",
+                "handler": get_notification_for_airport,
+                "description": _get_tool_description(get_notification_for_airport, "get_notification_for_airport"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "icao": {
+                            "type": "string",
+                            "description": "Airport ICAO code (e.g., LFRG, LFPT).",
+                        },
+                        "day_of_week": {
+                            "type": "string",
+                            "description": "Optional day to get specific rules for (e.g., Saturday, Monday).",
+                        },
+                    },
+                    "required": ["icao"],
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        (
+            "find_airports_by_notification",
+            {
+                "name": "find_airports_by_notification",
+                "handler": find_airports_by_notification,
+                "description": _get_tool_description(find_airports_by_notification, "find_airports_by_notification"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_hours_notice": {
+                            "type": "integer",
+                            "description": "Maximum hours notice required (e.g., 24 for less than 24h).",
+                        },
+                        "notification_type": {
+                            "type": "string",
+                            "description": "Type filter: 'h24', 'hours', 'on_request', 'business_day'.",
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "ISO-2 country code (e.g., FR, DE, GB).",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results to return.",
+                            "default": 20,
+                        },
+                    },
+                },
+                "expose_to_llm": True,
             },
         ),
     ])

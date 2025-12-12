@@ -1,0 +1,1 @@
+List aviation rules and regulations for a specific country (iso-2 code eg FR,GB), including customs, flight plans, and operational requirements. Can be filtered by category like IFR/VFR, airspace, etc.

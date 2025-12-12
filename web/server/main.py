@@ -44,7 +44,7 @@ from config_helpers import (
 )
 
 # Import API routes
-from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness
+from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness, notifications
 
 from shared.rules_manager import RulesManager
 
@@ -234,6 +234,7 @@ app.include_router(procedures.router, prefix="/api/procedures", tags=["procedure
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
 app.include_router(rules.router, prefix="/api/rules", tags=["rules"])
+app.include_router(notifications.router)  # Has its own prefix /api/notifications
 
 if aviation_agent_chat.feature_enabled():
     logger.info("Aviation agent router enabled at /api/aviation-agent")

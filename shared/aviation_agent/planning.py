@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -10,6 +10,15 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Field
 
 from .tools import AviationTool, render_tool_catalog
+
+
+class ToolCall(BaseModel):
+    """Single tool call with name and arguments."""
+    tool_name: str = Field(..., description="Name of the tool to call.")
+    arguments: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arguments to call the tool with.",
+    )
 
 
 class AviationPlan(BaseModel):
@@ -30,6 +39,10 @@ class AviationPlan(BaseModel):
         default="narrative_markdown",
         description="Preferred style for the final answer (hint for formatter).",
     )
+    
+    def get_tool_calls(self) -> List[ToolCall]:
+        """Get tool calls for compatibility with tool_node."""
+        return [ToolCall(tool_name=self.selected_tool, arguments=self.arguments)]
 
 
 def _build_planner_prompt_messages(
@@ -109,7 +122,7 @@ def build_planner_runnable(
             
             def _invoke(state: Dict[str, Any]) -> AviationPlan:
                 plan = chain.invoke({"messages": state["messages"], "tool_catalog": tool_catalog})
-                _validate_selected_tool(plan.selected_tool, tools)
+                _validate_plan(plan, tools)
                 return plan
             
             return RunnableLambda(_invoke)
@@ -144,7 +157,7 @@ def build_planner_runnable(
 
     def _invoke(state: Dict[str, Any]) -> AviationPlan:
         plan = chain.invoke(_prepare_input(state))
-        _validate_selected_tool(plan.selected_tool, tools)
+        _validate_plan(plan, tools)
         return plan
 
     return RunnableLambda(_invoke)
@@ -169,9 +182,26 @@ def _convert_examples_to_messages(examples: list[dict[str, str]]) -> list[BaseMe
 
 
 def _validate_selected_tool(tool_name: str, tools: Sequence[AviationTool]) -> None:
-    if tool_name not in {tool.name for tool in tools}:
+    """Validate a single tool name is in the manifest."""
+    valid_names = {tool.name for tool in tools}
+    if tool_name and tool_name not in valid_names:
         raise ValueError(
             f"Planner chose '{tool_name}', which is not defined in the manifest."
         )
+
+
+def _validate_plan(plan: "AviationPlan", tools: Sequence[AviationTool]) -> None:
+    """Validate an AviationPlan - handles both single and multi-tool patterns."""
+    valid_names = {tool.name for tool in tools}
+    
+    tool_calls = plan.get_tool_calls()
+    if not tool_calls:
+        raise ValueError("Plan has no tool calls (neither selected_tool nor tool_calls populated).")
+    
+    for tc in tool_calls:
+        if tc.tool_name not in valid_names:
+            raise ValueError(
+                f"Planner chose '{tc.tool_name}', which is not defined in the manifest."
+            )
 
 

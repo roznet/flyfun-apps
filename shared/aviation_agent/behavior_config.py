@@ -73,6 +73,23 @@ class ExamplesConfig(BaseModel):
     planner: str  # Path to planner examples file, e.g., "examples/planner_examples_v1.json"
 
 
+class ToolsConfig(BaseModel):
+    """Configuration for tool description file paths."""
+    search_airports: Optional[str] = None
+    find_airports_near_location: Optional[str] = None
+    find_airports_near_route: Optional[str] = None
+    get_airport_details: Optional[str] = None
+    get_border_crossing_airports: Optional[str] = None
+    get_airport_statistics: Optional[str] = None
+    get_airport_pricing: Optional[str] = None
+    get_pilot_reviews: Optional[str] = None
+    get_fuel_prices: Optional[str] = None
+    list_rules_for_country: Optional[str] = None
+    compare_rules_between_countries: Optional[str] = None
+    get_notification_for_airport: Optional[str] = None
+    find_airports_by_notification: Optional[str] = None
+
+
 class AgentBehaviorConfig(BaseModel):
     version: str = "1.0"
     name: Optional[str] = None
@@ -86,6 +103,7 @@ class AgentBehaviorConfig(BaseModel):
     next_query_prediction: NextQueryPredictionConfig
     prompts: PromptsConfig
     examples: ExamplesConfig
+    tools: Optional[ToolsConfig] = None  # Optional: tool description file paths
 
     _config_dir: Optional[Path] = None  # Internal: set by from_file()
 
@@ -104,6 +122,33 @@ class AgentBehaviorConfig(BaseModel):
             raise FileNotFoundError(f"Prompt file not found: {full_path}")
 
         return full_path.read_text(encoding="utf-8")
+
+    def load_tool_description(self, tool_name: str) -> Optional[str]:
+        """Load tool description from file if configured.
+        
+        Args:
+            tool_name: Name of the tool (e.g., "search_airports")
+            
+        Returns:
+            Tool description text from file, or None if not configured.
+        """
+        if not self.tools:
+            return None
+            
+        tool_path = getattr(self.tools, tool_name, None)
+        if not tool_path:
+            return None
+            
+        # Resolve relative to config directory
+        if not hasattr(self, "_config_dir") or self._config_dir is None:
+            return None
+            
+        full_path = self._config_dir / tool_path
+        if not full_path.exists():
+            logger.warning(f"Tool description file not found: {full_path}")
+            return None
+            
+        return full_path.read_text(encoding="utf-8").strip()
 
     def load_examples(self, component: str = "planner") -> list[dict[str, str]]:
         """
