@@ -119,26 +119,26 @@ class TestPersonaExplanation:
     def test_explain_score_features(self, sample_personas, sample_feature_scores):
         """Test feature breakdown in explanation."""
         manager = PersonaManager(sample_personas)
-        
+
         explanation = manager.explain_score("test_ifr", sample_feature_scores)
         features = explanation["features"]
-        
-        # test_ifr has weights for ga_ops_ifr_score
-        assert "ga_ops_ifr_score" in features
-        assert features["ga_ops_ifr_score"]["weight"] > 0
-        assert features["ga_ops_ifr_score"]["included"] is True
+
+        # test_ifr has weights for review_ops_ifr_score and aip_ops_ifr_score
+        assert "review_ops_ifr_score" in features
+        assert features["review_ops_ifr_score"]["weight"] > 0
+        assert features["review_ops_ifr_score"]["included"] is True
 
     def test_explain_score_with_missing(self, sample_personas, sample_feature_scores_with_missing):
         """Test explanation with missing values."""
         manager = PersonaManager(sample_personas)
-        
+
         explanation = manager.explain_score("test_ifr", sample_feature_scores_with_missing)
         features = explanation["features"]
-        
-        # ga_ops_ifr_score is missing, should show resolved value
-        if "ga_ops_ifr_score" in features:
-            assert features["ga_ops_ifr_score"]["raw_value"] is None
-            assert features["ga_ops_ifr_score"]["resolved_value"] is not None
+
+        # review_ops_ifr_score is missing, should show resolved value
+        if "review_ops_ifr_score" in features:
+            assert features["review_ops_ifr_score"]["raw_value"] is None
+            assert features["review_ops_ifr_score"]["resolved_value"] is not None
 
 
 @pytest.mark.unit
@@ -161,16 +161,17 @@ class TestMissingBehaviorHandling:
     def test_exclude_behavior(self, sample_personas):
         """Test EXCLUDE missing behavior."""
         manager = PersonaManager(sample_personas)
-        
+
         # Feature scores with hospitality missing
         scores = AirportFeatureScores(
             icao="TEST",
-            ga_cost_score=0.8,
-            ga_fun_score=0.7,
-            ga_hassle_score=0.6,
-            ga_hospitality_score=None,  # test_lunch has this as EXCLUDE by default
+            review_cost_score=0.8,
+            review_fun_score=0.7,
+            review_hassle_score=0.6,
+            review_hospitality_score=None,
+            aip_hospitality_score=None,
         )
-        
+
         # The score should still be computed, just without hospitality
         score = manager.compute_score("test_lunch", scores)
         assert score is not None
@@ -178,30 +179,32 @@ class TestMissingBehaviorHandling:
     def test_negative_behavior(self, sample_personas):
         """Test NEGATIVE missing behavior."""
         manager = PersonaManager(sample_personas)
-        
+
         # test_lunch has hospitality as NEGATIVE behavior
-        
+
         # With hospitality present
         with_hospitality = AirportFeatureScores(
             icao="TEST",
-            ga_cost_score=0.5,
-            ga_fun_score=0.5,
-            ga_hassle_score=0.5,
-            ga_hospitality_score=0.8,
+            review_cost_score=0.5,
+            review_fun_score=0.5,
+            review_hassle_score=0.5,
+            review_hospitality_score=0.8,
+            aip_hospitality_score=0.7,
         )
-        
+
         # With hospitality missing (treated as 0.0)
         without_hospitality = AirportFeatureScores(
             icao="TEST",
-            ga_cost_score=0.5,
-            ga_fun_score=0.5,
-            ga_hassle_score=0.5,
-            ga_hospitality_score=None,
+            review_cost_score=0.5,
+            review_fun_score=0.5,
+            review_hassle_score=0.5,
+            review_hospitality_score=None,
+            aip_hospitality_score=None,
         )
-        
+
         score_with = manager.compute_score("test_lunch", with_hospitality)
         score_without = manager.compute_score("test_lunch", without_hospitality)
-        
+
         # Score should be lower when hospitality is missing (treated as 0)
         assert score_with > score_without
 

@@ -191,14 +191,16 @@ class GAFriendlinessService:
                 # Build AirportFeatureScores for persona scoring
                 features = AirportFeatureScores(
                     icao=stats.icao,
-                    ga_cost_score=stats.ga_cost_score,
-                    ga_review_score=stats.ga_review_score,
-                    ga_hassle_score=stats.ga_hassle_score,
-                    ga_ops_ifr_score=stats.ga_ops_ifr_score,
-                    ga_ops_vfr_score=stats.ga_ops_vfr_score,
-                    ga_access_score=stats.ga_access_score,
-                    ga_fun_score=stats.ga_fun_score,
-                    ga_hospitality_score=stats.ga_hospitality_score,
+                    review_cost_score=stats.review_cost_score,
+                    review_hassle_score=stats.review_hassle_score,
+                    review_review_score=stats.review_review_score,
+                    review_ops_ifr_score=stats.review_ops_ifr_score,
+                    review_ops_vfr_score=stats.review_ops_vfr_score,
+                    review_access_score=stats.review_access_score,
+                    review_fun_score=stats.review_fun_score,
+                    review_hospitality_score=stats.review_hospitality_score,
+                    aip_ops_ifr_score=stats.aip_ops_ifr_score,
+                    aip_hospitality_score=stats.aip_hospitality_score,
                 )
                 
                 # Pre-compute scores for ALL personas
@@ -249,14 +251,16 @@ class GAFriendlinessService:
             # Build feature scores
             features = AirportFeatureScores(
                 icao=stats.icao,
-                ga_cost_score=stats.ga_cost_score,
-                ga_review_score=stats.ga_review_score,
-                ga_hassle_score=stats.ga_hassle_score,
-                ga_ops_ifr_score=stats.ga_ops_ifr_score,
-                ga_ops_vfr_score=stats.ga_ops_vfr_score,
-                ga_access_score=stats.ga_access_score,
-                ga_fun_score=stats.ga_fun_score,
-                ga_hospitality_score=stats.ga_hospitality_score,
+                review_cost_score=stats.review_cost_score,
+                review_hassle_score=stats.review_hassle_score,
+                review_review_score=stats.review_review_score,
+                review_ops_ifr_score=stats.review_ops_ifr_score,
+                review_ops_vfr_score=stats.review_ops_vfr_score,
+                review_access_score=stats.review_access_score,
+                review_fun_score=stats.review_fun_score,
+                review_hospitality_score=stats.review_hospitality_score,
+                aip_ops_ifr_score=stats.aip_ops_ifr_score,
+                aip_hospitality_score=stats.aip_hospitality_score,
             )
             
             # Compute persona score

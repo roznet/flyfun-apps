@@ -69,12 +69,12 @@ class TestStorageAirfieldStats:
     def test_write_and_read_stats(self, temp_storage, sample_airport_stats):
         """Test writing and reading airport stats."""
         temp_storage.write_airfield_stats(sample_airport_stats)
-        
+
         result = temp_storage.get_airfield_stats("EGKB")
         assert result is not None
         assert result.icao == "EGKB"
         assert result.rating_avg == 4.25
-        assert result.ga_cost_score == 0.65
+        assert result.review_cost_score == 0.65
 
     def test_upsert_stats(self, temp_storage, sample_airport_stats):
         """Test updating existing stats."""

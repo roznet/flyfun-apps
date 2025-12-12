@@ -52,11 +52,12 @@ SAMPLE_PERSONAS: Dict[str, Any] = {
             "label": "Test IFR Persona",
             "description": "Test persona for IFR touring",
             "weights": {
-                "ga_ops_ifr_score": 0.30,
-                "ga_hassle_score": 0.25,
-                "ga_cost_score": 0.20,
-                "ga_review_score": 0.15,
-                "ga_access_score": 0.10,
+                "review_ops_ifr_score": 0.20,
+                "aip_ops_ifr_score": 0.10,
+                "review_hassle_score": 0.25,
+                "review_cost_score": 0.20,
+                "review_review_score": 0.15,
+                "review_access_score": 0.10,
             },
         },
         "test_vfr": {
@@ -64,10 +65,10 @@ SAMPLE_PERSONAS: Dict[str, Any] = {
             "label": "Test VFR Persona",
             "description": "Test persona for VFR budget flying",
             "weights": {
-                "ga_cost_score": 0.40,
-                "ga_hassle_score": 0.30,
-                "ga_ops_vfr_score": 0.20,
-                "ga_review_score": 0.10,
+                "review_cost_score": 0.40,
+                "review_hassle_score": 0.30,
+                "review_ops_vfr_score": 0.20,
+                "review_review_score": 0.10,
             },
         },
         "test_lunch": {
@@ -75,13 +76,15 @@ SAMPLE_PERSONAS: Dict[str, Any] = {
             "label": "Test Lunch Stop Persona",
             "description": "Test persona for lunch stops",
             "weights": {
-                "ga_hospitality_score": 0.40,
-                "ga_fun_score": 0.30,
-                "ga_cost_score": 0.15,
-                "ga_hassle_score": 0.15,
+                "review_hospitality_score": 0.30,
+                "aip_hospitality_score": 0.10,
+                "review_fun_score": 0.30,
+                "review_cost_score": 0.15,
+                "review_hassle_score": 0.15,
             },
             "missing_behaviors": {
-                "ga_hospitality_score": "negative",  # Required for lunch stops
+                "review_hospitality_score": "negative",  # Required for lunch stops
+                "aip_hospitality_score": "negative",
             },
         },
     },
@@ -207,14 +210,16 @@ def sample_feature_scores() -> AirportFeatureScores:
     """Return sample airport feature scores."""
     return AirportFeatureScores(
         icao="EGKB",
-        ga_cost_score=0.65,
-        ga_review_score=0.80,
-        ga_hassle_score=0.75,
-        ga_ops_ifr_score=0.60,
-        ga_ops_vfr_score=0.85,
-        ga_access_score=0.70,
-        ga_fun_score=0.72,
-        ga_hospitality_score=0.78,
+        review_cost_score=0.65,
+        review_hassle_score=0.75,
+        review_review_score=0.80,
+        review_ops_ifr_score=0.60,
+        review_ops_vfr_score=0.85,
+        review_access_score=0.70,
+        review_fun_score=0.72,
+        review_hospitality_score=0.78,
+        aip_ops_ifr_score=0.75,
+        aip_hospitality_score=0.66,
     )
 
 
@@ -223,14 +228,16 @@ def sample_feature_scores_with_missing() -> AirportFeatureScores:
     """Return sample airport feature scores with some missing values."""
     return AirportFeatureScores(
         icao="LFAT",
-        ga_cost_score=0.80,
-        ga_review_score=0.65,
-        ga_hassle_score=0.90,
-        ga_ops_ifr_score=None,  # Missing
-        ga_ops_vfr_score=0.75,
-        ga_access_score=None,  # Missing
-        ga_fun_score=0.50,
-        ga_hospitality_score=None,  # Missing
+        review_cost_score=0.80,
+        review_hassle_score=0.90,
+        review_review_score=0.65,
+        review_ops_ifr_score=None,  # Missing
+        review_ops_vfr_score=0.75,
+        review_access_score=None,  # Missing
+        review_fun_score=0.50,
+        review_hospitality_score=None,  # Missing
+        aip_ops_ifr_score=None,  # Missing
+        aip_hospitality_score=None,  # Missing
     )
 
 
@@ -249,17 +256,23 @@ def sample_airport_stats() -> AirportStats:
         fee_band_2000_3999kg=50.0,
         fee_band_4000_plus_kg=75.0,
         fee_currency="GBP",
-        mandatory_handling=False,
-        ifr_procedure_available=True,
-        night_available=False,
-        ga_cost_score=0.65,
-        ga_review_score=0.80,
-        ga_hassle_score=0.75,
-        ga_ops_ifr_score=0.60,
-        ga_ops_vfr_score=0.85,
-        ga_access_score=0.70,
-        ga_fun_score=0.72,
-        ga_hospitality_score=0.78,
+        # AIP raw data
+        aip_ifr_available=3,  # RNAV approaches
+        aip_night_available=0,
+        aip_hotel_info=1,  # Nearby
+        aip_restaurant_info=2,  # At airport
+        # Review-derived scores
+        review_cost_score=0.65,
+        review_review_score=0.80,
+        review_hassle_score=0.75,
+        review_ops_ifr_score=0.60,
+        review_ops_vfr_score=0.85,
+        review_access_score=0.70,
+        review_fun_score=0.72,
+        review_hospitality_score=0.78,
+        # AIP-derived scores
+        aip_ops_ifr_score=0.75,
+        aip_hospitality_score=0.66,
         source_version="test-v1",
         scoring_version="ga_scores_v1",
     )

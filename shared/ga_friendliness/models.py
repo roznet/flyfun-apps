@@ -104,30 +104,37 @@ class OntologyConfig(BaseModel):
 class PersonaWeights(BaseModel):
     """Weights for a single persona's feature scores."""
 
-    ga_cost_score: float = Field(default=0.0, ge=0.0)
-    ga_review_score: float = Field(default=0.0, ge=0.0)
-    ga_hassle_score: float = Field(default=0.0, ge=0.0)
-    ga_ops_ifr_score: float = Field(default=0.0, ge=0.0)
-    ga_ops_vfr_score: float = Field(default=0.0, ge=0.0)
-    ga_access_score: float = Field(default=0.0, ge=0.0)
-    ga_fun_score: float = Field(default=0.0, ge=0.0)
-    ga_hospitality_score: float = Field(
+    # Review-derived features
+    review_cost_score: float = Field(default=0.0, ge=0.0)
+    review_hassle_score: float = Field(default=0.0, ge=0.0)
+    review_review_score: float = Field(default=0.0, ge=0.0)
+    review_ops_ifr_score: float = Field(default=0.0, ge=0.0)
+    review_ops_vfr_score: float = Field(default=0.0, ge=0.0)
+    review_access_score: float = Field(default=0.0, ge=0.0)
+    review_fun_score: float = Field(default=0.0, ge=0.0)
+    review_hospitality_score: float = Field(
         default=0.0,
         ge=0.0,
         description="Weight for availability/proximity of restaurant and accommodation",
     )
 
+    # AIP-derived features
+    aip_ops_ifr_score: float = Field(default=0.0, ge=0.0)
+    aip_hospitality_score: float = Field(default=0.0, ge=0.0)
+
     def total_weight(self) -> float:
         """Calculate total weight across all features."""
         return (
-            self.ga_cost_score
-            + self.ga_review_score
-            + self.ga_hassle_score
-            + self.ga_ops_ifr_score
-            + self.ga_ops_vfr_score
-            + self.ga_access_score
-            + self.ga_fun_score
-            + self.ga_hospitality_score
+            self.review_cost_score
+            + self.review_hassle_score
+            + self.review_review_score
+            + self.review_ops_ifr_score
+            + self.review_ops_vfr_score
+            + self.review_access_score
+            + self.review_fun_score
+            + self.review_hospitality_score
+            + self.aip_ops_ifr_score
+            + self.aip_hospitality_score
         )
 
 
@@ -150,17 +157,22 @@ class MissingBehavior(str, Enum):
 class PersonaMissingBehaviors(BaseModel):
     """Per-feature missing value behavior for a persona."""
 
-    ga_cost_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_review_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_hassle_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_ops_ifr_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_ops_vfr_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_access_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_fun_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
-    ga_hospitality_score: MissingBehavior = Field(
+    # Review-derived features
+    review_cost_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_hassle_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_review_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_ops_ifr_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_ops_vfr_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_access_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_fun_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    review_hospitality_score: MissingBehavior = Field(
         default=MissingBehavior.EXCLUDE,
         description="Default: optional feature",
     )
+
+    # AIP-derived features
+    aip_ops_ifr_score: MissingBehavior = Field(default=MissingBehavior.NEUTRAL)
+    aip_hospitality_score: MissingBehavior = Field(default=MissingBehavior.EXCLUDE)
 
 
 class PersonaConfig(BaseModel):
@@ -212,19 +224,25 @@ class AirportFeatureScores(BaseModel):
     """Normalized feature scores for an airport."""
 
     icao: str = Field(..., description="Airport ICAO code")
-    ga_cost_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_review_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_hassle_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_ops_ifr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_ops_vfr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_access_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_fun_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_hospitality_score: Optional[float] = Field(
+
+    # Review-derived features
+    review_cost_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_hassle_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_review_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_ops_ifr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_ops_vfr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_access_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_fun_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_hospitality_score: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="Availability/proximity of restaurant and accommodation [0, 1]",
+        description="Availability/proximity of restaurant and accommodation from reviews [0, 1]",
     )
+
+    # AIP-derived features
+    aip_ops_ifr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    aip_hospitality_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 # --- Airport Stats ---

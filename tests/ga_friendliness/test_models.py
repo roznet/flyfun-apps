@@ -133,22 +133,22 @@ class TestPersonaWeights:
     def test_create_default(self):
         """Test creating PersonaWeights with defaults."""
         weights = PersonaWeights()
-        assert weights.ga_cost_score == 0.0
+        assert weights.review_cost_score == 0.0
         assert weights.total_weight() == 0.0
 
     def test_create_with_values(self):
         """Test creating PersonaWeights with values."""
         weights = PersonaWeights(
-            ga_cost_score=0.30,
-            ga_hassle_score=0.25,
-            ga_review_score=0.45,
+            review_cost_score=0.30,
+            review_hassle_score=0.25,
+            review_review_score=0.45,
         )
         assert weights.total_weight() == 1.0
 
     def test_negative_weight_invalid(self):
         """Test that negative weights are invalid."""
         with pytest.raises(ValidationError):
-            PersonaWeights(ga_cost_score=-0.1)
+            PersonaWeights(review_cost_score=-0.1)
 
 
 @pytest.mark.unit
@@ -181,17 +181,17 @@ class TestAirportFeatureScores:
     def test_create_valid(self, sample_feature_scores):
         """Test creating valid feature scores."""
         assert sample_feature_scores.icao == "EGKB"
-        assert sample_feature_scores.ga_cost_score == 0.65
+        assert sample_feature_scores.review_cost_score == 0.65
 
     def test_score_validation(self):
         """Test score must be in [0, 1]."""
         with pytest.raises(ValidationError):
-            AirportFeatureScores(icao="EGKB", ga_cost_score=1.5)
+            AirportFeatureScores(icao="EGKB", review_cost_score=1.5)
 
     def test_allow_none(self):
         """Test None values are allowed."""
-        scores = AirportFeatureScores(icao="EGKB", ga_cost_score=None)
-        assert scores.ga_cost_score is None
+        scores = AirportFeatureScores(icao="EGKB", review_cost_score=None)
+        assert scores.review_cost_score is None
 
 
 @pytest.mark.unit
@@ -205,9 +205,9 @@ class TestAirportStats:
         assert sample_airport_stats.fee_band_0_749kg == 15.0
 
     def test_boolean_flags(self, sample_airport_stats):
-        """Test boolean flag handling."""
-        assert sample_airport_stats.mandatory_handling is False
-        assert sample_airport_stats.ifr_procedure_available is True
+        """Test AIP availability flags."""
+        assert sample_airport_stats.aip_ifr_available == 3  # RNAV
+        assert sample_airport_stats.aip_night_available == 0
 
 
 @pytest.mark.unit

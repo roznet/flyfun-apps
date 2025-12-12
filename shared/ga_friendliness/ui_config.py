@@ -17,14 +17,19 @@ from .personas import FEATURE_NAMES
 # Map internal feature names to user-friendly display names
 
 FEATURE_DISPLAY_NAMES: Dict[str, str] = {
-    "ga_cost_score": "Cost",
-    "ga_review_score": "Reviews",
-    "ga_hassle_score": "Low Hassle",
-    "ga_ops_ifr_score": "IFR Ops",
-    "ga_ops_vfr_score": "VFR Ops",
-    "ga_access_score": "Access",
-    "ga_fun_score": "Fun Factor",
-    "ga_hospitality_score": "Hospitality",
+    # Review-derived features
+    "review_cost_score": "Cost",
+    "review_hassle_score": "Low Hassle",
+    "review_review_score": "Reviews",
+    "review_ops_ifr_score": "IFR Ops (Reviews)",
+    "review_ops_vfr_score": "VFR Ops",
+    "review_access_score": "Access",
+    "review_fun_score": "Fun Factor",
+    "review_hospitality_score": "Hospitality (Reviews)",
+
+    # AIP-derived features
+    "aip_ops_ifr_score": "IFR Ops (Official)",
+    "aip_hospitality_score": "Hospitality (Official)",
 }
 
 
@@ -32,14 +37,19 @@ FEATURE_DISPLAY_NAMES: Dict[str, str] = {
 # Explain what each feature measures (higher = better for all)
 
 FEATURE_DESCRIPTIONS: Dict[str, str] = {
-    "ga_cost_score": "Lower landing/handling fees = higher score",
-    "ga_review_score": "Better pilot reviews and ratings = higher score",
-    "ga_hassle_score": "Less bureaucracy and simpler procedures = higher score",
-    "ga_ops_ifr_score": "Better IFR capability (ILS, RNAV) = higher score",
-    "ga_ops_vfr_score": "Better VFR operations environment = higher score",
-    "ga_access_score": "Better transport links and accessibility = higher score",
-    "ga_fun_score": "More interesting destination, scenery = higher score",
-    "ga_hospitality_score": "Better restaurant/accommodation availability = higher score",
+    # Review-derived features
+    "review_cost_score": "Lower landing/handling fees based on pilot reviews = higher score",
+    "review_hassle_score": "Less bureaucracy and simpler procedures based on pilot reviews = higher score",
+    "review_review_score": "Better pilot reviews and ratings = higher score",
+    "review_ops_ifr_score": "Better IFR operations based on pilot experience = higher score",
+    "review_ops_vfr_score": "Better VFR operations environment based on pilot reviews = higher score",
+    "review_access_score": "Better transport links and accessibility based on pilot reviews = higher score",
+    "review_fun_score": "More interesting destination and scenery based on pilot reviews = higher score",
+    "review_hospitality_score": "Better restaurant/accommodation based on pilot reviews = higher score",
+
+    # AIP-derived features
+    "aip_ops_ifr_score": "Official IFR capability (approaches, procedures, night ops) = higher score",
+    "aip_hospitality_score": "Official hotel/restaurant information from AIP = higher score",
 }
 
 
