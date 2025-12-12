@@ -123,12 +123,13 @@ class GAMetaStorage(StorageInterface):
                         icao, rating_avg, rating_count, last_review_utc,
                         fee_band_0_749kg, fee_band_750_1199kg, fee_band_1200_1499kg,
                         fee_band_1500_1999kg, fee_band_2000_3999kg, fee_band_4000_plus_kg,
-                        fee_currency,
-                        mandatory_handling, ifr_procedure_available, ifr_score, night_available,
-                        hotel_info, restaurant_info,
-                        ga_cost_score, ga_review_score, ga_hassle_score,
-                        ga_ops_ifr_score, ga_ops_vfr_score, ga_access_score,
-                        ga_fun_score, ga_hospitality_score, notification_hassle_score,
+                        fee_currency, fee_last_updated_utc,
+                        aip_ifr_available, aip_night_available,
+                        aip_hotel_info, aip_restaurant_info,
+                        review_cost_score, review_hassle_score, review_review_score,
+                        review_ops_ifr_score, review_ops_vfr_score, review_access_score,
+                        review_fun_score, review_hospitality_score,
+                        aip_ops_ifr_score, aip_hospitality_score,
                         source_version, scoring_version
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
@@ -143,21 +144,21 @@ class GAMetaStorage(StorageInterface):
                     stats.fee_band_2000_3999kg,
                     stats.fee_band_4000_plus_kg,
                     stats.fee_currency,
-                    1 if stats.mandatory_handling else 0,
-                    1 if stats.ifr_procedure_available else 0,
-                    stats.ifr_score,
-                    1 if stats.night_available else 0,
-                    stats.hotel_info,
-                    stats.restaurant_info,
-                    stats.ga_cost_score,
-                    stats.ga_review_score,
-                    stats.ga_hassle_score,
-                    stats.ga_ops_ifr_score,
-                    stats.ga_ops_vfr_score,
-                    stats.ga_access_score,
-                    stats.ga_fun_score,
-                    stats.ga_hospitality_score,
-                    stats.notification_hassle_score,
+                    stats.fee_last_updated_utc,
+                    stats.aip_ifr_available,
+                    stats.aip_night_available,
+                    stats.aip_hotel_info,
+                    stats.aip_restaurant_info,
+                    stats.review_cost_score,
+                    stats.review_hassle_score,
+                    stats.review_review_score,
+                    stats.review_ops_ifr_score,
+                    stats.review_ops_vfr_score,
+                    stats.review_access_score,
+                    stats.review_fun_score,
+                    stats.review_hospitality_score,
+                    stats.aip_ops_ifr_score,
+                    stats.aip_hospitality_score,
                     stats.source_version,
                     stats.scoring_version,
                 ))
@@ -188,21 +189,21 @@ class GAMetaStorage(StorageInterface):
                 fee_band_2000_3999kg=row["fee_band_2000_3999kg"],
                 fee_band_4000_plus_kg=row["fee_band_4000_plus_kg"],
                 fee_currency=row["fee_currency"],
-                mandatory_handling=bool(row["mandatory_handling"]),
-                ifr_procedure_available=bool(row["ifr_procedure_available"]),
-                ifr_score=row["ifr_score"] or 0,
-                night_available=bool(row["night_available"]),
-                hotel_info=row["hotel_info"],
-                restaurant_info=row["restaurant_info"],
-                ga_cost_score=row["ga_cost_score"],
-                ga_review_score=row["ga_review_score"],
-                ga_hassle_score=row["ga_hassle_score"],
-                ga_ops_ifr_score=row["ga_ops_ifr_score"],
-                ga_ops_vfr_score=row["ga_ops_vfr_score"],
-                ga_access_score=row["ga_access_score"],
-                ga_fun_score=row["ga_fun_score"],
-                ga_hospitality_score=row["ga_hospitality_score"],
-                notification_hassle_score=row["notification_hassle_score"],
+                fee_last_updated_utc=row["fee_last_updated_utc"],
+                aip_ifr_available=row["aip_ifr_available"] or 0,
+                aip_night_available=row["aip_night_available"] or 0,
+                aip_hotel_info=row["aip_hotel_info"],
+                aip_restaurant_info=row["aip_restaurant_info"],
+                review_cost_score=row["review_cost_score"],
+                review_hassle_score=row["review_hassle_score"],
+                review_review_score=row["review_review_score"],
+                review_ops_ifr_score=row["review_ops_ifr_score"],
+                review_ops_vfr_score=row["review_ops_vfr_score"],
+                review_access_score=row["review_access_score"],
+                review_fun_score=row["review_fun_score"],
+                review_hospitality_score=row["review_hospitality_score"],
+                aip_ops_ifr_score=row["aip_ops_ifr_score"],
+                aip_hospitality_score=row["aip_hospitality_score"],
                 source_version=row["source_version"] or "unknown",
                 scoring_version=row["scoring_version"] or "unknown",
             )
@@ -516,21 +517,6 @@ class GAMetaStorage(StorageInterface):
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write AIP rule summary: {e}")
 
-    def update_notification_hassle_score(self, icao: str, score: float) -> None:
-        """Update notification_hassle_score in ga_airfield_stats."""
-        self._check_readonly()
-        with self._lock:
-            try:
-                self.conn.execute("""
-                    UPDATE ga_airfield_stats 
-                    SET notification_hassle_score = ?
-                    WHERE icao = ?
-                """, (score, icao))
-
-                if not self._in_transaction:
-                    self.conn.commit()
-            except sqlite3.Error as e:
-                raise StorageError(f"Failed to update notification hassle score: {e}")
 
     def get_last_aip_processed_timestamp(self, icao: str) -> Optional[datetime]:
         """Get when AIP rules were last processed for this airport."""
@@ -557,30 +543,34 @@ class GAMetaStorage(StorageInterface):
         """Compute global average scores across all airports."""
         try:
             cursor = self.conn.execute("""
-                SELECT 
-                    AVG(ga_cost_score) as ga_cost_score,
-                    AVG(ga_hassle_score) as ga_hassle_score,
-                    AVG(ga_review_score) as ga_review_score,
-                    AVG(ga_ops_ifr_score) as ga_ops_ifr_score,
-                    AVG(ga_ops_vfr_score) as ga_ops_vfr_score,
-                    AVG(ga_access_score) as ga_access_score,
-                    AVG(ga_fun_score) as ga_fun_score,
-                    AVG(ga_hospitality_score) as ga_hospitality_score
+                SELECT
+                    AVG(review_cost_score) as review_cost_score,
+                    AVG(review_hassle_score) as review_hassle_score,
+                    AVG(review_review_score) as review_review_score,
+                    AVG(review_ops_ifr_score) as review_ops_ifr_score,
+                    AVG(review_ops_vfr_score) as review_ops_vfr_score,
+                    AVG(review_access_score) as review_access_score,
+                    AVG(review_fun_score) as review_fun_score,
+                    AVG(review_hospitality_score) as review_hospitality_score,
+                    AVG(aip_ops_ifr_score) as aip_ops_ifr_score,
+                    AVG(aip_hospitality_score) as aip_hospitality_score
                 FROM ga_airfield_stats
-                WHERE ga_cost_score IS NOT NULL
+                WHERE review_cost_score IS NOT NULL
             """)
             row = cursor.fetchone()
-            
+
             # Default to 0.5 for any NULL values
             return {
-                "ga_cost_score": row["ga_cost_score"] or 0.5,
-                "ga_hassle_score": row["ga_hassle_score"] or 0.5,
-                "ga_review_score": row["ga_review_score"] or 0.5,
-                "ga_ops_ifr_score": row["ga_ops_ifr_score"] or 0.5,
-                "ga_ops_vfr_score": row["ga_ops_vfr_score"] or 0.5,
-                "ga_access_score": row["ga_access_score"] or 0.5,
-                "ga_fun_score": row["ga_fun_score"] or 0.5,
-                "ga_hospitality_score": row["ga_hospitality_score"] or 0.5,
+                "review_cost_score": row["review_cost_score"] or 0.5,
+                "review_hassle_score": row["review_hassle_score"] or 0.5,
+                "review_review_score": row["review_review_score"] or 0.5,
+                "review_ops_ifr_score": row["review_ops_ifr_score"] or 0.5,
+                "review_ops_vfr_score": row["review_ops_vfr_score"] or 0.5,
+                "review_access_score": row["review_access_score"] or 0.5,
+                "review_fun_score": row["review_fun_score"] or 0.5,
+                "review_hospitality_score": row["review_hospitality_score"] or 0.5,
+                "aip_ops_ifr_score": row["aip_ops_ifr_score"] or 0.5,
+                "aip_hospitality_score": row["aip_hospitality_score"] or 0.5,
             }
         except sqlite3.Error as e:
             raise StorageError(f"Failed to compute global priors: {e}")

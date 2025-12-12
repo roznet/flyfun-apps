@@ -11,7 +11,7 @@ from typing import Optional
 from .exceptions import StorageError
 
 # Current schema version
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"  # Major version bump: breaking schema changes (renamed fields, removed persona scores)
 
 
 def get_schema_version(conn: sqlite3.Connection) -> Optional[str]:
@@ -59,13 +59,17 @@ def create_schema(conn: sqlite3.Connection) -> None:
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ga_airfield_stats (
             icao                TEXT PRIMARY KEY,
-            
-            -- Aggregate review info
+
+            -- ============================================
+            -- REVIEW AGGREGATE INFO
+            -- ============================================
             rating_avg          REAL,
             rating_count        INTEGER,
             last_review_utc     TEXT,
-            
-            -- Fee info (aggregated GA bands by MTOW ranges)
+
+            -- ============================================
+            -- FEE INFO (from review sources)
+            -- ============================================
             fee_band_0_749kg    REAL,
             fee_band_750_1199kg REAL,
             fee_band_1200_1499kg REAL,
@@ -74,34 +78,41 @@ def create_schema(conn: sqlite3.Connection) -> None:
             fee_band_4000_plus_kg REAL,
             fee_currency        TEXT,
             fee_last_updated_utc TEXT,
-            
-            -- Binary/boolean-style flags and IFR capabilities
-            mandatory_handling  INTEGER,
-            ifr_procedure_available INTEGER,
-            ifr_score           INTEGER,  -- 0=no IFR, 1=IFR permitted, 2=VOR/NDB, 3=RNP, 4=ILS
-            night_available     INTEGER,
-            
-            -- AIP metadata (from airports.db)
-            hotel_info          TEXT,
-            restaurant_info     TEXT,
-            
-            -- Normalized feature scores (0.0-1.0)
-            ga_cost_score       REAL,
-            ga_review_score     REAL,
-            ga_hassle_score     REAL,
-            ga_ops_ifr_score    REAL,
-            ga_ops_vfr_score    REAL,
-            ga_access_score     REAL,
-            ga_fun_score        REAL,
-            ga_hospitality_score REAL,
-            notification_hassle_score REAL,
-            
-            -- Persona-specific composite scores (denormalized cache; optional)
-            score_ifr_touring   REAL,
-            score_vfr_budget    REAL,
-            score_training      REAL,
-            
-            -- Versioning / provenance
+
+            -- ============================================
+            -- AIP RAW DATA (from airports.db/AIP)
+            -- ============================================
+            -- IFR capabilities
+            aip_ifr_available        INTEGER,   -- 0=no IFR, 1=IFR permitted (no procedures), 2=non-precision (VOR/NDB), 3=RNP/RNAV, 4=ILS
+            aip_night_available     INTEGER,    -- 0=unknown/unavailable, 1=available
+
+            -- Hospitality (encoded from AIP)
+            aip_hotel_info          INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
+            aip_restaurant_info     INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
+
+            -- ============================================
+            -- REVIEW-DERIVED FEATURE SCORES (0.0-1.0)
+            -- From parsing review text and extracting tags
+            -- ============================================
+            review_cost_score       REAL,
+            review_hassle_score     REAL,
+            review_review_score     REAL,
+            review_ops_ifr_score    REAL,
+            review_ops_vfr_score   REAL,
+            review_access_score     REAL,
+            review_fun_score        REAL,
+            review_hospitality_score REAL,
+
+            -- ============================================
+            -- AIP-DERIVED FEATURE SCORES (0.0-1.0)
+            -- Computed from AIP raw data fields
+            -- ============================================
+            aip_ops_ifr_score       REAL,
+            aip_hospitality_score   REAL,
+
+            -- ============================================
+            -- VERSIONING / PROVENANCE
+            -- ============================================
             source_version      TEXT,
             scoring_version     TEXT
         )

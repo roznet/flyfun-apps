@@ -694,13 +694,14 @@ class AirportsDatabaseSource:
     def __init__(self, db_path: Path):
         """
         Initialize airports database source.
-        
+
         Args:
             db_path: Path to airports.db SQLite database
         """
         self.db_path = Path(db_path)
         self._conn = None
         self._cache: Dict[str, Dict] = {}
+        self._euro_aip_model = None  # Lazy-loaded EuroAipModel
     
     def _get_connection(self):
         """Get or create database connection."""
@@ -807,10 +808,57 @@ class AirportsDatabaseSource:
         """Get restaurant availability info for an airport."""
         return self._get_aip_field(icao, self.STD_FIELD_RESTAURANT)
     
+    def _load_euro_aip_model(self):
+        """Lazy-load the EuroAipModel (loads entire database)."""
+        if self._euro_aip_model is None:
+            try:
+                from euro_aip.storage import DatabaseStorage
+
+                storage = DatabaseStorage(str(self.db_path))
+                self._euro_aip_model = storage.load_model()
+            except ImportError:
+                # euro_aip not available
+                import logging
+                logging.warning("euro_aip module not available, AIP data will be limited")
+                self._euro_aip_model = False  # Mark as unavailable
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to load euro_aip model: {e}")
+                self._euro_aip_model = False  # Mark as unavailable
+
+    def get_airport(self, icao: str) -> Optional[Any]:
+        """
+        Get euro_aip Airport object for an airport.
+
+        Returns Airport object with procedures, aip_entries, etc.
+        Uses cached EuroAipModel for efficient access.
+
+        Args:
+            icao: Airport ICAO code
+
+        Returns:
+            Airport object from euro_aip, or None if not found/unavailable
+        """
+        # Load model if not already loaded
+        self._load_euro_aip_model()
+
+        # Check if model is available
+        if self._euro_aip_model is False:
+            return None
+
+        # Get airport from model
+        try:
+            airport = self._euro_aip_model.get_airport(icao.upper())
+            return airport
+        except Exception as e:
+            import logging
+            logging.debug(f"Airport {icao} not found in euro_aip model: {e}")
+            return None
+
     def get_airport_metadata(self, icao: str) -> Dict[str, Any]:
         """
         Get all relevant metadata for an airport.
-        
+
         Returns dict with:
             - ifr_score: int (0-4)
             - ifr_permitted: bool
@@ -819,14 +867,14 @@ class AirportsDatabaseSource:
             - restaurant_info: str or None
         """
         icao = icao.upper()
-        
+
         # Check cache
         if icao in self._cache:
             return self._cache[icao]
-        
+
         ifr_permitted = self._is_ifr_permitted(icao)
         best_approach = self._get_best_approach_type(icao) if ifr_permitted else None
-        
+
         metadata = {
             "ifr_score": self.get_ifr_score(icao),
             "ifr_permitted": ifr_permitted,
@@ -834,7 +882,7 @@ class AirportsDatabaseSource:
             "hotel_info": self.get_hotel_info(icao),
             "restaurant_info": self.get_restaurant_info(icao),
         }
-        
+
         self._cache[icao] = metadata
         return metadata
     

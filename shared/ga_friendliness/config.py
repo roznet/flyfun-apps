@@ -195,13 +195,50 @@ def load_personas(path: Path) -> PersonasConfig:
     except Exception as e:
         raise PersonaValidationError(f"Invalid personas structure: {e}")
 
+    # Valid feature names (all possible feature scores)
+    valid_feature_names = {
+        "review_cost_score",
+        "review_hassle_score",
+        "review_review_score",
+        "review_ops_ifr_score",
+        "review_ops_vfr_score",
+        "review_access_score",
+        "review_fun_score",
+        "review_hospitality_score",
+        "aip_ops_ifr_score",
+        "aip_hospitality_score",
+    }
+
     # Validate each persona
     for persona_id, persona in config.personas.items():
-        # Check that weights are defined
+        # Get all weights from persona
+        weights_dict = persona.weights.model_dump()
+
+        # Check that all weights are non-negative
+        for feature_name, weight in weights_dict.items():
+            if weight < 0:
+                raise PersonaValidationError(
+                    f"Persona '{persona_id}' has negative weight for '{feature_name}': {weight}"
+                )
+
+            # Check that feature name is valid
+            if weight > 0 and feature_name not in valid_feature_names:
+                raise PersonaValidationError(
+                    f"Persona '{persona_id}' references unknown feature: '{feature_name}'. "
+                    f"Valid features: {', '.join(sorted(valid_feature_names))}"
+                )
+
+        # Check that weights sum to approximately 1.0 (tolerance: 0.05)
         total_weight = persona.weights.total_weight()
         if total_weight <= 0:
             raise PersonaValidationError(
                 f"Persona '{persona_id}' has no positive weights"
+            )
+
+        if abs(total_weight - 1.0) > 0.05:
+            raise PersonaValidationError(
+                f"Persona '{persona_id}' weights sum to {total_weight:.3f}, "
+                f"expected approximately 1.0 (±0.05)"
             )
 
     return config
@@ -251,6 +288,11 @@ DEFAULT_ONTOLOGY: Dict[str, Any] = {
             "negative",
             "very_negative",
         ],
+        # IFR/VFR operations aspects (for ops_ifr_score and ops_vfr_score)
+        "ifr": ["excellent", "good", "ok", "poor", "unavailable"],
+        "procedure": ["well_documented", "standard", "complex", "unclear"],
+        "approach": ["excellent", "good", "ok", "poor"],
+        "vfr": ["excellent", "good", "ok", "poor", "restricted"],
     },
 }
 
@@ -263,13 +305,13 @@ DEFAULT_PERSONAS: Dict[str, Any] = {
             "label": "IFR touring (SR22)",
             "description": "IFR touring mission: prefers solid IFR capability, reasonable fees, low bureaucracy",
             "weights": {
-                "ga_ops_ifr_score": 0.25,
-                "ga_hassle_score": 0.20,
-                "ga_cost_score": 0.20,
-                "ga_review_score": 0.15,
-                "ga_access_score": 0.10,
-                "ga_fun_score": 0.05,
-                "ga_hospitality_score": 0.05,
+                "aip_ops_ifr_score": 0.25,
+                "review_hassle_score": 0.20,
+                "review_cost_score": 0.20,
+                "review_review_score": 0.15,
+                "review_access_score": 0.10,
+                "review_fun_score": 0.05,
+                "review_hospitality_score": 0.05,
             },
         },
         "vfr_budget": {
@@ -277,11 +319,11 @@ DEFAULT_PERSONAS: Dict[str, Any] = {
             "label": "VFR budget flyer",
             "description": "VFR pilot focused on low cost and easy access",
             "weights": {
-                "ga_cost_score": 0.35,
-                "ga_hassle_score": 0.25,
-                "ga_ops_vfr_score": 0.20,
-                "ga_review_score": 0.10,
-                "ga_access_score": 0.10,
+                "review_cost_score": 0.35,
+                "review_hassle_score": 0.25,
+                "review_ops_vfr_score": 0.20,
+                "review_review_score": 0.10,
+                "review_access_score": 0.10,
             },
         },
         "lunch_stop": {
@@ -289,14 +331,16 @@ DEFAULT_PERSONAS: Dict[str, Any] = {
             "label": "Lunch stop",
             "description": "Looking for a nice lunch destination with good restaurant",
             "weights": {
-                "ga_hospitality_score": 0.35,
-                "ga_fun_score": 0.25,
-                "ga_cost_score": 0.15,
-                "ga_hassle_score": 0.15,
-                "ga_review_score": 0.10,
+                "review_hospitality_score": 0.25,
+                "aip_hospitality_score": 0.10,
+                "review_fun_score": 0.25,
+                "review_cost_score": 0.15,
+                "review_hassle_score": 0.15,
+                "review_review_score": 0.10,
             },
             "missing_behaviors": {
-                "ga_hospitality_score": "negative",  # Required for lunch stops
+                "review_hospitality_score": "negative",  # Required for lunch stops
+                "aip_hospitality_score": "negative",  # Required for lunch stops
             },
         },
         "training": {
@@ -304,10 +348,10 @@ DEFAULT_PERSONAS: Dict[str, Any] = {
             "label": "Training flight",
             "description": "Training flight focus on ops and low cost",
             "weights": {
-                "ga_ops_vfr_score": 0.30,
-                "ga_cost_score": 0.30,
-                "ga_hassle_score": 0.20,
-                "ga_review_score": 0.20,
+                "review_ops_vfr_score": 0.30,
+                "review_cost_score": 0.30,
+                "review_hassle_score": 0.20,
+                "review_review_score": 0.20,
             },
         },
     },

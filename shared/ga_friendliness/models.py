@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # --- Raw Input Models ---
@@ -258,48 +258,63 @@ class AirportStats(BaseModel):
         default=None, description="4000+ kg MTOW"
     )
     fee_currency: Optional[str] = Field(default=None, description="Currency code")
-
-    # Binary flags and IFR capabilities
-    mandatory_handling: bool = Field(default=False)
-    ifr_procedure_available: bool = Field(
-        default=False,
-        description="True if airport has instrument approach procedures (ILS, RNAV, VOR, etc.)",
+    fee_last_updated_utc: Optional[str] = Field(
+        default=None, description="Timestamp of fee data last update"
     )
-    ifr_score: int = Field(
+
+    # AIP raw data (from airports.db/AIP)
+    aip_ifr_available: int = Field(
         default=0,
         ge=0,
         le=4,
-        description="IFR capability score: 0=no IFR, 1=IFR permitted, 2=basic (VOR/NDB), 3=RNP, 4=ILS",
+        description="IFR capability: 0=no IFR, 1=IFR permitted (no procedures), 2=non-precision (VOR/NDB), 3=RNP/RNAV, 4=ILS",
     )
-    night_available: bool = Field(default=False)
-    
-    # AIP metadata (from airports.db)
-    hotel_info: Optional[str] = Field(
-        default=None, description="Hotel availability info from AIP"
+    aip_night_available: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="Night operations: 0=unknown/unavailable, 1=available",
     )
-    restaurant_info: Optional[str] = Field(
-        default=None, description="Restaurant availability info from AIP"
+    aip_hotel_info: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=2,
+        description="Hotel availability: 0=unknown, 1=vicinity, 2=at_airport",
+    )
+    aip_restaurant_info: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=2,
+        description="Restaurant availability: 0=unknown, 1=vicinity, 2=at_airport",
     )
 
-    # Feature scores (all normalized [0, 1])
-    ga_cost_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_review_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_hassle_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_ops_ifr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_ops_vfr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_access_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_fun_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ga_hospitality_score: Optional[float] = Field(
+    # Review-derived feature scores (all normalized [0, 1])
+    review_cost_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_hassle_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_review_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_ops_ifr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_ops_vfr_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_access_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_fun_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    review_hospitality_score: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="Availability/proximity of restaurant and accommodation",
+        description="Restaurant/hotel availability from reviews",
     )
-    notification_hassle_score: Optional[float] = Field(
+
+    # AIP-derived feature scores (all normalized [0, 1])
+    aip_ops_ifr_score: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="From AIP notification rules (optional)",
+        description="IFR capability score computed from aip_ifr_available",
+    )
+    aip_hospitality_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Hospitality score computed from aip_hotel_info, aip_restaurant_info",
     )
 
     # Versioning
@@ -402,24 +417,135 @@ class RuleSummary(BaseModel):
 # --- Feature Mapping Configuration ---
 
 
-class FeatureMappingConfig(BaseModel):
-    """Configuration for mapping aspect labels to a feature score."""
+class AspectConfig(BaseModel):
+    """Configuration for a single aspect contributing to a feature."""
 
-    aspect: str = Field(..., description="Aspect name from ontology")
-    label_scores: Dict[str, float] = Field(
-        ..., description="Mapping of label -> score [0, 1]"
+    name: str = Field(..., description="Aspect name from ontology")
+    weight: float = Field(..., ge=0.0, description="Weight for this aspect")
+
+
+class ReviewFeatureDefinition(BaseModel):
+    """
+    Configuration for computing a review-derived feature score.
+
+    Defines how to combine multiple aspects with different weights
+    into a single normalized feature score.
+    """
+
+    description: str = Field(..., description="Human-readable description")
+    aspects: List[AspectConfig] = Field(
+        ..., min_length=1, description="Aspects that contribute to this feature"
     )
-    default_score: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="Score when no labels match"
+    aggregation: str = Field(
+        default="weighted_label_mapping",
+        description="Aggregation method (currently only 'weighted_label_mapping')",
     )
+    label_scores: Dict[str, Any] = Field(
+        ...,
+        description="Label scores - can be flat dict or nested by aspect name",
+    )
+
+    @field_validator("aggregation")
+    @classmethod
+    def validate_aggregation(cls, v: str) -> str:
+        """Validate aggregation method."""
+        allowed = {"weighted_label_mapping"}
+        if v not in allowed:
+            raise ValueError(f"Aggregation must be one of {allowed}, got: {v}")
+        return v
+
+
+class AIPFeatureDefinition(BaseModel):
+    """
+    Configuration for computing an AIP-derived feature score.
+
+    Defines how to compute normalized scores from raw AIP data fields
+    using lookup tables or weighted component sums.
+    """
+
+    description: str = Field(..., description="Human-readable description")
+    raw_fields: List[str] = Field(
+        ..., min_length=1, description="Raw AIP fields used in computation"
+    )
+    computation: str = Field(
+        ...,
+        description="Computation method: 'lookup_table' or 'weighted_component_sum'",
+    )
+    value_mapping: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="For lookup_table: maps raw value (as string) to score",
+    )
+    component_mappings: Optional[Dict[str, Dict[str, float]]] = Field(
+        default=None,
+        description="For weighted_component_sum: maps each field's values to scores",
+    )
+    component_weights: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="For weighted_component_sum: weight for each field",
+    )
+    notes: Optional[str] = Field(
+        default=None, description="Optional notes about the computation"
+    )
+
+    @field_validator("computation")
+    @classmethod
+    def validate_computation(cls, v: str) -> str:
+        """Validate computation method."""
+        allowed = {"lookup_table", "weighted_component_sum"}
+        if v not in allowed:
+            raise ValueError(f"Computation must be one of {allowed}, got: {v}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_computation_fields(self) -> "AIPFeatureDefinition":
+        """Validate that required fields are present for computation method."""
+        if self.computation == "lookup_table":
+            if not self.value_mapping:
+                raise ValueError(
+                    "lookup_table computation requires value_mapping"
+                )
+            if len(self.raw_fields) != 1:
+                raise ValueError(
+                    "lookup_table computation requires exactly 1 raw field"
+                )
+        elif self.computation == "weighted_component_sum":
+            if not self.component_mappings or not self.component_weights:
+                raise ValueError(
+                    "weighted_component_sum requires component_mappings and component_weights"
+                )
+            # Check all raw_fields have mappings and weights
+            for field in self.raw_fields:
+                if field not in self.component_mappings:
+                    raise ValueError(
+                        f"Field '{field}' missing from component_mappings"
+                    )
+                if field not in self.component_weights:
+                    raise ValueError(
+                        f"Field '{field}' missing from component_weights"
+                    )
+        return self
 
 
 class FeatureMappingsConfig(BaseModel):
-    """All feature mapping configurations."""
+    """
+    Complete feature mapping configuration.
+
+    Defines how ALL feature scores are computed from review tags
+    and AIP data. This enables config-driven feature computation
+    without code changes.
+    """
 
     version: str = Field(..., description="Feature mappings version")
-    mappings: Dict[str, FeatureMappingConfig] = Field(
-        ..., description="Mapping of feature_name -> FeatureMappingConfig"
+    description: Optional[str] = Field(
+        default=None, description="Optional description"
+    )
+    review_feature_definitions: Dict[str, ReviewFeatureDefinition] = Field(
+        default_factory=dict,
+        description="Review-derived feature definitions (feature_name -> definition)",
+    )
+    aip_feature_definitions: Dict[str, AIPFeatureDefinition] = Field(
+        default_factory=dict,
+        description="AIP-derived feature definitions (feature_name -> definition)",
     )
 
 

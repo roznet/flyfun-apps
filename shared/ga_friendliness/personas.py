@@ -4,10 +4,10 @@ Persona loading and score computation.
 Manages personas and computes persona-specific scores from features.
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from .models import (
-    AirportFeatureScores,
+    AirportStats,
     MissingBehavior,
     PersonaConfig,
     PersonaMissingBehaviors,
@@ -15,17 +15,27 @@ from .models import (
 )
 
 
-# Feature names for iteration
-FEATURE_NAMES = [
-    "ga_cost_score",
-    "ga_review_score",
-    "ga_hassle_score",
-    "ga_ops_ifr_score",
-    "ga_ops_vfr_score",
-    "ga_access_score",
-    "ga_fun_score",
-    "ga_hospitality_score",
+# Feature names for iteration (all possible feature scores)
+# Review-derived features
+REVIEW_FEATURE_NAMES = [
+    "review_cost_score",
+    "review_hassle_score",
+    "review_review_score",
+    "review_ops_ifr_score",
+    "review_ops_vfr_score",
+    "review_access_score",
+    "review_fun_score",
+    "review_hospitality_score",
 ]
+
+# AIP-derived features
+AIP_FEATURE_NAMES = [
+    "aip_ops_ifr_score",
+    "aip_hospitality_score",
+]
+
+# All feature names combined
+FEATURE_NAMES = REVIEW_FEATURE_NAMES + AIP_FEATURE_NAMES
 
 
 class PersonaManager:
@@ -61,6 +71,21 @@ class PersonaManager:
         """List all persona configs."""
         return list(self.config.personas.values())
 
+    def _get_feature_value(
+        self,
+        features: Union[AirportStats, Dict[str, float], Any],
+        feature_name: str
+    ) -> Optional[float]:
+        """
+        Get feature value from object, dict, or attribute.
+
+        Supports AirportStats objects, dicts, and any object with attributes.
+        """
+        if isinstance(features, dict):
+            return features.get(feature_name)
+        else:
+            return getattr(features, feature_name, None)
+
     def _resolve_missing_value(
         self,
         value: Optional[float],
@@ -68,7 +93,7 @@ class PersonaManager:
     ) -> tuple[Optional[float], bool]:
         """
         Resolve missing value based on behavior.
-        
+
         Returns:
             Tuple of (resolved_value, should_include)
             If should_include is False, this feature should be excluded.
@@ -88,21 +113,21 @@ class PersonaManager:
     def compute_score(
         self,
         persona_id: str,
-        features: AirportFeatureScores
+        features: Union[AirportStats, Dict[str, float], Any]
     ) -> Optional[float]:
         """
-        Compute persona-specific score from base features.
-        
+        Compute persona-specific score from feature scores using weighted sum.
+
         Handles missing (None) feature values based on persona's missing_behaviors:
             - NEUTRAL: treat as 0.5 (average)
             - NEGATIVE: treat as 0.0 (worst case - feature is required)
             - POSITIVE: treat as 1.0 (best case - rare)
             - EXCLUDE: skip this feature, re-normalize remaining weights
-        
+
         Args:
             persona_id: ID of persona to compute score for
-            features: Airport feature scores
-            
+            features: AirportStats object, dict, or any object with feature score attributes
+
         Returns:
             Score in [0, 1] range, or None if persona not found
         """
@@ -120,7 +145,7 @@ class PersonaManager:
             if weight == 0.0:
                 continue  # Feature not used by this persona
 
-            value = getattr(features, feature_name, None)
+            value = self._get_feature_value(features, feature_name)
             behavior = getattr(missing_behaviors, feature_name, MissingBehavior.NEUTRAL)
 
             resolved_value, should_include = self._resolve_missing_value(value, behavior)
@@ -140,14 +165,14 @@ class PersonaManager:
 
     def compute_scores_for_all_personas(
         self,
-        features: AirportFeatureScores
+        features: Union[AirportStats, Dict[str, float], Any]
     ) -> Dict[str, float]:
         """
         Compute scores for all personas.
-        
+
         Args:
-            features: Airport feature scores
-            
+            features: AirportStats object, dict, or any object with feature score attributes
+
         Returns:
             Dict mapping persona_id -> score
         """
@@ -160,16 +185,16 @@ class PersonaManager:
 
     def get_top_personas_for_airport(
         self,
-        features: AirportFeatureScores,
+        features: Union[AirportStats, Dict[str, float], Any],
         n: int = 3
     ) -> List[tuple[str, float]]:
         """
         Get top N personas for an airport by score.
-        
+
         Args:
-            features: Airport feature scores
+            features: AirportStats object, dict, or any object with feature score attributes
             n: Number of top personas to return
-            
+
         Returns:
             List of (persona_id, score) tuples, sorted by score descending
         """
@@ -180,13 +205,17 @@ class PersonaManager:
     def explain_score(
         self,
         persona_id: str,
-        features: AirportFeatureScores
+        features: Union[AirportStats, Dict[str, float], Any]
     ) -> Dict[str, dict]:
         """
         Explain how a persona score was computed.
-        
+
         Useful for transparency and debugging.
-        
+
+        Args:
+            persona_id: ID of persona to explain
+            features: AirportStats object, dict, or any object with feature score attributes
+
         Returns:
             Dict with feature-level breakdown
         """
@@ -209,7 +238,7 @@ class PersonaManager:
             if weight == 0.0:
                 continue
 
-            value = getattr(features, feature_name, None)
+            value = self._get_feature_value(features, feature_name)
             behavior = getattr(missing_behaviors, feature_name, MissingBehavior.NEUTRAL)
             resolved_value, should_include = self._resolve_missing_value(value, behavior)
 

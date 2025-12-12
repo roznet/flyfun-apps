@@ -72,8 +72,10 @@ from .models import (
     ParsedAIPRules,
     RuleSummary,
     # Feature mappings
-    FeatureMappingConfig,
     FeatureMappingsConfig,
+    ReviewFeatureDefinition,
+    AIPFeatureDefinition,
+    AspectConfig,
     # Build
     FailureMode,
     BuildMetrics,
@@ -187,8 +189,10 @@ __all__ = [
     "NotificationRule",
     "ParsedAIPRules",
     "RuleSummary",
-    "FeatureMappingConfig",
     "FeatureMappingsConfig",
+    "ReviewFeatureDefinition",
+    "AIPFeatureDefinition",
+    "AspectConfig",
     "FailureMode",
     "BuildMetrics",
     "BuildResult",

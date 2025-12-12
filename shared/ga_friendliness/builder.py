@@ -11,7 +11,13 @@ from typing import Any, Dict, List, Optional, Set
 
 from .config import GAFriendlinessSettings, get_default_ontology, get_default_personas
 from .exceptions import BuildError, StorageError
-from .features import FeatureMapper, aggregate_fees_by_band
+from .features import (
+    FeatureMapper,
+    aggregate_fees_by_band,
+    compute_aip_ifr_score,
+    compute_aip_night_available,
+    parse_hospitality_text_to_int,
+)
 from .interfaces import ReviewSource, StorageInterface
 from .models import (
     AirportStats,
@@ -312,31 +318,60 @@ class GAFriendlinessBuilder:
         if self._aggregator and extractions:
             distributions, context = self._aggregator.aggregate_tags(extractions)
         
-        # Get airport metadata from airports.db (IFR score, hotel, restaurant)
-        ifr_score = 0  # Default: IFR not available
-        ifr_available = False
-        hotel_info = None
-        restaurant_info = None
-        
+        # Get airport metadata from euro_aip (IFR score, hotel, restaurant)
+        aip_ifr_available = 0  # Default: IFR not available
+        aip_night_available = 0  # Default: not available
+        aip_hotel_info = None  # 0=unknown, 1=vicinity, 2=at_airport
+        aip_restaurant_info = None  # 0=unknown, 1=vicinity, 2=at_airport
+        aip_data = {}  # For AIP feature computation
+
         if airports_db:
             try:
-                metadata = airports_db.get_airport_metadata(icao)
-                ifr_score = metadata.get("ifr_score", 0)
-                ifr_available = metadata.get("ifr_permitted", False)
-                hotel_info = metadata.get("hotel_info")
-                restaurant_info = metadata.get("restaurant_info")
+                # Get euro_aip Airport object
+                airport = airports_db.get_airport(icao)
+                if airport:
+                    # Compute IFR score from procedures
+                    # Get IFR permitted field (std_field_id=207) if available
+                    ifr_permitted_text = None
+                    for entry in airport.aip_entries:
+                        if entry.std_field_id == 207:
+                            ifr_permitted_text = entry.value
+                            break
+
+                    aip_ifr_available = compute_aip_ifr_score(
+                        airport.procedures, ifr_permitted_text
+                    )
+                    aip_night_available = compute_aip_night_available()
+
+                    # Parse hospitality text fields
+                    # Hotel: std_field_id = 501
+                    # Restaurant: std_field_id = 502
+                    for entry in airport.aip_entries:
+                        if entry.std_field_id == 501:  # Hotels
+                            aip_hotel_info = parse_hospitality_text_to_int(entry.value)
+                        elif entry.std_field_id == 502:  # Restaurants
+                            aip_restaurant_info = parse_hospitality_text_to_int(entry.value)
+
+                    # Prepare AIP data for feature computation
+                    aip_data = {
+                        "aip_ifr_available": aip_ifr_available,
+                        "aip_hotel_info": aip_hotel_info,
+                        "aip_restaurant_info": aip_restaurant_info,
+                    }
             except Exception as e:
-                logger.warning(f"Failed to get airports.db metadata for {icao}: {e}")
-        
-        # Compute feature scores
-        feature_scores = self.feature_mapper.compute_feature_scores(
+                logger.warning(f"Failed to get euro_aip metadata for {icao}: {e}")
+
+        # Compute review-derived feature scores
+        review_feature_scores = self.feature_mapper.compute_review_feature_scores(
             icao=icao,
             distributions=distributions,
-            ifr_procedure_available=ifr_available,
         )
-        
-        # Compute persona scores
-        persona_scores = self.persona_manager.compute_scores_for_all_personas(feature_scores)
+
+        # Compute AIP-derived feature scores
+        aip_feature_scores = self.feature_mapper.compute_aip_feature_scores(
+            icao=icao,
+            aip_data=aip_data,
+        )
         
         # Get fee data if source supports it
         fee_bands: Dict[str, Optional[float]] = {}
@@ -375,20 +410,21 @@ class GAFriendlinessBuilder:
             fee_band_2000_3999kg=fee_bands.get("fee_band_2000_3999kg"),
             fee_band_4000_plus_kg=fee_bands.get("fee_band_4000_plus_kg"),
             fee_currency=fee_currency,
-            mandatory_handling=False,
-            ifr_procedure_available=ifr_available,
-            ifr_score=ifr_score,
-            night_available=False,
-            hotel_info=hotel_info,
-            restaurant_info=restaurant_info,
-            ga_cost_score=feature_scores.ga_cost_score,
-            ga_review_score=feature_scores.ga_review_score,
-            ga_hassle_score=feature_scores.ga_hassle_score,
-            ga_ops_ifr_score=feature_scores.ga_ops_ifr_score,
-            ga_ops_vfr_score=feature_scores.ga_ops_vfr_score,
-            ga_access_score=feature_scores.ga_access_score,
-            ga_fun_score=feature_scores.ga_fun_score,
-            ga_hospitality_score=feature_scores.ga_hospitality_score,
+            fee_last_updated_utc=None,  # TODO: Track fee update timestamps
+            aip_ifr_available=aip_ifr_available,
+            aip_night_available=aip_night_available,
+            aip_hotel_info=aip_hotel_info,
+            aip_restaurant_info=aip_restaurant_info,
+            review_cost_score=review_feature_scores.get("review_cost_score"),
+            review_hassle_score=review_feature_scores.get("review_hassle_score"),
+            review_review_score=review_feature_scores.get("review_review_score"),
+            review_ops_ifr_score=review_feature_scores.get("review_ops_ifr_score"),
+            review_ops_vfr_score=review_feature_scores.get("review_ops_vfr_score"),
+            review_access_score=review_feature_scores.get("review_access_score"),
+            review_fun_score=review_feature_scores.get("review_fun_score"),
+            review_hospitality_score=review_feature_scores.get("review_hospitality_score"),
+            aip_ops_ifr_score=aip_feature_scores.get("aip_ops_ifr_score"),
+            aip_hospitality_score=aip_feature_scores.get("aip_hospitality_score"),
             source_version=self.settings.source_version,
             scoring_version=self.settings.scoring_version,
         )

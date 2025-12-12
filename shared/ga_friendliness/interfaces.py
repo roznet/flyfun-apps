@@ -259,11 +259,6 @@ class StorageInterface(ABC):
         pass
 
     @abstractmethod
-    def update_notification_hassle_score(self, icao: str, score: float) -> None:
-        """Update notification_hassle_score in ga_airfield_stats."""
-        pass
-
-    @abstractmethod
     def get_last_aip_processed_timestamp(self, icao: str) -> Optional[datetime]:
         """Get when AIP rules were last processed for this airport."""
         pass
