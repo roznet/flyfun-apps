@@ -36,6 +36,7 @@ from shared.ga_friendliness import (
     get_settings,
     BuildResult,
     AirfieldDirectorySource,
+    AirfieldDirectoryAPISource,
     AirportJsonDirectorySource,
     CSVReviewSource,
     CompositeReviewSource,
@@ -74,6 +75,17 @@ def parse_args() -> argparse.Namespace:
         "--json-dir",
         type=Path,
         help="Directory containing per-airport JSON files (e.g., EGTF.json)",
+    )
+    source_group.add_argument(
+        "--download-api",
+        action="store_true",
+        help="Download from airfield.directory API instead of using local file",
+    )
+    source_group.add_argument(
+        "--api-base-url",
+        type=str,
+        default="https://airfield.directory/airfield",
+        help="Base URL for airfield.directory API (default: https://airfield.directory/airfield)",
     )
     source_group.add_argument(
         "--airports-db",
@@ -184,6 +196,24 @@ def parse_args() -> argparse.Namespace:
 def create_source(args: argparse.Namespace) -> "ReviewSource":
     """Create review source from arguments."""
     sources = []
+    
+    # API download mode (requires --icaos)
+    if args.download_api:
+        if not args.icaos:
+            logger.error("--download-api requires --icaos to specify which airports to download")
+            sys.exit(1)
+        
+        icaos = [icao.strip().upper() for icao in args.icaos.split(",")]
+        source = AirfieldDirectoryAPISource(
+            cache_dir=args.cache_dir,
+            icaos=icaos,
+            filter_ai_generated=True,
+            max_cache_age_days=7,
+            base_url=args.api_base_url,
+        )
+        if args.force_refresh:
+            source.set_force_refresh(True)
+        return source  # API source is standalone, don't combine with others
     
     if args.export:
         if not args.export.exists():

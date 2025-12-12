@@ -143,6 +143,7 @@ from .cache import CachedDataLoader
 from .sources import (
     CSVReviewSource,
     AirfieldDirectorySource,
+    AirfieldDirectoryAPISource,
     AirportJsonDirectorySource,
     CompositeReviewSource,
     AirportsDatabaseSource,
@@ -236,6 +237,7 @@ __all__ = [
     # Sources
     "CSVReviewSource",
     "AirfieldDirectorySource",
+    "AirfieldDirectoryAPISource",
     "AirportJsonDirectorySource",
     "CompositeReviewSource",
     "AirportsDatabaseSource",

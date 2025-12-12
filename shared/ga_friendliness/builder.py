@@ -376,6 +376,7 @@ class GAFriendlinessBuilder:
         # Get fee data if source supports it
         fee_bands: Dict[str, Optional[float]] = {}
         fee_currency = "EUR"  # Default
+        fee_last_updated = None
         
         if isinstance(source, AirportJsonDirectorySource):
             # AirportJsonDirectorySource has pre-aggregated fee data
@@ -383,6 +384,14 @@ class GAFriendlinessBuilder:
             if fee_data:
                 fee_bands = fee_data.get("bands", {})
                 fee_currency = fee_data.get("currency", "EUR")
+                fee_last_updated = fee_data.get("fees_last_changed")
+        elif hasattr(source, "get_fee_data"):
+            # AirfieldDirectoryAPISource also has get_fee_data method
+            fee_data = source.get_fee_data(icao)
+            if fee_data:
+                fee_bands = fee_data.get("bands", {})
+                fee_currency = fee_data.get("currency", "EUR")
+                fee_last_updated = fee_data.get("fees_last_changed")
         elif isinstance(source, AirfieldDirectorySource):
             airport_data = source.get_airport_data(icao)
             if airport_data and "aerops" in airport_data:
@@ -410,7 +419,7 @@ class GAFriendlinessBuilder:
             fee_band_2000_3999kg=fee_bands.get("fee_band_2000_3999kg"),
             fee_band_4000_plus_kg=fee_bands.get("fee_band_4000_plus_kg"),
             fee_currency=fee_currency,
-            fee_last_updated_utc=None,  # TODO: Track fee update timestamps
+            fee_last_updated_utc=fee_last_updated,
             aip_ifr_available=aip_ifr_available,
             aip_night_available=aip_night_available,
             aip_hotel_info=aip_hotel_info,
