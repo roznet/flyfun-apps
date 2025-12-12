@@ -232,6 +232,37 @@ class StorageInterface(ABC):
         """Check if airport has new/changed reviews."""
         pass
 
+    def has_fee_changes(
+        self, icao: str, fee_data: Optional[Dict[str, Any]]
+    ) -> bool:
+        """
+        Check if airport fees have changed.
+        
+        Args:
+            icao: Airport ICAO code
+            fee_data: Fee data dict with 'fees_last_changed' and 'bands', or None
+            
+        Returns:
+            True if fees have changed or if airport has no fee data but new data is available
+        """
+        # Default implementation: always return False (no fee change detection)
+        # Subclasses should override this for fee change detection
+        return False
+
+    def update_fees_only(
+        self, icao: str, fee_data: Dict[str, Any]
+    ) -> None:
+        """
+        Update only fee data for an airport without processing reviews.
+        
+        Args:
+            icao: Airport ICAO code
+            fee_data: Fee data dict with 'currency', 'fees_last_changed', and 'bands'
+        """
+        # Default implementation: raise NotImplementedError
+        # Subclasses should override this for fee-only updates
+        raise NotImplementedError("Fee-only updates not supported by this storage implementation")
+
     # --- Resume Support ---
 
     @abstractmethod

@@ -428,6 +428,129 @@ class GAMetaStorage(StorageInterface):
 
         return False  # No changes detected
 
+    def has_fee_changes(
+        self, icao: str, fee_data: Optional[Dict[str, Any]]
+    ) -> bool:
+        """
+        Check if airport fees have changed.
+        
+        Args:
+            icao: Airport ICAO code
+            fee_data: Fee data dict with 'fees_last_changed' and 'bands', or None
+            
+        Returns:
+            True if fees have changed or if airport has no fee data but new data is available
+        """
+        # Get current fee data from database
+        current_stats = self.get_airfield_stats(icao)
+        if current_stats is None:
+            # Airport not in database, treat as change
+            return fee_data is not None
+        
+        # If no new fee data, no change
+        if fee_data is None:
+            return False
+        
+        # Compare fees_last_changed timestamps
+        new_fees_changed = fee_data.get("fees_last_changed")
+        current_fees_changed = current_stats.fee_last_updated_utc
+        
+        # If new data has timestamp but current doesn't, it's a change
+        if new_fees_changed and not current_fees_changed:
+            return True
+        
+        # If both have timestamps, compare them
+        if new_fees_changed and current_fees_changed:
+            try:
+                new_time = parse_timestamp(new_fees_changed)
+                current_time = parse_timestamp(current_fees_changed)
+                if new_time > current_time:
+                    return True
+            except ValueError:
+                # Invalid timestamp, compare fee values directly
+                pass
+        
+        # Compare fee band values (in case timestamps are missing or equal)
+        new_bands = fee_data.get("bands", {})
+        if not new_bands:
+            return False  # No new fee data
+        
+        # Check if any fee band values differ
+        current_bands = {
+            "fee_band_0_749kg": current_stats.fee_band_0_749kg,
+            "fee_band_750_1199kg": current_stats.fee_band_750_1199kg,
+            "fee_band_1200_1499kg": current_stats.fee_band_1200_1499kg,
+            "fee_band_1500_1999kg": current_stats.fee_band_1500_1999kg,
+            "fee_band_2000_3999kg": current_stats.fee_band_2000_3999kg,
+            "fee_band_4000_plus_kg": current_stats.fee_band_4000_plus_kg,
+        }
+        
+        for band_name, new_value in new_bands.items():
+            current_value = current_bands.get(band_name)
+            # Compare with small epsilon for floating point comparison
+            if abs((new_value or 0.0) - (current_value or 0.0)) > 0.01:
+                return True
+        
+        # Check currency change
+        new_currency = fee_data.get("currency", "EUR")
+        current_currency = current_stats.fee_currency or "EUR"
+        if new_currency != current_currency:
+            return True
+        
+        return False  # No fee changes detected
+
+    def update_fees_only(
+        self, icao: str, fee_data: Dict[str, Any]
+    ) -> None:
+        """
+        Update only fee data for an airport without processing reviews.
+        
+        Args:
+            icao: Airport ICAO code
+            fee_data: Fee data dict with 'currency', 'fees_last_changed', and 'bands'
+        """
+        self._check_readonly()
+        
+        # Get current stats to preserve other fields
+        current_stats = self.get_airfield_stats(icao)
+        if current_stats is None:
+            raise StorageError(f"Cannot update fees for {icao}: airport not in database")
+        
+        # Update only fee-related fields
+        fee_bands = fee_data.get("bands", {})
+        fee_currency = fee_data.get("currency", "EUR")
+        fee_last_updated = fee_data.get("fees_last_changed")
+        
+        with self._lock:
+            try:
+                self.conn.execute("""
+                    UPDATE ga_airfield_stats SET
+                        fee_band_0_749kg = ?,
+                        fee_band_750_1199kg = ?,
+                        fee_band_1200_1499kg = ?,
+                        fee_band_1500_1999kg = ?,
+                        fee_band_2000_3999kg = ?,
+                        fee_band_4000_plus_kg = ?,
+                        fee_currency = ?,
+                        fee_last_updated_utc = ?
+                    WHERE icao = ?
+                """, (
+                    fee_bands.get("fee_band_0_749kg"),
+                    fee_bands.get("fee_band_750_1199kg"),
+                    fee_bands.get("fee_band_1200_1499kg"),
+                    fee_bands.get("fee_band_1500_1999kg"),
+                    fee_bands.get("fee_band_2000_3999kg"),
+                    fee_bands.get("fee_band_4000_plus_kg"),
+                    fee_currency,
+                    fee_last_updated,
+                    icao,
+                ))
+                
+                if not self._in_transaction:
+                    self.conn.commit()
+            except sqlite3.Error as e:
+                raise StorageError(f"Failed to update fees for {icao}: {e}")
+
     # --- Resume Support ---
 
     def get_last_successful_icao(self) -> Optional[str]:

@@ -212,12 +212,46 @@ class GAFriendlinessBuilder:
                             continue
                         
                         # Check for changes if incremental
+                        review_changes = False
+                        fee_changes = False
+                        
                         if incremental:
-                            if not self.storage.has_changes(icao, reviews, since):
+                            review_changes = self.storage.has_changes(icao, reviews, since)
+                            
+                            # Check for fee changes if source supports it
+                            fee_data = None
+                            if hasattr(review_source, "get_fee_data"):
+                                fee_data = review_source.get_fee_data(icao)
+                            elif isinstance(review_source, AirfieldDirectorySource):
+                                airport_data = review_source.get_airport_data(icao)
+                                if airport_data and "aerops" in airport_data:
+                                    # Parse fee data for comparison
+                                    aerops = airport_data.get("aerops", {})
+                                    if isinstance(aerops, dict) and "landing_fees" in aerops:
+                                        # Convert to fee_data format for comparison
+                                        fee_data = {
+                                            "currency": aerops.get("currency", "EUR"),
+                                            "fees_last_changed": aerops.get("fees_last_changed"),
+                                            "bands": aggregate_fees_by_band(aerops),
+                                        }
+                            
+                            if fee_data:
+                                fee_changes = self.storage.has_fee_changes(icao, fee_data)
+                            
+                            # If neither reviews nor fees changed, skip
+                            if not review_changes and not fee_changes:
                                 self._metrics.skipped_airports += 1
                                 continue
+                            
+                            # If only fees changed, update fees only
+                            if not review_changes and fee_changes:
+                                logger.info(f"Updating fees only for {icao} (reviews unchanged)")
+                                if fee_data:
+                                    self.storage.update_fees_only(icao, fee_data)
+                                    self._metrics.successful_airports += 1
+                                continue
                         
-                        # Process airport
+                        # Process airport (reviews changed, or full processing)
                         self._process_airport(icao, reviews, review_source, airports_db)
                         
                         self._metrics.successful_airports += 1
