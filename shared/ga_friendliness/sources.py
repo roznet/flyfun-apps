@@ -1200,7 +1200,7 @@ class AirportsDatabaseSource:
 
         # Get airport from model
         try:
-            airport = self._euro_aip_model.get_airport(icao.upper())
+            airport = self._euro_aip_model.airports.where(ident=icao.upper()).first()
             return airport
         except Exception as e:
             import logging

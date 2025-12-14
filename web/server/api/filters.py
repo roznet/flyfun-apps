@@ -56,7 +56,7 @@ async def get_available_countries(request: Request):
     country_mapper = CountryMapper()
     
     countries = {}
-    for airport in model.airports.values():
+    for airport in model.airports:
         if airport.iso_country:
             if airport.iso_country not in countries:
                 countries[airport.iso_country] = 0
@@ -93,7 +93,7 @@ async def get_available_procedure_types(request: Request):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     procedure_types = {}
-    for airport in model.airports.values():
+    for airport in model.airports:
         for procedure in airport.procedures:
             proc_type = procedure.procedure_type.lower()
             if proc_type not in procedure_types:
@@ -112,7 +112,7 @@ async def get_available_aip_sections(request: Request):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     sections = {}
-    for airport in model.airports.values():
+    for airport in model.airports:
         for entry in airport.aip_entries:
             section = entry.section
             if section not in sections:
@@ -131,7 +131,7 @@ async def get_available_aip_fields(request: Request):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     fields = {}
-    for airport in model.airports.values():
+    for airport in model.airports:
         for entry in airport.aip_entries:
             if entry.std_field:
                 field = entry.std_field
@@ -151,7 +151,7 @@ async def get_available_sources(request: Request):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     sources = {}
-    for airport in model.airports.values():
+    for airport in model.airports:
         for source in airport.sources:
             if source not in sources:
                 sources[source] = 0
@@ -171,8 +171,8 @@ async def get_runway_characteristics(request: Request):
     runway_lengths = []
     runway_surfaces = {}
     runway_lighting = {}
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         for runway in airport.runways:
             # Length statistics
             if runway.length_ft:

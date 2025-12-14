@@ -162,6 +162,9 @@ from .features import (
 # --- Builder ---
 from .builder import GAFriendlinessBuilder
 
+# --- Service ---
+from .service import GAFriendlinessService
+
 __all__ = [
     # Exceptions
     "GAFriendlinessError",
@@ -250,5 +253,7 @@ __all__ = [
     "apply_bayesian_smoothing",
     # Builder
     "GAFriendlinessBuilder",
+    # Service
+    "GAFriendlinessService",
 ]
 

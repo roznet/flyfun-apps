@@ -45,7 +45,7 @@ class BorderCrossingModelBuilder:
             logger.info(f"Loading base model from database: {self.args.database}")
             storage = DatabaseStorage(self.args.database)
             self.base_model = storage.load_model()
-            logger.info(f"Loaded {len(self.base_model.airports)} airports from database")
+            logger.info(f"Loaded {self.base_model.airports.count()} airports from database")
             
         elif self.args.worldairports:
             # Build from WorldAirports source
@@ -115,21 +115,34 @@ class BorderCrossingModelBuilder:
                     logger.warning("No European airports found in WorldAirports")
         
         # Step 2: Filter to specific airports if provided
-        if self.args.airports and self.base_model.airports:
+        if self.args.airports and self.base_model.airports.count() > 0:
+            logger.info(f"Filtering base model to {len(self.args.airports)} specified airports")
             filtered_model = EuroAipModel()
+
+            # Get airports to add
+            airports_to_add = []
             for airport_code in self.args.airports:
-                if airport_code in self.base_model.airports:
-                    filtered_model.airports[airport_code] = self.base_model.airports[airport_code]
+                airport = self.base_model.airports.where(ident=airport_code).first()
+                if airport:
+                    airports_to_add.append(airport)
                 else:
                     logger.warning(f"Airport {airport_code} not found in base model")
-            self.base_model = filtered_model
+
+            # Use bulk add for efficiency
+            if airports_to_add:
+                result = filtered_model.bulk_add_airports(airports_to_add)
+                logger.info(f"Filtered model created: {result['added']} airports added")
+                self.base_model = filtered_model
+            else:
+                logger.warning("No airports found to add to filtered model, using original base model")
+
         
         # Step 3: Update with border crossing data
         if self.border_crossing_source:
             logger.info("Updating model with border crossing data")
             self.border_crossing_source.update_model(self.base_model)
         
-        logger.info(f"Final model contains {len(self.base_model.airports)} airports")
+        logger.info(f"Final model contains {self.base_model.airports.count()} airports")
         return self.base_model
     
     def _get_european_airports(self) -> List[str]:
@@ -157,7 +170,7 @@ class BorderCrossingModelBuilder:
                 logger.warning(f"Error getting airports from base source: {e}")
         
         elif hasattr(self, 'base_model'):
-            airports = list(self.base_model.airports.keys())
+            airports = [a.ident for a in self.base_model.airports]
             logger.info(f"Found {len(airports)} airports in base model")
             return airports
         
@@ -228,7 +241,7 @@ class JSONExporter:
     
     def save_model(self, model: EuroAipModel):
         """Export the entire model to JSON."""
-        logger.info(f"Exporting {len(model.airports)} airports to JSON")
+        logger.info(f"Exporting {model.airports.count()} airports to JSON")
         
         # Convert model to dictionary
         model_data = model.to_dict()

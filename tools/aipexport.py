@@ -193,7 +193,7 @@ class ModelBuilder:
                         self._update_model_with_worldairports(source, model, airports)
                     else:
                         source.update_model(model, airports)
-                    logger.info(f"Updated model with {source_name}: {len(model.airports)} airports")
+                    logger.info(f"Updated model with {source_name}: {model.airports.count()} airports")
                 else:
                     logger.warning(f"Source {source_name} doesn't implement SourceInterface, skipping")
             except Exception as e:
@@ -201,26 +201,39 @@ class ModelBuilder:
         
         # Filter to specific airports if provided
         if airports:
+            logger.info(f"Filtering model to {len(airports)} specified airports")
             filtered_model = EuroAipModel()
+
+            # Get airports to add
+            airports_to_add = []
             for airport_code in airports:
-                if airport_code in model.airports:
-                    filtered_model.airports[airport_code] = model.airports[airport_code]
+                airport = model.airports.where(ident=airport_code).first()
+                if airport:
+                    airports_to_add.append(airport)
                 else:
                     logger.warning(f"Airport {airport_code} not found in model")
-            model = filtered_model
+
+            # Use bulk add for efficiency
+            if airports_to_add:
+                result = filtered_model.bulk_add_airports(airports_to_add)
+                logger.info(f"Filtered model created: {result['added']} airports added")
+                model = filtered_model
+            else:
+                logger.warning("No airports found to add to filtered model, using original model")
+
         
         # Log field mapping statistics
         mapping_stats = model.get_field_mapping_statistics()
         logger.info(f"Field mapping statistics: {mapping_stats['mapped_fields']}/{mapping_stats['total_fields']} fields mapped ({mapping_stats['mapping_rate']:.1%})")
         logger.info(f"Average mapping score: {mapping_stats['average_mapping_score']:.2f}")
         
-        logger.info(f"Final model contains {len(model.airports)} airports")
+        logger.info(f"Final model contains {model.airports.count()} airports")
         return model
 
     def _update_model_with_worldairports(self, source, model, airports):
         """Special update logic for WorldAirportsSource with filtering."""
         if self.args.worldairports_filter == 'required':
-            existing_airports = list(model.airports.keys())
+            existing_airports = [a.ident for a in model.airports]
             if existing_airports:
                 source.update_model(model, existing_airports)
                 logger.info(f"Updated WorldAirports with {len(existing_airports)} existing airports")
@@ -271,8 +284,8 @@ class ModelBuilder:
                 logger.debug(f"Source {source_name} does not support find_available_airports")
         
         if not all_airports:
-            if self.base_model is not None and getattr(self.base_model, 'airports', None):
-                base_airports = list(self.base_model.airports.keys())
+            if self.base_model is not None:
+                base_airports = [a.ident for a in self.base_model.airports]
                 logger.info(f"Using {len(base_airports)} airports from base model")
                 return base_airports
             logger.warning("No airports found from any source that supports find_available_airports")
@@ -292,7 +305,7 @@ class JSONExporter:
     
     def save_model(self, model: EuroAipModel):
         """Export the entire model to JSON."""
-        logger.info(f"Exporting {len(model.airports)} airports to JSON")
+        logger.info(f"Exporting {model.airports.count()} airports to JSON")
         
         # Convert model to dictionary
         model_data = model.to_dict()

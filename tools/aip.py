@@ -281,7 +281,7 @@ def main():
     icao_list = [s.strip().upper() for s in (args.icao or [])]
     first = True
     for icao in icao_list:
-        airport = model.get_airport(icao) if hasattr(model, "get_airport") else None
+        airport = model.airports.where(ident=icao).first()
         if not airport:
             print(f"{icao}: not found.", file=sys.stderr)
             continue

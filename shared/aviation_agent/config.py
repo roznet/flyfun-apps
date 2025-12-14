@@ -196,42 +196,54 @@ class AviationAgentSettings(BaseSettings):
         alias="AVIATION_AGENT_CONFIG",
     )
 
-    def build_tool_context(self, *, load_rules: bool = True) -> ToolContext:
+    def build_tool_context(
+        self,
+        *,
+        load_rules: bool = True,
+        load_notifications: bool = True,
+        load_ga_friendliness: bool = True,
+    ) -> ToolContext:
         """
         Build or retrieve cached ToolContext.
         
         ToolContext is expensive to create (loads entire airport database + rules),
-        so we cache it at the module level. The cache key includes db_path, rules_path,
-        and load_rules flag to ensure we create separate contexts for different configs.
+        so we cache it at the module level. The cache key includes load flags
+        to ensure we create separate contexts for different configs.
+        
+        Args:
+            load_rules: Load rules manager (default: True)
+            load_notifications: Load notification service (default: True)
+            load_ga_friendliness: Load GA friendliness service (default: True)
         """
         return _cached_tool_context(
-            db_path=str(self.airports_db),
-            rules_path=str(self.rules_json),
             load_rules=load_rules,
+            load_notifications=load_notifications,
+            load_ga_friendliness=load_ga_friendliness,
         )
 
 
 @lru_cache(maxsize=1)
 def _cached_tool_context(
-    db_path: str,
-    rules_path: str,
     load_rules: bool,
+    load_notifications: bool,
+    load_ga_friendliness: bool,
 ) -> ToolContext:
     """
     Cached ToolContext factory.
     
     ToolContext creation is expensive (loads entire airport database + rules),
     so we cache it at the module level. Only one ToolContext is created per unique
-    combination of (db_path, rules_path, load_rules).
+    combination of load flags.
     
     This matches the pattern used in:
     - mcp_server/main.py (global _tool_context created once at startup)
     - tests/tools/conftest.py (@lru_cache on tool_context fixture)
     """
     return ToolContext.create(
-        db_path=db_path,
-        rules_path=rules_path,
+        load_airports=True,  # Always required
         load_rules=load_rules,
+        load_notifications=load_notifications,
+        load_ga_friendliness=load_ga_friendliness,
     )
 
 

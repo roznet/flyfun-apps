@@ -2,5 +2,5 @@
 globs: *.md
 alwaysApply: false
 ---
-- use mermaid for graph and diagrams when appropriate
+- use mermaid for graph and diagrams when appropriate in markdown files
 - for function code example, only include the comments, function signature, description of the logic in the function and example of return type. do not write the whole code.

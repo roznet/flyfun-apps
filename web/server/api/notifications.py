@@ -8,13 +8,31 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
-from shared.ga_notification_agent.notification_query import (
-    get_notification_for_airport,
-    find_airports_by_notification,
-    get_notification_statistics,
-)
+from shared.ga_notification_agent.service import NotificationService
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
+
+# Global service instance (set by web server startup)
+_notification_service: Optional[NotificationService] = None
+
+
+def set_notification_service(service: NotificationService):
+    """Set the notification service instance."""
+    global _notification_service
+    _notification_service = service
+
+
+def _get_service() -> NotificationService:
+    """Get notification service instance."""
+    global _notification_service
+    if _notification_service is None:
+        _notification_service = NotificationService()
+    return _notification_service
+
+
+def get_notification_service() -> NotificationService:
+    """Public function to get notification service instance."""
+    return _get_service()
 
 
 class AirportNotificationResponse(BaseModel):
@@ -77,7 +95,8 @@ async def get_airport_notification(
     
     Pass `day_of_week` to get day-specific rules (e.g., Saturday may require more notice).
     """
-    result = get_notification_for_airport(icao, day_of_week)
+    service = _get_service()
+    result = service.get_notification_for_airport(icao, day_of_week)
     return AirportNotificationResponse(**result)
 
 
@@ -107,7 +126,8 @@ async def filter_airports_by_notification(
     - `/api/notifications/?max_hours_notice=24&country=FR` - French airports with <24h notice
     - `/api/notifications/?notification_type=h24` - All H24 airports (no notice needed)
     """
-    result = find_airports_by_notification(
+    service = _get_service()
+    result = service.find_airports_by_notification(
         max_hours_notice=max_hours_notice,
         notification_type=notification_type,
         country=country,
@@ -128,5 +148,6 @@ async def get_statistics():
     """
     Get summary statistics about parsed notification requirements.
     """
-    result = get_notification_statistics()
+    service = _get_service()
+    result = service.get_notification_statistics()
     return NotificationStatsResponse(**result)

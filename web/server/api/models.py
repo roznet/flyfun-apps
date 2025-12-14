@@ -14,8 +14,8 @@ from euro_aip.models.procedure import Procedure
 from euro_aip.models.aip_entry import AIPEntry
 from euro_aip.models.runway import Runway
 
-# Import notification service for parsed customs/immigration
-from notification_service import get_notification_service
+# Import notification service accessor
+from .notifications import get_notification_service
 
 
 class GAFriendlySummary(BaseModel):

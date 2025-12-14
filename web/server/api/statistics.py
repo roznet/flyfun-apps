@@ -33,8 +33,8 @@ async def get_statistics_by_country(request: Request):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     countries = {}
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         country = airport.iso_country or "Unknown"
         
         if country not in countries:
@@ -79,8 +79,8 @@ async def get_procedure_distribution(request: Request):
     
     procedure_types = {}
     approach_types = {}
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         for procedure in airport.procedures:
             # General procedure types
             proc_type = procedure.procedure_type.lower()
@@ -115,8 +115,8 @@ async def get_aip_data_distribution(request: Request):
     sections = {}
     fields = {}
     sources = {}
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         for entry in airport.aip_entries:
             # Sections
             section = entry.section
@@ -163,8 +163,8 @@ async def get_runway_statistics(request: Request):
     surfaces = {}
     lighting = {}
     widths = []
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         for runway in airport.runways:
             # Lengths
             if runway.length_ft:
@@ -243,14 +243,14 @@ async def get_data_quality_statistics(request: Request):
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
     
-    total_airports = len(model.airports)
+    total_airports = model.airports.count()
     airports_with_coordinates = 0
     airports_with_runways = 0
     airports_with_procedures = 0
     airports_with_aip_data = 0
     airports_with_complete_data = 0
-    
-    for airport in model.airports.values():
+
+    for airport in model.airports:
         has_coordinates = airport.latitude_deg is not None and airport.longitude_deg is not None
         has_runways = len(airport.runways) > 0
         has_procedures = len(airport.procedures) > 0

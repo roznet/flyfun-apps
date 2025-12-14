@@ -20,10 +20,7 @@ from euro_aip.storage.database_storage import DatabaseStorage
 from .rules_manager import RulesManager
 from .filtering import FilterEngine
 from .prioritization import PriorityEngine
-from .ga_notification_agent.notification_query import (
-    get_notification_for_airport as _get_notification_for_airport,
-    find_airports_by_notification as _find_airports_by_notification,
-)
+# Notification query functions now use NotificationService from ToolContext
 
 
 ToolCallable = Callable[..., Dict[str, Any]]
@@ -56,48 +53,72 @@ class ToolContext:
     @classmethod
     def create(
         cls,
-        db_path: str,
-        rules_path: Optional[str] = None,
+        load_airports: bool = True,
         load_rules: bool = True,
+        load_notifications: bool = True,
+        load_ga_friendliness: bool = True,
     ) -> "ToolContext":
         """
-        Create ToolContext with optional services loaded from environment.
-
-        Services are optional and will gracefully degrade if not available.
+        Create ToolContext with all paths resolved from environment/config.
+        
+        All paths are resolved using centralized config functions from
+        shared/aviation_agent/config.py. Services are optional and will
+        gracefully degrade if not available or disabled.
+        
+        Args:
+            load_airports: Load airports database (default: True)
+            load_rules: Load rules manager (default: True)
+            load_notifications: Load notification service (default: True)
+            load_ga_friendliness: Load GA friendliness service (default: True)
+        
+        Returns:
+            ToolContext instance with requested services loaded
         """
         from pathlib import Path
 
-        # Load core model (required)
-        storage = DatabaseStorage(db_path)
-        model = storage.load_model()
+        # Get all paths from centralized config
+        from shared.aviation_agent.config import (
+            _default_airports_db,
+            _default_rules_json,
+            get_ga_notifications_db_path,
+            get_ga_meta_db_path,
+        )
+
+        # Load core model (required if load_airports is True)
+        model = None
+        if load_airports:
+            airports_db_path = _default_airports_db()
+            storage = DatabaseStorage(str(airports_db_path))
+            model = storage.load_model()
+        else:
+            raise ValueError("load_airports must be True - airports database is required")
 
         # Initialize NotificationService (optional)
         notification_service = None
-        try:
-            from shared.aviation_agent.config import get_ga_notifications_db_path
-            from web.server.notification_service import NotificationService
-            notifications_db = get_ga_notifications_db_path()
-            notification_service = NotificationService(notifications_db)
-        except Exception:
-            pass  # Service is optional
+        if load_notifications:
+            try:
+                from shared.ga_notification_agent.service import NotificationService
+                notification_service = NotificationService()
+            except Exception:
+                pass  # Service is optional
 
         # Initialize GAFriendlinessService (optional)
         ga_friendliness_service = None
-        try:
-            from shared.aviation_agent.config import get_ga_meta_db_path
-            from web.server.api.ga_friendliness import GAFriendlinessService
-            ga_meta_db = get_ga_meta_db_path()
-            if ga_meta_db and Path(ga_meta_db).exists():
-                ga_friendliness_service = GAFriendlinessService(ga_meta_db, readonly=True)
-        except Exception:
-            pass  # Service is optional
+        if load_ga_friendliness:
+            try:
+                from shared.ga_friendliness.service import GAFriendlinessService
+                ga_meta_db = get_ga_meta_db_path()
+                if ga_meta_db and Path(ga_meta_db).exists():
+                    ga_friendliness_service = GAFriendlinessService(ga_meta_db, readonly=True)
+            except Exception:
+                pass  # Service is optional
 
         # Initialize RulesManager (optional)
         rules_manager = None
-        if rules_path or load_rules:
-            rules_manager = RulesManager(rules_path)
-            if load_rules:
-                rules_manager.load_rules()
+        if load_rules:
+            rules_path = _default_rules_json()
+            rules_manager = RulesManager(str(rules_path))
+            rules_manager.load_rules()
 
         return cls(
             model=model,
@@ -177,14 +198,14 @@ def search_airports(
     
     if country_code:
         # Search by country code
-        for a in ctx.model.airports.values():
+        for a in ctx.model.airports:
             if (a.iso_country or "").upper() == country_code:
                 matches.append(a)
                 if len(matches) >= 200:
                     break
     else:
         # Standard search: ICAO, name, IATA, municipality, or ISO country
-        for a in ctx.model.airports.values():
+        for a in ctx.model.airports:
             if (
                 (q in a.ident)
                 or (a.name and q in a.name.upper())
@@ -202,7 +223,7 @@ def search_airports(
         if geocode:
             # Find airports near the geocoded location (within 50nm by default)
             center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
-            for airport in ctx.model.airports.values():
+            for airport in ctx.model.airports:
                 if not getattr(airport, "navpoint", None):
                     continue
                 try:
@@ -470,7 +491,7 @@ def find_airports_near_route(
 def get_airport_details(ctx: ToolContext, icao_code: str) -> Dict[str, Any]:
     """Get comprehensive details about a specific airport including runways, procedures, facilities, and AIP information."""
     icao = icao_code.strip().upper()
-    a = ctx.model.get_airport(icao)
+    a = ctx.model.airports.where(ident=icao).first()
 
     if not a:
         return {"found": False, "pretty": f"Airport {icao} not found."}
@@ -539,11 +560,12 @@ def get_airport_details(ctx: ToolContext, icao_code: str) -> Dict[str, Any]:
 
 def get_border_crossing_airports(ctx: ToolContext, country: Optional[str] = None) -> Dict[str, Any]:
     """List all airports that are official border crossing points (with customs). Optionally filter by country."""
-    airports_list = ctx.model.get_border_crossing_airports()
+    airports_query = ctx.model.airports.border_crossings()
 
     if country:
-        c = country.upper()
-        airports_list = [a for a in airports_list if (a.iso_country or "").upper() == c]
+        airports_query = airports_query.by_country(country.upper())
+
+    airports_list = airports_query.all()
 
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     all_airports: List[Dict[str, Any]] = []
@@ -595,7 +617,7 @@ def get_border_crossing_airports(ctx: ToolContext, country: Optional[str] = None
 
 def get_airport_statistics(ctx: ToolContext, country: Optional[str] = None) -> Dict[str, Any]:
     """Get statistical information about airports, such as counts with customs, fuel types, or procedures. Optionally filter by country."""
-    airports = ctx.model.get_airports_by_country(country.upper()) if country else list(ctx.model.airports.values())
+    airports = ctx.model.airports.by_country(country.upper()).all() if country else ctx.model.airports.all()
     total = len(airports)
 
     stats = {
@@ -826,7 +848,7 @@ def _find_nearest_airport_in_db(
     icao = icao_or_location.strip().upper()
 
     # First try direct ICAO lookup
-    airport = ctx.model.get_airport(icao)
+    airport = ctx.model.airports.where(ident=icao).first()
     if airport:
         return {
             "airport": airport,
@@ -851,7 +873,7 @@ def _find_nearest_airport_in_db(
     nearest_any = None
     nearest_any_distance = float('inf')
 
-    for apt in ctx.model.airports.values():
+    for apt in ctx.model.airports:
         if not getattr(apt, "navpoint", None):
             continue
         try:
@@ -933,7 +955,7 @@ def find_airports_near_location(
     # Compute distances to all airports and filter by radius
     candidate_airports: List[Airport] = []
     point_distances: Dict[str, float] = {}
-    for airport in ctx.model.airports.values():
+    for airport in ctx.model.airports:
         if not getattr(airport, "navpoint", None):
             continue
         try:
@@ -1033,7 +1055,14 @@ def get_notification_for_airport(
     day_of_week: Optional[str] = None
 ) -> Dict[str, Any]:
     """Get customs/immigration notification requirements for a specific airport. Use when user asks about notification requirements, customs, or when to notify for a specific airport."""
-    return _get_notification_for_airport(icao, day_of_week)
+    if not ctx.notification_service:
+        return {
+            "found": False,
+            "icao": icao.upper(),
+            "error": "Notification service not available.",
+            "pretty": f"Notification service not available. Cannot look up {icao.upper()}."
+        }
+    return ctx.notification_service.get_notification_for_airport(icao, day_of_week)
 
 
 def find_airports_by_notification(
@@ -1044,7 +1073,15 @@ def find_airports_by_notification(
     limit: int = 20
 ) -> Dict[str, Any]:
     """Find airports filtered by notification requirements. Use when user asks for airports with specific notice periods (e.g., '<24h notice') or notification types (H24, on_request)."""
-    return _find_airports_by_notification(max_hours_notice, notification_type, country, limit)
+    if not ctx.notification_service:
+        return {
+            "found": False,
+            "error": "Notification service not available.",
+            "pretty": "Notification service not available."
+        }
+    return ctx.notification_service.find_airports_by_notification(
+        max_hours_notice, notification_type, country, limit
+    )
 
 
 def _tool_description(func: Callable) -> str:

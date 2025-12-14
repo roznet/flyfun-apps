@@ -47,12 +47,12 @@ class PersonaOptimizedStrategy(PriorityStrategy):
             ga_score = None
             if tool_context and tool_context.ga_friendliness_service:
                 try:
-                    summary = tool_context.ga_friendliness_service.get_summary(
+                    summary_dict = tool_context.ga_friendliness_service.get_summary_dict(
                         airport.ident,
                         persona_id
                     )
-                    if summary.has_data and summary.score is not None:
-                        ga_score = summary.score
+                    if summary_dict.get("has_data") and summary_dict.get("score") is not None:
+                        ga_score = summary_dict["score"]
                 except Exception:
                     pass  # GA data not available
 

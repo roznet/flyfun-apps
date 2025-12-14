@@ -36,36 +36,55 @@ async def get_procedures(
     """Get a list of procedures with optional filtering."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    procedures = []
-    
-    for airport in model.airports.values():
-        for procedure in airport.procedures:
-            # Apply filters
-            if procedure_type and procedure.procedure_type.lower() != procedure_type.lower():
-                continue
-            
-            if approach_type and procedure.approach_type and procedure.approach_type.upper() != approach_type.upper():
-                continue
-            
-            if runway and not procedure.matches_runway(runway):
-                continue
-            
-            if authority and procedure.authority != authority:
-                continue
-            
-            if source and procedure.source != source:
-                continue
-            
-            if airport and airport.ident != airport:
-                continue
-            
-            procedures.append(ProcedureSummary.from_procedure(procedure, airport))
-    
-    # Apply pagination
-    procedures = procedures[offset:offset + limit]
-    
-    return procedures
+
+    # Start with all procedures using modern query API
+    proc_collection = model.procedures
+
+    # Apply filters using chainable methods
+    if procedure_type:
+        # Filter by procedure type (approach, departure, arrival)
+        proc_type_lower = procedure_type.lower()
+        if proc_type_lower == "approach":
+            proc_collection = proc_collection.approaches()
+        elif proc_type_lower == "departure":
+            proc_collection = proc_collection.departures()
+        elif proc_type_lower == "arrival":
+            proc_collection = proc_collection.arrivals()
+        else:
+            # Custom procedure type filter
+            proc_collection = proc_collection.filter(
+                lambda p: p.procedure_type.lower() == proc_type_lower
+            )
+
+    if approach_type:
+        proc_collection = proc_collection.by_type(approach_type)
+
+    if runway:
+        proc_collection = proc_collection.by_runway(runway)
+
+    if authority:
+        proc_collection = proc_collection.by_authority(authority)
+
+    if source:
+        proc_collection = proc_collection.by_source(source)
+
+    if airport:
+        # Filter procedures for a specific airport
+        proc_collection = proc_collection.filter(
+            lambda p: p.airport_ident == airport.upper()
+        )
+
+    # Apply pagination and convert to response format
+    procedures = proc_collection.skip(offset).take(limit).all()
+
+    # Find airport for each procedure to build response
+    # Build a quick airport lookup map
+    airport_map = {a.ident: a for a in model.airports}
+
+    return [
+        ProcedureSummary.from_procedure(proc, airport_map.get(proc.airport_ident))
+        for proc in procedures
+    ]
 
 @router.get("/approaches")
 async def get_approaches(
@@ -78,38 +97,42 @@ async def get_approaches(
     """Get all approach procedures with optional filtering."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    approaches = []
-    
-    for airport in model.airports.values():
-        airport_approaches = airport.get_approaches()
-        
-        for procedure in airport_approaches:
-            # Apply filters
-            if approach_type and procedure.approach_type and procedure.approach_type.upper() != approach_type.upper():
-                continue
-            
-            if runway and not procedure.matches_runway(runway):
-                continue
-            
-            if airport and airport.ident != airport:
-                continue
-            
-            approaches.append({
-                "name": procedure.name,
-                "approach_type": procedure.approach_type,
-                "runway_ident": procedure.runway_ident,
-                "authority": procedure.authority,
-                "source": procedure.source,
-                "airport_ident": airport.ident,
-                "airport_name": airport.name,
-                "precision": procedure.get_approach_precision()
-            })
-    
-    # Apply limit
-    approaches = approaches[:limit]
-    
-    return approaches
+
+    # Use modern query API - start with all approaches
+    proc_collection = model.procedures.approaches()
+
+    # Apply filters
+    if approach_type:
+        proc_collection = proc_collection.by_type(approach_type)
+
+    if runway:
+        proc_collection = proc_collection.by_runway(runway)
+
+    if airport:
+        proc_collection = proc_collection.filter(
+            lambda p: p.airport_ident == airport.upper()
+        )
+
+    # Get results with limit
+    procedures = proc_collection.take(limit).all()
+
+    # Build airport lookup map
+    airport_map = {a.ident: a for a in model.airports}
+
+    # Convert to response format
+    return [
+        {
+            "name": proc.name,
+            "approach_type": proc.approach_type,
+            "runway_ident": proc.runway_ident,
+            "authority": proc.authority,
+            "source": proc.source,
+            "airport_ident": proc.airport_ident,
+            "airport_name": airport_map.get(proc.airport_ident).name if airport_map.get(proc.airport_ident) else None,
+            "precision": proc.get_approach_precision()
+        }
+        for proc in procedures
+    ]
 
 @router.get("/departures")
 async def get_departures(
@@ -121,33 +144,37 @@ async def get_departures(
     """Get all departure procedures with optional filtering."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    departures = []
-    
-    for airport in model.airports.values():
-        airport_departures = airport.get_departures()
-        
-        for procedure in airport_departures:
-            # Apply filters
-            if runway and not procedure.matches_runway(runway):
-                continue
-            
-            if airport and airport.ident != airport:
-                continue
-            
-            departures.append({
-                "name": procedure.name,
-                "runway_ident": procedure.runway_ident,
-                "authority": procedure.authority,
-                "source": procedure.source,
-                "airport_ident": airport.ident,
-                "airport_name": airport.name
-            })
-    
-    # Apply limit
-    departures = departures[:limit]
-    
-    return departures
+
+    # Use modern query API - start with all departures
+    proc_collection = model.procedures.departures()
+
+    # Apply filters
+    if runway:
+        proc_collection = proc_collection.by_runway(runway)
+
+    if airport:
+        proc_collection = proc_collection.filter(
+            lambda p: p.airport_ident == airport.upper()
+        )
+
+    # Get results with limit
+    procedures = proc_collection.take(limit).all()
+
+    # Build airport lookup map
+    airport_map = {a.ident: a for a in model.airports}
+
+    # Convert to response format
+    return [
+        {
+            "name": proc.name,
+            "runway_ident": proc.runway_ident,
+            "authority": proc.authority,
+            "source": proc.source,
+            "airport_ident": proc.airport_ident,
+            "airport_name": airport_map.get(proc.airport_ident).name if airport_map.get(proc.airport_ident) else None
+        }
+        for proc in procedures
+    ]
 
 @router.get("/arrivals")
 async def get_arrivals(
@@ -159,33 +186,37 @@ async def get_arrivals(
     """Get all arrival procedures with optional filtering."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    arrivals = []
-    
-    for airport in model.airports.values():
-        airport_arrivals = airport.get_arrivals()
-        
-        for procedure in airport_arrivals:
-            # Apply filters
-            if runway and not procedure.matches_runway(runway):
-                continue
-            
-            if airport and airport.ident != airport:
-                continue
-            
-            arrivals.append({
-                "name": procedure.name,
-                "runway_ident": procedure.runway_ident,
-                "authority": procedure.authority,
-                "source": procedure.source,
-                "airport_ident": airport.ident,
-                "airport_name": airport.name
-            })
-    
-    # Apply limit
-    arrivals = arrivals[:limit]
-    
-    return arrivals
+
+    # Use modern query API - start with all arrivals
+    proc_collection = model.procedures.arrivals()
+
+    # Apply filters
+    if runway:
+        proc_collection = proc_collection.by_runway(runway)
+
+    if airport:
+        proc_collection = proc_collection.filter(
+            lambda p: p.airport_ident == airport.upper()
+        )
+
+    # Get results with limit
+    procedures = proc_collection.take(limit).all()
+
+    # Build airport lookup map
+    airport_map = {a.ident: a for a in model.airports}
+
+    # Convert to response format
+    return [
+        {
+            "name": proc.name,
+            "runway_ident": proc.runway_ident,
+            "authority": proc.authority,
+            "source": proc.source,
+            "airport_ident": proc.airport_ident,
+            "airport_name": airport_map.get(proc.airport_ident).name if airport_map.get(proc.airport_ident) else None
+        }
+        for proc in procedures
+    ]
 
 @router.get("/by-runway/{airport_icao}")
 async def get_procedures_by_runway(
@@ -195,8 +226,8 @@ async def get_procedures_by_runway(
     """Get procedures organized by runway for a specific airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(airport_icao.upper())
+
+    airport = model.airports.where(ident=airport_icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {airport_icao} not found")
     
@@ -210,8 +241,8 @@ async def get_most_precise_approaches(
     """Get the most precise approach for each runway at an airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(airport_icao.upper())
+
+    airport = model.airports.where(ident=airport_icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {airport_icao} not found")
     
@@ -222,32 +253,30 @@ async def get_procedure_statistics(request: Request):
     """Get statistics about procedures across all airports."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    total_procedures = 0
+
+    # Use modern query API for efficiency
+    total_procedures = model.procedures.count()
+    airports_with_procedures = model.airports.with_procedures().count()
+    total_airports = model.airports.count()
+
     procedure_types = {}
     approach_types = {}
-    airports_with_procedures = 0
-    
-    for airport in model.airports.values():
-        if airport.procedures:
-            airports_with_procedures += 1
-            
-        for procedure in airport.procedures:
-            total_procedures += 1
-            
-            # Count procedure types
-            proc_type = procedure.procedure_type
-            procedure_types[proc_type] = procedure_types.get(proc_type, 0) + 1
-            
-            # Count approach types
-            if procedure.approach_type:
-                app_type = procedure.approach_type
-                approach_types[app_type] = approach_types.get(app_type, 0) + 1
-    
+
+    # Iterate through all procedures
+    for procedure in model.procedures:
+        # Count procedure types
+        proc_type = procedure.procedure_type
+        procedure_types[proc_type] = procedure_types.get(proc_type, 0) + 1
+
+        # Count approach types
+        if procedure.approach_type:
+            app_type = procedure.approach_type
+            approach_types[app_type] = approach_types.get(app_type, 0) + 1
+
     return {
         "total_procedures": total_procedures,
         "airports_with_procedures": airports_with_procedures,
         "procedure_types": procedure_types,
         "approach_types": approach_types,
-        "average_procedures_per_airport": total_procedures / len(model.airports) if model.airports else 0
+        "average_procedures_per_airport": total_procedures / total_airports if total_airports > 0 else 0
     } 

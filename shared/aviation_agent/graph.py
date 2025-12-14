@@ -370,8 +370,10 @@ def build_agent_graph(
             if wants_notifications and first_tool in location_tools and result.get("airports"):
                 logger.info(f"📋 POST-PROCESSING: Enriching {len(result['airports'])} airports with notification data")
                 
-                # Import notification query function
-                from shared.ga_notification_agent.notification_query import get_notification_for_airport
+                # Import notification service
+                from shared.ga_notification_agent.service import NotificationService
+                
+                notification_service = NotificationService()
                 
                 # Extract day_of_week from query if mentioned
                 day_of_week = None
@@ -387,7 +389,7 @@ def build_agent_graph(
                 for airport in result["airports"][:15]:  # Limit to first 15 airports
                     icao = airport.get("ident") or airport.get("icao")
                     if icao:
-                        notif = get_notification_for_airport(icao, day_of_week)
+                        notif = notification_service.get_notification_for_airport(icao, day_of_week)
                         airport["notification"] = notif
                         if notif.get("found"):
                             summary = notif.get("day_specific_rule") or notif.get("summary") or f"{notif.get('hours_notice', '?')}h notice"

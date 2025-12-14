@@ -104,37 +104,50 @@ async def get_airports(
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     # Validate offset against actual data size
-    if offset >= len(model.airports):
+    if offset >= model.airports.count():
         raise HTTPException(status_code=400, detail="Offset too large")
+
+    # Start with queryable collection
+    airports = model.airports
     
-    airports = list(model.airports.values())
-    
-    # Apply filters
+    # Apply filters using modern query API
     if country:
-        airports = [a for a in airports if a.iso_country == country]
-    
+        airports = airports.by_country(country)
+
     if has_procedures is not None:
-        airports = [a for a in airports if bool(a.procedures) == has_procedures]
-    
+        if has_procedures:
+            airports = airports.with_procedures()
+        else:
+            airports = airports.filter(lambda a: not a.procedures)
+
     if has_aip_data is not None:
-        airports = [a for a in airports if bool(a.aip_entries) == has_aip_data]
-    
+        if has_aip_data:
+            airports = airports.with_aip_data()
+        else:
+            airports = airports.filter(lambda a: not a.aip_entries)
+
     if has_hard_runway is not None:
-        airports = [a for a in airports if a.has_hard_runway == has_hard_runway]
-    
+        if has_hard_runway:
+            airports = airports.with_hard_runway()
+        else:
+            airports = airports.filter(lambda a: not a.has_hard_runway)
+
     if point_of_entry is not None:
-        airports = [a for a in airports if a.point_of_entry == point_of_entry]
-    
+        if point_of_entry:
+            airports = airports.border_crossings()
+        else:
+            airports = airports.filter(lambda a: not a.point_of_entry)
+
     # Apply AIP field filtering
     if aip_field:
-        airports = [a for a in airports if _matches_aip_field(a, aip_field, aip_value, aip_operator)]
+        airports = airports.filter(lambda a: _matches_aip_field(a, aip_field, aip_value, aip_operator))
     
     # Always sort by longest runway length (descending) to prioritize larger airports
     # Airports without runway data will be sorted last
-    airports.sort(key=lambda a: a.longest_runway_length_ft or 0, reverse=True)
-    
-    # Apply pagination
-    airports = airports[offset:offset + limit]
+    airports = airports.order_by(lambda a: a.longest_runway_length_ft or 0, reverse=True)
+
+    # Apply pagination and get results
+    airports = airports.skip(offset).take(limit).all()
     
     # Get GA data if requested and service is available
     ga_data: Dict[str, GAFriendlySummary] = {}
@@ -194,7 +207,7 @@ async def get_airports_near_route(
         icao = item
         if len(icao) != 4:
             raise HTTPException(status_code=400, detail=f"Invalid ICAO code: {icao}")
-        if not model.get_airport(icao):
+        if not model.airports.where(ident=icao).first():
             raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
     # Resolve effective segment distance (support legacy query param)
@@ -209,7 +222,7 @@ async def get_airports_near_route(
     first_route_item = route_airports[0]
     if not isinstance(first_route_item, str):
         raise HTTPException(status_code=400, detail="First route item must be a string ICAO code")
-    from_airport = model.get_airport(first_route_item) if enroute_distance_max_nm is not None else None
+    from_airport = model.airports.where(ident=first_route_item).first() if enroute_distance_max_nm is not None else None
     for item in nearby_airports:
         airport = item['airport']
         
@@ -335,7 +348,7 @@ async def locate_airports(
         center = NavPoint(latitude=center_lat, longitude=center_lon, name=q or "Center")
         # Compute distances and filter
         filtered_airports = []
-        for a in model.airports.values():
+        for a in model.airports:
             ap = getattr(a, "navpoint", None)
             if not ap:
                 continue
@@ -514,8 +527,8 @@ async def get_airport_detail(
     """Get detailed information about a specific airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(icao.upper())
+
+    airport = model.airports.where(ident=icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
@@ -531,8 +544,8 @@ async def get_airport_aip_entries(
     """Get AIP entries for a specific airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(icao.upper())
+
+    airport = model.airports.where(ident=icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
@@ -546,8 +559,8 @@ async def get_airport_aip_entries(
         entries = [e for e in entries if e.std_field == std_field]
     
     # Get parsed notification summary if available
-    from notification_service import get_notification_service
-    notification_service = get_notification_service()
+    from shared.ga_notification_agent.service import NotificationService
+    notification_service = NotificationService()
     parsed_notification = notification_service.get_notification_summary(icao.upper())
     
     # Convert entries to dicts, injecting parsed notifications for field 302
@@ -606,8 +619,8 @@ async def get_airport_procedures(
     """Get procedures for a specific airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(icao.upper())
+
+    airport = model.airports.where(ident=icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
@@ -630,8 +643,8 @@ async def get_airport_runways(
     """Get runways for a specific airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(icao.upper())
+
+    airport = model.airports.where(ident=icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
@@ -646,8 +659,8 @@ async def get_airport_procedure_lines(
     """Get procedure lines for an airport."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    airport = model.get_airport(icao.upper())
+
+    airport = model.airports.where(ident=icao.upper()).first()
     if not airport:
         raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
     
@@ -667,9 +680,9 @@ async def get_bulk_procedure_lines(
         raise HTTPException(status_code=400, detail="Maximum 100 airports allowed per request")
     
     result = {}
-    
+
     for icao in airports:
-        airport = model.get_airport(icao.upper())
+        airport = model.airports.where(ident=icao.upper()).first()
         if airport:
             try:
                 procedure_lines = airport.get_procedure_lines(distance_nm)
@@ -695,9 +708,9 @@ async def search_airports(
     
     query_upper = query.upper()
     results = []
-    
+
     # First try direct database search
-    for airport in model.airports.values():
+    for airport in model.airports:
         if (query_upper in airport.ident or 
             (airport.name and query_upper in airport.name.upper()) or 
             (airport.iata_code and query_upper in airport.iata_code) or
@@ -720,7 +733,7 @@ async def search_airports(
                 # Look up actual airport object from model
                 icao = apt_data.get("ident")
                 if icao:
-                    airport = model.get_airport(icao)
+                    airport = model.airports.where(ident=icao).first()
                     if airport:
                         results.append(AirportSummary.from_airport(airport))
     
