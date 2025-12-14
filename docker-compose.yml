@@ -26,12 +26,13 @@ services:
     # These hard-coded paths override any host paths from .env
     # Other variables (API keys, etc.) still come from .env via env_file
     environment:
+      # Database paths (ToolContextSettings)
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
+      - GA_NOTIFICATIONS_DB=/app/data/ga_notifications.db
       - GA_META_DB=/app/out/ga_meta.sqlite
-      # Use ChromaDB service in production (defaults to service URL in Docker)
+      # Vector DB for RAG (AviationAgentSettings)
       # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
-      # This is separate from host ports - no conflict with web-server's host port 8000
       - VECTOR_DB_URL=http://chromadb:8000
       # Local path fallback (used if VECTOR_DB_URL is not set)
       - VECTOR_DB_PATH=/app/out/rules_vector_db
@@ -71,12 +72,12 @@ services:
     # Container-specific overrides (paths must be container paths, not host paths)
     # These hard-coded paths override any host paths from .env
     environment:
+      # Database paths (ToolContextSettings)
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
-      # Use ChromaDB service in production (defaults to service URL in Docker)
+      - GA_NOTIFICATIONS_DB=/app/data/ga_notifications.db
+      # Vector DB for RAG (AviationAgentSettings)
       # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
-      # This is separate from host ports - no conflict with web-server's host port 8000
-      # Set VECTOR_DB_URL in .env to override, or leave unset to use local VECTOR_DB_PATH
       - VECTOR_DB_URL=${VECTOR_DB_URL:-http://chromadb:8000}
       # Local path fallback (used if VECTOR_DB_URL is not set)
       - VECTOR_DB_PATH=/app/out/rules_vector_db

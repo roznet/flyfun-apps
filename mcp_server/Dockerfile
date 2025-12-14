@@ -8,6 +8,8 @@ RUN groupadd -r -g 2001 flyfun-mcp && \
 
 # Copy application-specific code
 COPY mcp_server/ /app/mcp_server/
+# Copy shared application code
+COPY shared/ /app/shared/
 
 # Set correct ownership
 RUN chown -R flyfun-mcp:flyfun-mcp /app

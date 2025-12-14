@@ -14,9 +14,6 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared application code
-COPY shared/ /app/shared/
-
 # Install euro_aip from GitHub (latest version)
 RUN pip install "git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip"
 
