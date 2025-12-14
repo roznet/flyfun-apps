@@ -157,7 +157,7 @@ class Command:
         }
 
         # Get border crossing airports from the model
-        border_airports = self.model.get_border_crossing_airports()
+        border_airports = self.model.airports.border_crossings().all()
         logger.info(f"Found {len(border_airports)} border crossing airports")
         
         for airport in border_airports:
@@ -223,7 +223,7 @@ class Command:
         }
 
         # Get airports with procedures
-        airports_with_procedures = self.model.get_airports_with_procedures()
+        airports_with_procedures = self.model.airports.with_procedures().all()
         logger.info(f"Found {len(airports_with_procedures)} airports with procedures")
         logger.info(f"Using procedure line distance: {self.args.procedure_distance}nm")
         
