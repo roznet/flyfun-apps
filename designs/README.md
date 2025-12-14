@@ -64,9 +64,8 @@ This directory contains design documents and specifications for the FlyFun aviat
 
 **Documents:**
 - [GA_FRIENDLINESS_DESIGN.md](./GA_FRIENDLINESS_DESIGN.md) - Overall design
-- [GA_FRIENDLINESS_IMPLEMENTATION.md](./GA_FRIENDLINESS_IMPLEMENTATION.md) - Implementation details
-- [GA_FRIENDLINESS_PHASES.md](./GA_FRIENDLINESS_PHASES.md) - Phased rollout plan
-- [GA_FRIENDLY_INTEGRATION_PLAN.md](./GA_FRIENDLY_INTEGRATION_PLAN.md) - Integration with existing systems
+- [GA_FRIENDLINESS_BUILD_TOOL_REVIEW.md](./GA_FRIENDLINESS_BUILD_TOOL_REVIEW.md) - Build tool review
+- [GA_FRIENDLINESS_IMPLEMENTATION_COMPARISON.md](./GA_FRIENDLINESS_IMPLEMENTATION_COMPARISON.md) - Implementation comparison
 
 ---
 
@@ -92,7 +91,30 @@ This directory contains design documents and specifications for the FlyFun aviat
 
 ### rzflight Request
 **Documents:**
-- [rzflight-request.md](./rzflight-request.md) - External integration request
+- [rzflight-request.md](./rzflight-request.md) - External integration request (kept as demonstration example)
+
+---
+
+## ✅ Completed Migrations & Summaries
+
+These documents describe completed migrations and implementation summaries:
+
+### Euro AIP Modern Query API Migration
+- [EURO_AIP_MIGRATION_SUMMARY.md](./EURO_AIP_MIGRATION_SUMMARY.md) - ✅ Complete (December 2025)
+
+### Path Resolution Refactoring
+- [PATH_RESOLUTION_IMPLEMENTATION.md](./PATH_RESOLUTION_IMPLEMENTATION.md) - ✅ Complete
+- [TOOLCONTEXT_REFACTOR_SUMMARY.md](./TOOLCONTEXT_REFACTOR_SUMMARY.md) - ✅ Complete
+
+### Service Refactoring
+- [SERVICE_REFACTORING_PLAN.md](./SERVICE_REFACTORING_PLAN.md) - ✅ Complete
+
+### API Integration
+- [AIRFIELD_DIRECTORY_API_DOWNLOAD_PLAN.md](./AIRFIELD_DIRECTORY_API_DOWNLOAD_PLAN.md) - ✅ Complete
+- [API_DOWNLOAD_FLOW_EXPLANATION.md](./API_DOWNLOAD_FLOW_EXPLANATION.md) - ✅ Complete
+
+### Architectural Decisions
+- [WEB_SERVER_TOOLCONTEXT_ANALYSIS.md](./WEB_SERVER_TOOLCONTEXT_ANALYSIS.md) - Architectural decision document
 
 ---
 
@@ -108,7 +130,7 @@ High-level architecture, problem analysis, and solution proposals
 Detailed technical specifications for developers
 - **Format:** Technical details → Code structure → Implementation notes
 - **Audience:** Developers
-- **Examples:** IOS_APP_IMPLEMENTATION.md, GA_FRIENDLINESS_IMPLEMENTATION.md
+- **Examples:** IOS_APP_IMPLEMENTATION.md, IOS_APP_DESIGN.md, GA_FRIENDLINESS_IMPLEMENTATION.md
 
 ### Decision Documents
 Options analysis and decision-making frameworks
@@ -130,12 +152,12 @@ Architecture diagrams and visual explanations
 1. Start with [LLM_AGENT_DESIGN.md](./LLM_AGENT_DESIGN.md) - Core agent architecture
 2. Read [CHATBOT_WEBUI_DESIGN.md](./CHATBOT_WEBUI_DESIGN.md) - User-facing interface
 3. Review [GA_FRIENDLINESS_DESIGN.md](./GA_FRIENDLINESS_DESIGN.md) - Domain-specific feature
-4. Check [RULES_RAG_INDEX.md](./RULES_RAG_INDEX.md) - Latest enhancement proposal
+4. Check [RULES_RAG_COMPLETE.md](./RULES_RAG_COMPLETE.md) - Latest enhancement (complete)
 
 ### For Product/Stakeholders
-1. Read summaries: RULES_RAG_SUMMARY.md
-2. Review diagrams: RULES_RAG_ARCHITECTURE_DIAGRAM.md
-3. Check decisions: RULES_RAG_DECISIONS.md
+1. Read executive summary: [RULES_RAG_COMPLETE.md](./RULES_RAG_COMPLETE.md)
+2. Review diagrams: [RULES_RAG_ARCHITECTURE_DIAGRAM.md](./RULES_RAG_ARCHITECTURE_DIAGRAM.md)
+3. Review configuration: [AVIATION_AGENT_CONFIGURATION_GUIDE.md](./AVIATION_AGENT_CONFIGURATION_GUIDE.md)
 
 ### For Developers (Implementation)
 1. Design first: [Component]_DESIGN.md
@@ -146,11 +168,6 @@ Architecture diagrams and visual explanations
 
 ## 🔄 Document Lifecycle
 
-### 1. Draft (🔴)
-- Initial proposal
-- Under review
-- Feedback collection
-- **Example:** Rules RAG documents (current)
 
 ### 2. Approved (🟡)
 - Design approved
@@ -175,10 +192,9 @@ Architecture diagrams and visual explanations
 
 ## 🎯 Current Priorities (December 2025)
 
-1. **Rules RAG Enhancement** 🔴
-   - Review design documents
-   - Make key decisions
-   - Start prototyping
+1. **Rules RAG Enhancement** ✅
+   - ✅ Implementation complete
+   - Ready for UI testing
 
 2. **Chatbot Web UI** 🟢
    - Ongoing maintenance
@@ -287,5 +303,16 @@ Architecture diagrams and visual explanations
 - Implementation: Check implementation docs or ask dev team
 - Product: See summary docs or decision docs
 
-**Last Updated:** 2025-12-02
+---
+
+## 📚 Additional Resources
+
+### Configuration & Guides
+- [AVIATION_AGENT_CONFIGURATION_GUIDE.md](./AVIATION_AGENT_CONFIGURATION_GUIDE.md) - Configuration system guide
+- [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md) - Deployment documentation
+
+### Recent Cleanup (December 2025)
+The designs directory was reviewed and cleaned up to remove outdated migration artifacts. See [DESIGNS_DIRECTORY_REVIEW.md](./DESIGNS_DIRECTORY_REVIEW.md) for details.
+
+**Last Updated:** 2025-12-14
 
