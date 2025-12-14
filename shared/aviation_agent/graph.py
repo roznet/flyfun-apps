@@ -354,7 +354,7 @@ def build_agent_graph(
                 return {"error": "No tools selected in plan"}
             
             # Single tool execution
-            result = tool_runner.run(plan)
+            result = tool_runner.run(plan, state)
             
             # POST-PROCESSING: Enrich airport results with notification data
             # Check if this is a location/route tool and query mentions notifications

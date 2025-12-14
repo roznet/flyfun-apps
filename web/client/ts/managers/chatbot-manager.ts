@@ -3,6 +3,7 @@
  */
 
 import { LLMIntegration } from '../adapters/llm-integration';
+import { useStore } from '../store/store';
 
 /**
  * Chatbot Manager class
@@ -139,10 +140,15 @@ export class ChatbotManager {
       content: message
     });
 
+    // Get persona from store
+    const state = useStore.getState();
+    const personaId = state.ga?.selectedPersona || 'ifr_touring_sr22';
+
     console.log('ChatbotManager: Sending message with history', {
       messageHistoryLength: this.messageHistory.length,
       messagesLength: messages.length,
-      sessionId: this.sessionId
+      sessionId: this.sessionId,
+      personaId: personaId
     });
 
     // Call aviation agent streaming API with 120s timeout for cold start
@@ -158,7 +164,10 @@ export class ChatbotManager {
           ...(this.sessionId ? { 'X-Session-ID': this.sessionId } : {})
         },
         credentials: 'include',
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ 
+          messages,
+          persona_id: personaId
+        }),
         signal: controller.signal
       });
     } finally {

@@ -45,6 +45,9 @@ class AgentState(TypedDict, total=False):
     ui_payload: Optional[dict]  # UI-specific data (charts, maps, etc.)
     error: Optional[str]  # Error message if execution fails
 
+    # User preferences
+    persona_id: Optional[str]  # Persona ID for airport prioritization
+
     # Next query prediction
     suggested_queries: Optional[List[dict]]  # Suggested follow-up queries
 

@@ -51,12 +51,25 @@ def _airport_summary(a: Airport) -> Dict[str, Any]:
     }
 
 
+def _build_priority_context(base_context: Optional[Dict[str, Any]] = None, persona_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Build context dict for PriorityEngine.apply().
+    
+    Merges base_context (e.g., segment_distances) with persona_id if provided.
+    """
+    context = dict(base_context) if base_context else {}
+    if persona_id:
+        context["persona_id"] = persona_id
+    return context
+
+
 def search_airports(
     ctx: ToolContext,
     query: str,
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "persona_optimized",
+    **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
     Search for airports by ICAO code, IATA code, airport name, or city name with optional filters (country, procedures, runway, fuel, fees).
@@ -138,12 +151,16 @@ def search_airports(
         filter_engine = FilterEngine(context=ctx)
         matches = filter_engine.apply(matches, filters)
 
+    # Extract persona_id from kwargs (injected by ToolRunner)
+    persona_id = kwargs.pop("_persona_id", None)
+    
     # Apply priority sorting using PriorityEngine
     priority_engine = PriorityEngine(context=ctx)
+    priority_context = _build_priority_context(persona_id=persona_id)
     sorted_airports = priority_engine.apply(
         matches,
         strategy=priority_strategy,
-        context={},
+        context=priority_context,
         max_results=max_results
     )
 
@@ -206,6 +223,7 @@ def find_airports_near_route(
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "persona_optimized",
+    **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
     List airports within a specified distance from a direct route between two locations, with optional airport filters.
@@ -288,12 +306,19 @@ def find_airports_near_route(
         filter_engine = FilterEngine(context=ctx)
         airport_objects = filter_engine.apply(airport_objects, filters)
 
+    # Extract persona_id from kwargs (injected by ToolRunner)
+    persona_id = kwargs.pop("_persona_id", None)
+    
     # Apply priority sorting using PriorityEngine
     priority_engine = PriorityEngine(context=ctx)
+    priority_context = _build_priority_context(
+        base_context={"segment_distances": segment_distances, "enroute_distances": enroute_distances},
+        persona_id=persona_id
+    )
     sorted_airports = priority_engine.apply(
         airport_objects,
         strategy=priority_strategy,
-        context={"segment_distances": segment_distances, "enroute_distances": enroute_distances},
+        context=priority_context,
         max_results=100  # Get more for full list, will limit to 20 for LLM later
     )
 
@@ -823,6 +848,7 @@ def find_airports_near_location(
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
     priority_strategy: str = "persona_optimized",
+    **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
     Find airports near a geographic location (free-text location name, city, landmark, or coordinates) within a specified distance.
@@ -870,12 +896,19 @@ def find_airports_near_location(
         filter_engine = FilterEngine(context=ctx)
         candidate_airports = filter_engine.apply(candidate_airports, filters)
 
+    # Extract persona_id from kwargs (injected by ToolRunner)
+    persona_id = kwargs.pop("_persona_id", None)
+    
     # Priority sort using PriorityEngine (use distances as context)
     priority_engine = PriorityEngine(context=ctx)
+    priority_context = _build_priority_context(
+        base_context={"point_distances": point_distances},
+        persona_id=persona_id
+    )
     sorted_airports = priority_engine.apply(
         candidate_airports,
         strategy=priority_strategy,
-        context={"point_distances": point_distances},
+        context=priority_context,
         max_results=100
     )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Literal, Sequence
+from typing import List, Literal, Optional, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -22,6 +22,10 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(default_factory=list)
+    persona_id: Optional[str] = Field(
+        default="ifr_touring_sr22",
+        description="Persona ID for airport prioritization"
+    )
 
     def to_langchain(self) -> List[BaseMessage]:
         if not self.messages:

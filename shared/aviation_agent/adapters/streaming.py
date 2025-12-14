@@ -12,6 +12,7 @@ async def stream_aviation_agent(
     messages: List[BaseMessage],
     graph: Any,  # Compiled graph from LangGraph (type: CompiledGraph from langgraph.checkpoint)
     session_id: Optional[str] = None,
+    persona_id: Optional[str] = None,
 ) -> AsyncIterator[Dict[str, Any]]:
     """
     Stream agent execution with SSE-compatible events and token tracking.
@@ -50,8 +51,12 @@ async def stream_aviation_agent(
         # Note: We don't filter by include_names for LLM events - they come from inside chains
         # Don't filter by names - we want to capture all events including LLM streaming
         # The LLM events might not have the node name in their name field
+        initial_state = {"messages": messages}
+        if persona_id:
+            initial_state["persona_id"] = persona_id
+        
         async for event in graph.astream_events(
-            {"messages": messages},
+            initial_state,
             version="v2",
         ):
             kind = event.get("event")

@@ -9,6 +9,8 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List
 
 from shared.aviation_agent.adapters import (
     ChatRequest,
@@ -25,6 +27,18 @@ router = APIRouter(tags=["aviation-agent"])
 logger = logging.getLogger(__name__)
 
 
+class QuickAction(BaseModel):
+    """Quick action button definition."""
+    icon: str  # Emoji (≤2 chars) or FontAwesome icon name (without 'fa-')
+    title: str
+    prompt: str
+
+
+class QuickActionsResponse(BaseModel):
+    """Response containing quick actions."""
+    actions: List[QuickAction]
+
+
 def feature_enabled(settings: Optional[AviationAgentSettings] = None) -> bool:
     settings = settings or get_settings()
     return bool(settings.enabled)
@@ -39,7 +53,11 @@ def aviation_agent_chat(
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
 
     try:
-        state = run_aviation_agent(request.to_langchain(), settings=settings)
+        state = run_aviation_agent(
+            request.to_langchain(),
+            settings=settings,
+            persona_id=request.persona_id
+        )
     except Exception as exc:  # pragma: no cover - runtime failure surfaced to clients
         logger.exception("Aviation agent failed")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -74,7 +92,8 @@ async def aviation_agent_chat_stream(
                 async for event in stream_aviation_agent(
                     messages,
                     graph,
-                    session_id=session_id
+                    session_id=session_id,
+                    persona_id=request.persona_id
                 ):
                     event_name = event.get("event")
                     event_data = event.get("data", {})
@@ -117,4 +136,53 @@ async def aviation_agent_chat_stream(
     except Exception as exc:
         logger.exception("Aviation agent streaming failed")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/quick-actions", response_model=QuickActionsResponse)
+def get_quick_actions(
+    settings: AviationAgentSettings = Depends(get_settings),
+) -> QuickActionsResponse:
+    """
+    Get quick action buttons for the chatbot UI.
+    
+    Returns a list of predefined actions that users can click to quickly
+    send common queries to the aviation agent.
+    """
+    if not settings.enabled:
+        raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
+    
+    actions = [
+        QuickAction(
+            icon="✈️",
+            title="Airports near route",
+            prompt="Find airports between EGTF and LFMD"
+        ),
+        QuickAction(
+            icon="plane",
+            title="Border crossing airports",
+            prompt="Show me border crossing airports in France"
+        ),
+        QuickAction(
+            icon="map-marker-alt",
+            title="Airports near location",
+            prompt="Find airports near Paris"
+        ),
+        QuickAction(
+            icon="fuel-pump",
+            title="Airports with AVGAS",
+            prompt="Find airports with AVGAS in Germany"
+        ),
+        QuickAction(
+            icon="route",
+            title="IFR procedures",
+            prompt="Show airports with IFR near EGTF"
+        ),
+        QuickAction(
+            icon="book",
+            title="Country rules",
+            prompt="What are the rules for flying IFR to an uncontrolled airport in France?"
+        ),
+    ]
+    
+    return QuickActionsResponse(actions=actions)
 

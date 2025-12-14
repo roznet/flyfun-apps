@@ -95,6 +95,7 @@ def run_aviation_agent(
     planner_llm: Optional[Runnable] = None,
     formatter_llm: Optional[Runnable] = None,
     enable_routing: bool = True,
+    persona_id: Optional[str] = None,
 ) -> AgentState:
     graph = build_agent(
         settings=settings,
@@ -102,7 +103,10 @@ def run_aviation_agent(
         formatter_llm=formatter_llm,
         enable_routing=enable_routing,
     )
-    result = graph.invoke({"messages": messages})
+    initial_state = {"messages": messages}
+    if persona_id:
+        initial_state["persona_id"] = persona_id
+    result = graph.invoke(initial_state)
     return result
 
 
