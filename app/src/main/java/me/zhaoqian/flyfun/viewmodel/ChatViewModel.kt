@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import me.zhaoqian.flyfun.data.models.*
 import me.zhaoqian.flyfun.data.repository.FlyFunRepository
+import me.zhaoqian.flyfun.data.repository.RouteStateHolder
 import java.util.UUID
 import javax.inject.Inject
 
@@ -15,7 +16,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val repository: FlyFunRepository
+    private val repository: FlyFunRepository,
+    private val routeStateHolder: RouteStateHolder
 ) : ViewModel() {
     
     // Chat messages
@@ -32,11 +34,16 @@ class ChatViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
     
-    // Session ID for conversation continuity
-    private val sessionId = UUID.randomUUID().toString()
+    // Route visualization from chat results
+    private val _routeVisualization = MutableStateFlow<RouteVisualization?>(null)
+    val routeVisualization: StateFlow<RouteVisualization?> = _routeVisualization.asStateFlow()
+    
     
     fun sendMessage(content: String) {
         if (content.isBlank() || _isStreaming.value) return
+        
+        // Clear previous visualization when starting new chat
+        _routeVisualization.value = null
         
         viewModelScope.launch {
             // Add user message
@@ -60,16 +67,12 @@ class ChatViewModel @Inject constructor(
             _isStreaming.value = true
             _error.value = null
             
-            // Build request
-            val history = _messages.value
-                .dropLast(2) // Exclude the messages we just added
+            // Build request with all messages (history + current)
+            val allMessages = _messages.value
+                .dropLast(1) // Exclude the assistant placeholder we just added
                 .map { ChatMessage(role = it.role.value, content = it.content) }
             
-            val request = ChatRequest(
-                message = content,
-                history = history,
-                sessionId = sessionId
-            )
+            val request = ChatRequest(messages = allMessages)
             
             // Stream response
             var accumulatedContent = StringBuilder()
@@ -91,6 +94,10 @@ class ChatViewModel @Inject constructor(
                         }
                         is ChatStreamEvent.ToolCallEvent -> {
                             // Could show tool usage in UI
+                        }
+                        is ChatStreamEvent.UiPayloadEvent -> {
+                            // Process visualization payload for map display
+                            processVisualization(event.payload)
                         }
                         is ChatStreamEvent.FinalAnswerEvent -> {
                             updateAssistantMessage(assistantMessageId, event.response, false)
@@ -115,6 +122,68 @@ class ChatViewModel @Inject constructor(
         }
     }
     
+    private fun processVisualization(payload: VisualizationPayload) {
+        android.util.Log.d("ChatVM", "processVisualization: kind=${payload.kind}, mcpRaw=${payload.mcpRaw != null}")
+        
+        // Use mcpRaw.airports (raw tool output) as primary source, fallback to root airports
+        // This ensures we show all airports returned by the tool (e.g. "find airports near route")
+        val markerList = payload.mcpRaw?.airports ?: payload.airports ?: emptyList()
+        
+        if (markerList.size < 2) {
+            android.util.Log.w("ChatVM", "Not enough airports for route: ${markerList.size}")
+            return
+        }
+        
+        // First airport is departure, second is destination (sorted by enroute_distance)
+        val fromAirport = markerList.first()
+        val toAirport = markerList.find { it.enrouteDistanceNm != null && it.enrouteDistanceNm > 0 }
+            ?: markerList[1]
+        
+        val fromLat = fromAirport.latitude ?: return
+        val fromLon = fromAirport.longitude ?: return
+        val toLat = toAirport.latitude ?: return
+        val toLon = toAirport.longitude ?: return
+        
+        android.util.Log.d("ChatVM", "Route: ${fromAirport.ident} ($fromLat,$fromLon) -> ${toAirport.ident} ($toLat,$toLon)")
+        
+        // Extract all airport ICAOs for highlighting
+        val highlightedAirports = markerList.mapNotNull { it.ident ?: it.icao }
+        
+        // Map MarkerData to Airport objects
+        val mappedAirports = markerList.mapNotNull { marker ->
+            if (marker.latitude == null || marker.longitude == null) return@mapNotNull null
+            val icao = marker.ident ?: marker.icao ?: return@mapNotNull null
+            
+            Airport(
+                icao = icao,
+                name = marker.name,
+                country = marker.country,
+                latitude = marker.latitude,
+                longitude = marker.longitude,
+                pointOfEntry = marker.pointOfEntry,
+                hasProcedures = marker.hasProcedures ?: false,
+                hasHardRunway = marker.hasHardRunway ?: false,
+                hasRunways = true // Assumption for visualized airports
+            )
+        }
+        
+        val routeViz = RouteVisualization(
+            fromLat = fromLat,
+            fromLon = fromLon,
+            toLat = toLat,
+            toLon = toLon,
+            fromIcao = fromAirport.ident ?: "DEP",
+            toIcao = toAirport.ident ?: "ARR",
+            highlightedAirports = highlightedAirports,
+            airports = mappedAirports
+        )
+        
+        android.util.Log.d("ChatVM", "RouteVisualization created with ${mappedAirports.size} airports")
+        _routeVisualization.value = routeViz
+        // Also publish to shared state for MapViewModel
+        routeStateHolder.setRouteVisualization(routeViz)
+    }
+    
     private fun updateAssistantMessage(id: String, content: String, isStreaming: Boolean) {
         _messages.update { messages ->
             messages.map { msg ->
@@ -132,6 +201,12 @@ class ChatViewModel @Inject constructor(
         _messages.value = emptyList()
         _currentThinking.value = null
         _error.value = null
+        _routeVisualization.value = null
+        routeStateHolder.setRouteVisualization(null)
+    }
+    
+    fun clearRouteVisualization() {
+        _routeVisualization.value = null
     }
 }
 

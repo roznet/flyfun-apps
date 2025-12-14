@@ -32,7 +32,14 @@ fun FlyFunApp() {
                     onClick = { 
                         selectedTab = 0
                         navController.navigate("map") {
-                            popUpTo("map") { inclusive = true }
+                            // Avoid multiple copies of the same destination
+                            launchSingleTop = true
+                            // Restore state when navigating back
+                            restoreState = true
+                            // Save state when navigating away
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
                         }
                     }
                 )
@@ -43,7 +50,11 @@ fun FlyFunApp() {
                     onClick = { 
                         selectedTab = 1
                         navController.navigate("chat") {
-                            popUpTo("map")
+                            launchSingleTop = true
+                            restoreState = true
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
                         }
                     }
                 )
@@ -59,7 +70,13 @@ fun FlyFunApp() {
                 MapScreen(
                     onNavigateToChat = {
                         selectedTab = 1
-                        navController.navigate("chat")
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                            restoreState = true
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
+                        }
                     }
                 )
             }
@@ -68,7 +85,11 @@ fun FlyFunApp() {
                     onNavigateToMap = {
                         selectedTab = 0
                         navController.navigate("map") {
-                            popUpTo("map") { inclusive = true }
+                            launchSingleTop = true
+                            restoreState = true
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
                         }
                     }
                 )

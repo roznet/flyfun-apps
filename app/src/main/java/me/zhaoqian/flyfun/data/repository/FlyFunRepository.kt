@@ -28,9 +28,9 @@ class FlyFunRepository @Inject constructor(
         pointOfEntry: Boolean? = null,
         runwayMinLength: Int? = null,
         search: String? = null,
-        limit: Int = 500,
+        limit: Int = 10000,
         offset: Int = 0
-    ): Result<AirportsResponse> = runCatching {
+    ): Result<List<Airport>> = runCatching {
         apiService.getAirports(
             country = country,
             hasProcedure = hasProcedure,

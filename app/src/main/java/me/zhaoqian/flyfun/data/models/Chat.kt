@@ -9,9 +9,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class ChatRequest(
-    val message: String,
-    val history: List<ChatMessage> = emptyList(),
-    @SerialName("session_id") val sessionId: String? = null
+    val messages: List<ChatMessage>
 )
 
 @Serializable
@@ -22,9 +20,9 @@ data class ChatMessage(
 
 @Serializable
 data class ChatResponse(
-    val response: String,
-    @SerialName("tool_calls") val toolCalls: List<ToolCall>? = null,
-    val thinking: String? = null
+    val answer: String,
+    @SerialName("planner_meta") val plannerMeta: Map<String, String>? = null,
+    @SerialName("ui_payload") val uiPayload: Map<String, kotlinx.serialization.json.JsonElement>? = null
 )
 
 @Serializable
@@ -42,6 +40,7 @@ sealed class ChatStreamEvent {
     data class ThinkingEvent(val content: String) : ChatStreamEvent()
     data class ToolCallEvent(val toolCall: ToolCall) : ChatStreamEvent()
     data class FinalAnswerEvent(val response: String) : ChatStreamEvent()
+    data class UiPayloadEvent(val payload: VisualizationPayload) : ChatStreamEvent()
     data class ErrorEvent(val message: String) : ChatStreamEvent()
     object DoneEvent : ChatStreamEvent()
 }

@@ -41,21 +41,18 @@ fun AirportDetailSheet(
         ) {
             Column {
                 Text(
-                    text = airport.name,
+                    text = airport.name ?: airport.icao,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "${airport.icao} • ${airport.country}",
+                    text = "${airport.icao} • ${airport.country ?: "Unknown"}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
-            // GA Score badge
-            airport.gaScores?.get(selectedPersona)?.let { score ->
-                ScoreBadge(score = score)
-            }
+            // GA badge removed - field no longer exists in API
         }
         
         // Tabs
@@ -78,7 +75,7 @@ fun AirportDetailSheet(
             when (selectedTab) {
                 0 -> DetailsTab(airport, airportDetail)
                 1 -> AipDataTab(airportDetail)
-                2 -> RulesTab(airport.country)
+                2 -> RulesTab(airport.country ?: "Unknown")
                 3 -> RelevanceTab(airport, selectedPersona, onPersonaChange)
             }
         }
@@ -118,8 +115,8 @@ private fun DetailsTab(airport: Airport, detail: AirportDetail?) {
         // Basic info
         item {
             DetailSection(title = "Location") {
+                airport.municipality?.let { DetailRow("Municipality", it) }
                 DetailRow("Coordinates", "${airport.latitude}, ${airport.longitude}")
-                airport.elevationFt?.let { DetailRow("Elevation", "$it ft") }
             }
         }
         
@@ -168,17 +165,17 @@ private fun DetailsTab(airport: Airport, detail: AirportDetail?) {
         item {
             DetailSection(title = "Features") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (airport.hasIls) {
+                    if (airport.hasProcedures) {
                         AssistChip(
                             onClick = {},
-                            label = { Text("ILS") },
+                            label = { Text("Procedures") },
                             leadingIcon = { Icon(imageVector = Icons.Default.FlightLand, contentDescription = null, Modifier.size(16.dp)) }
                         )
                     }
-                    if (airport.hasVor) {
-                        AssistChip(onClick = {}, label = { Text("VOR") })
+                    if (airport.hasHardRunway) {
+                        AssistChip(onClick = {}, label = { Text("Hard Runway") })
                     }
-                    if (airport.pointOfEntry) {
+                    if (airport.pointOfEntry == true) {
                         AssistChip(
                             onClick = {},
                             label = { Text("Border Crossing") },
@@ -314,7 +311,7 @@ private fun RelevanceTab(
             .padding(16.dp)
     ) {
         // GA Summary
-        airport.gaSummary?.let { summary ->
+        airport.ga?.let { summary ->
             if (summary.hasData) {
                 summary.summaryText?.let { 
                     Text(it, style = MaterialTheme.typography.bodyMedium)
@@ -330,9 +327,9 @@ private fun RelevanceTab(
                     }
                 }
                 
-                summary.hassleLevel?.let {
+                summary.hassleLevel?.let { hassle ->
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Hassle Level: $it", fontWeight = FontWeight.Medium)
+                    Text("Hassle Level: $hassle", fontWeight = FontWeight.Medium)
                 }
             } else {
                 EmptyTabContent("No GA friendliness data available")

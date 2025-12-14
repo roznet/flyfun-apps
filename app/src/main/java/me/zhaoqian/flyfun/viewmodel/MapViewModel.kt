@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import me.zhaoqian.flyfun.data.models.*
 import me.zhaoqian.flyfun.data.repository.FlyFunRepository
+import me.zhaoqian.flyfun.data.repository.RouteStateHolder
 import javax.inject.Inject
 
 /**
@@ -14,7 +15,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class MapViewModel @Inject constructor(
-    private val repository: FlyFunRepository
+    private val repository: FlyFunRepository,
+    private val routeStateHolder: RouteStateHolder
 ) : ViewModel() {
     
     // UI State
@@ -41,9 +43,40 @@ class MapViewModel @Inject constructor(
     private val _selectedPersona = MutableStateFlow("ifr_touring_sr22")
     val selectedPersona: StateFlow<String> = _selectedPersona.asStateFlow()
     
+    // Route visualization from chat (observed from shared state)
+    // Route visualization from chat (observed from shared state)
+    val routeVisualization: StateFlow<RouteVisualization?> = routeStateHolder.routeVisualization
+    
+    // Internal cache of all loaded airports
+    private val _allAirports = MutableStateFlow<List<Airport>>(emptyList())
+    
     init {
         loadAirports()
         loadGAConfig()
+        
+        // Observe route and filter airports accordingly
+        viewModelScope.launch {
+            combine(_allAirports, routeVisualization) { allAirports, routeViz ->
+                if (routeViz != null && routeViz.airports.isNotEmpty()) {
+                    // If visualising a route, show ONLY the airports from the route
+                    routeViz.airports
+                } else {
+                    // Otherwise show all loaded airports
+                    allAirports
+                }
+            }.collect { filteredAirports ->
+                _uiState.update { 
+                    it.copy(
+                        airports = filteredAirports,
+                        totalCount = filteredAirports.size
+                    )
+                }
+            }
+        }
+    }
+    
+    fun clearRouteVisualization() {
+        routeStateHolder.clearRouteVisualization()
     }
     
     fun loadAirports() {
@@ -59,14 +92,10 @@ class MapViewModel @Inject constructor(
                 runwayMinLength = currentFilters.runwayMinLength,
                 search = currentFilters.searchQuery
             ).fold(
-                onSuccess = { response ->
-                    _uiState.update { 
-                        it.copy(
-                            isLoading = false,
-                            airports = response.airports,
-                            totalCount = response.total
-                        )
-                    }
+                onSuccess = { airports ->
+                    _allAirports.value = airports
+                    // UI state will be updated by the combine collector
+                    _uiState.update { it.copy(isLoading = false) }
                 },
                 onFailure = { error ->
                     _uiState.update { 

@@ -9,17 +9,26 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Airport(
-    val icao: String,
-    val name: String,
-    val country: String,
-    val latitude: Double,
-    val longitude: Double,
-    @SerialName("elevation_ft") val elevationFt: Int? = null,
-    @SerialName("has_ils") val hasIls: Boolean = false,
-    @SerialName("has_vor") val hasVor: Boolean = false,
-    @SerialName("point_of_entry") val pointOfEntry: Boolean = false,
-    @SerialName("ga_scores") val gaScores: Map<String, Double>? = null,
-    @SerialName("ga_summary") val gaSummary: GASummary? = null
+    @SerialName("ident") val icao: String,
+    val name: String? = null,
+    @SerialName("iso_country") val country: String? = null,
+    @SerialName("latitude_deg") val latitude: Double? = null,
+    @SerialName("longitude_deg") val longitude: Double? = null,
+    val municipality: String? = null,
+    @SerialName("point_of_entry") val pointOfEntry: Boolean? = null,
+    @SerialName("has_procedures") val hasProcedures: Boolean = false,
+    @SerialName("has_runways") val hasRunways: Boolean = false,
+    @SerialName("has_aip_data") val hasAipData: Boolean = false,
+    @SerialName("has_hard_runway") val hasHardRunway: Boolean = false,
+    @SerialName("has_lighted_runway") val hasLightedRunway: Boolean = false,
+    @SerialName("has_soft_runway") val hasSoftRunway: Boolean = false,
+    @SerialName("has_water_runway") val hasWaterRunway: Boolean = false,
+    @SerialName("has_snow_runway") val hasSnowRunway: Boolean = false,
+    @SerialName("longest_runway_length_ft") val longestRunwayLengthFt: Int? = null,
+    @SerialName("procedure_count") val procedureCount: Int = 0,
+    @SerialName("runway_count") val runwayCount: Int = 0,
+    @SerialName("aip_entry_count") val aipEntryCount: Int = 0,
+    val ga: GASummary? = null
 )
 
 @Serializable
