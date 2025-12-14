@@ -106,12 +106,15 @@ services:
       - "${CHROMADB_PORT:-8001}:8000"
     environment:
       - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
       - ANONYMIZED_TELEMETRY=FALSE
       - CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
       - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMADB_AUTH_TOKEN:-test-token}
       - CHROMA_SERVER_AUTHN_TOKEN_TRANSPORT_HEADER=X-Chroma-Token
     volumes:
       # Persistent storage for ChromaDB data
+      # Using bind mount to host directory for easy access and backup
+      # Data persists across container restarts and rebuilds
       - ${CHROMADB_DATA_DIR:-./out/chromadb_data}:/chroma/chroma
     restart: unless-stopped
     networks:
