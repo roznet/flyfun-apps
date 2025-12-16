@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from langchain_core.messages import BaseMessage
@@ -45,6 +46,12 @@ async def stream_aviation_agent(
     rules_agent_streamed = False
     rules_rag_completed = False
 
+    # Track the routing path for metadata (updated when router completes)
+    routing_path: Optional[str] = None
+
+    # Generate a unique run ID if session_id not provided
+    run_id = session_id or str(uuid.uuid4())
+
     try:
         # Use LangGraph's astream_events for fine-grained streaming
         # This is the standard LangGraph pattern for streaming + token tracking
@@ -54,10 +61,23 @@ async def stream_aviation_agent(
         initial_state = {"messages": messages}
         if persona_id:
             initial_state["persona_id"] = persona_id
-        
+
+        # LangSmith config for observability
+        # See: https://docs.langchain.com/langsmith
+        langsmith_config = {
+            "run_name": f"aviation-agent-{run_id[:8]}",
+            "tags": ["aviation-agent", "streaming"],
+            "metadata": {
+                "session_id": session_id,
+                "persona_id": persona_id,
+                "agent_version": "1.0",
+            },
+        }
+
         async for event in graph.astream_events(
             initial_state,
             version="v2",
+            config=langsmith_config,
         ):
             kind = event.get("event")
             name = event.get("name", "")
@@ -65,6 +85,16 @@ async def stream_aviation_agent(
             if kind == "on_chain_start" and event.get("name") == "planner":
                 # Planner started
                 continue
+
+            elif kind == "on_chain_end" and event.get("name") == "router":
+                # Router completed - capture the routing path for metadata
+                output = event.get("data", {}).get("output", {})
+                if isinstance(output, dict):
+                    decision = output.get("router_decision")
+                    if decision:
+                        routing_path = getattr(decision, "path", None) or decision.get("path")
+                        if routing_path:
+                            logger.info(f"Routing path determined: {routing_path}")
             
             elif kind == "on_chain_end" and event.get("name") == "planner":
                 # Planner completed - emit plan and thinking
@@ -281,7 +311,7 @@ async def stream_aviation_agent(
                         "data": {"state": serializable_state}
                     }
 
-                # Emit done event
+                # Emit done event with metadata for observability
                 yield {
                     "event": "done",
                     "data": {
@@ -290,6 +320,10 @@ async def stream_aviation_agent(
                             "input": total_input_tokens,
                             "output": total_output_tokens,
                             "total": total_input_tokens + total_output_tokens
+                        },
+                        "metadata": {
+                            "persona_id": persona_id,
+                            "path": routing_path or "rules",  # rules path if router chose it
                         }
                     }
                 }
@@ -351,7 +385,7 @@ async def stream_aviation_agent(
                         "data": {"state": serializable_state}
                     }
 
-                # Emit done event
+                # Emit done event with metadata for observability
                 yield {
                     "event": "done",
                     "data": {
@@ -360,10 +394,14 @@ async def stream_aviation_agent(
                             "input": total_input_tokens,
                             "output": total_output_tokens,
                             "total": total_input_tokens + total_output_tokens
+                        },
+                        "metadata": {
+                            "persona_id": persona_id,
+                            "path": routing_path or "database",  # database/both path if router chose it
                         }
                     }
                 }
-        
+
     except Exception as e:
         logger.exception("Error in stream_aviation_agent")
         yield {

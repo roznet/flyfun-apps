@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import List, Optional
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
 
 from ..config import AviationAgentSettings, get_settings, get_behavior_config
+
+logger = logging.getLogger(__name__)
 from ..execution import ToolRunner
 from ..formatting import build_formatter_chain
 from ..graph import _build_agent_graph
@@ -49,7 +53,9 @@ def build_agent(
         role="planner",
         config_name=settings.agent_config_name,
         temperature=behavior_config.llms.planner.temperature,
-        streaming=behavior_config.llms.planner.streaming
+        streaming=behavior_config.llms.planner.streaming,
+        max_retries=behavior_config.llms.planner.max_retries,
+        request_timeout=behavior_config.llms.planner.request_timeout,
     )
 
     formatter_llm = _resolve_llm(
@@ -58,7 +64,9 @@ def build_agent(
         role="formatter",
         config_name=settings.agent_config_name,
         temperature=behavior_config.llms.formatter.temperature,
-        streaming=behavior_config.llms.formatter.streaming
+        streaming=behavior_config.llms.formatter.streaming,
+        max_retries=behavior_config.llms.formatter.max_retries,
+        request_timeout=behavior_config.llms.formatter.request_timeout,
     )
 
     # Router LLM (optional - only needed if routing is enabled)
@@ -70,7 +78,9 @@ def build_agent(
             role="router",
             config_name=settings.agent_config_name,
             temperature=behavior_config.llms.router.temperature,
-            streaming=behavior_config.llms.router.streaming
+            streaming=behavior_config.llms.router.streaming,
+            max_retries=behavior_config.llms.router.max_retries,
+            request_timeout=behavior_config.llms.router.request_timeout,
         )
 
     # Rules LLM (defaults to formatter LLM if not specified)
@@ -82,7 +92,9 @@ def build_agent(
                 role="rules",
                 config_name=settings.agent_config_name,
                 temperature=behavior_config.llms.rules.temperature,
-                streaming=behavior_config.llms.rules.streaming
+                streaming=behavior_config.llms.rules.streaming,
+                max_retries=behavior_config.llms.rules.max_retries,
+                request_timeout=behavior_config.llms.rules.request_timeout,
             )
         else:
             rules_llm = formatter_llm  # Default to formatter LLM for rules
@@ -109,6 +121,7 @@ def run_aviation_agent(
     planner_llm: Optional[Runnable] = None,
     formatter_llm: Optional[Runnable] = None,
     persona_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> AgentState:
     """
     Run the aviation agent on a list of messages.
@@ -119,6 +132,7 @@ def run_aviation_agent(
         planner_llm: LLM for planning (testing only - uses behavior_config in production)
         formatter_llm: LLM for formatting (testing only - uses behavior_config in production)
         persona_id: Optional persona ID for the agent
+        session_id: Optional session ID for tracing
     """
     graph = build_agent(
         settings=settings,
@@ -128,7 +142,22 @@ def run_aviation_agent(
     initial_state = {"messages": messages}
     if persona_id:
         initial_state["persona_id"] = persona_id
-    result = graph.invoke(initial_state)
+
+    # Generate run ID for LangSmith tracing
+    run_id = session_id or str(uuid.uuid4())
+
+    # LangSmith config for observability
+    langsmith_config = {
+        "run_name": f"aviation-agent-{run_id[:8]}",
+        "tags": ["aviation-agent", "sync"],
+        "metadata": {
+            "session_id": session_id,
+            "persona_id": persona_id,
+            "agent_version": "1.0",
+        },
+    }
+
+    result = graph.invoke(initial_state, config=langsmith_config)
     return result
 
 
@@ -138,8 +167,30 @@ def _resolve_llm(
     role: str,
     config_name: Optional[str] = None,
     temperature: float = 0.0,
-    streaming: bool = False
+    streaming: bool = False,
+    max_retries: int = 3,
+    request_timeout: int = 60,
 ) -> Runnable:
+    """
+    Resolve an LLM instance with retry configuration.
+
+    Configures LLM with:
+    - max_retries: Number of retries for transient failures (rate limits, timeouts)
+    - request_timeout: Timeout per request in seconds
+
+    Args:
+        llm: Existing LLM instance (returned as-is if provided)
+        model_name: Model name from config
+        role: Role name for error messages (planner, formatter, etc.)
+        config_name: Config file name for error messages
+        temperature: LLM temperature setting
+        streaming: Whether to enable streaming
+        max_retries: Number of retries for transient failures (from config)
+        request_timeout: Timeout per request in seconds (from config)
+
+    Returns:
+        Configured LLM instance with retry support
+    """
     if llm is not None:
         return llm
     if not model_name:
@@ -155,5 +206,21 @@ def _resolve_llm(
             f"Cannot auto-create {role} LLM. Install langchain-openai or inject a custom Runnable."
         ) from exc
 
-    return ChatOpenAI(model=model_name, temperature=temperature, streaming=streaming)
+    # Configure LLM with retry support for transient failures
+    # max_retries handles: rate limits, timeouts, temporary API errors
+    # request_timeout prevents hanging on slow responses
+    llm_instance = ChatOpenAI(
+        model=model_name,
+        temperature=temperature,
+        streaming=streaming,
+        max_retries=max_retries,
+        request_timeout=request_timeout,
+    )
+
+    logger.debug(
+        f"Created {role} LLM: model={model_name}, "
+        f"max_retries={max_retries}, timeout={request_timeout}s"
+    )
+
+    return llm_instance
 

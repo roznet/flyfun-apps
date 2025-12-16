@@ -14,6 +14,8 @@ class LLMConfig(BaseModel):
     model: Optional[str] = None
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     streaming: bool = False
+    max_retries: int = Field(default=3, ge=0, le=10)
+    request_timeout: int = Field(default=60, ge=5, le=300)  # seconds
 
 
 class LLMsConfig(BaseModel):
