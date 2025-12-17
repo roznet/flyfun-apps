@@ -132,9 +132,25 @@ class AviationAgentSettings(BaseSettings):
     """
     Deployment configuration for the aviation agent.
 
-    This class manages external resources and deployment settings.
-    LLM models and behavior settings are configured in AgentBehaviorConfig (JSON files).
-    Database paths are managed by ToolContextSettings in shared/tool_context.py.
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │ CONFIGURATION GUIDELINES                                                 │
+    │                                                                          │
+    │ This file (config.py) is for DEPLOYMENT/INFRASTRUCTURE settings:         │
+    │   ✓ Database paths and connection strings                                │
+    │   ✓ API keys and secrets                                                 │
+    │   ✓ Feature flags for enabling/disabling entire services                 │
+    │   ✓ Storage locations (checkpointer, logs, vector DB)                    │
+    │   ✓ Anything that varies between dev/staging/prod                        │
+    │                                                                          │
+    │ Behavior configuration (behavior_config.py / JSON files) is for:         │
+    │   ✓ LLM models, temperatures, prompts                                    │
+    │   ✓ Feature flags that change agent logic (routing, RAG, reranking)     │
+    │   ✓ Algorithm parameters (top_k, similarity thresholds)                  │
+    │   ✓ Anything that affects "how the agent thinks"                         │
+    │                                                                          │
+    │ The key question: "Does this change how the agent thinks, or where       │
+    │ data goes?" Behavior → JSON config. Infrastructure → .env                │
+    └─────────────────────────────────────────────────────────────────────────┘
     """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
@@ -163,6 +179,20 @@ class AviationAgentSettings(BaseSettings):
         default=None,
         description="URL to ChromaDB service for RAG retrieval. If set, takes precedence over vector_db_path.",
         alias="VECTOR_DB_URL",
+    )
+
+    # Checkpointer settings (conversation memory persistence)
+    # This is infrastructure config because it determines WHERE state is stored,
+    # not HOW the agent behaves. The same agent logic works with any storage backend.
+    checkpointer_provider: str = Field(
+        default="memory",
+        description="Checkpointer backend: 'memory' (dev), 'sqlite' (persistent), 'none' (disabled)",
+        alias="CHECKPOINTER_PROVIDER",
+    )
+    checkpointer_sqlite_path: Optional[str] = Field(
+        default=None,
+        description="Path to SQLite database for checkpointer (only used when provider='sqlite')",
+        alias="CHECKPOINTER_SQLITE_PATH",
     )
 
     def build_tool_context(

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import List, Optional
+from functools import lru_cache
+from typing import List, Optional, Any
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable
@@ -10,6 +11,65 @@ from langchain_core.runnables import Runnable
 from ..config import AviationAgentSettings, get_settings, get_behavior_config
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _get_checkpointer(provider: str, sqlite_path: Optional[str] = None) -> Any:
+    """
+    Get or create a checkpointer instance (cached for reuse).
+
+    The checkpointer must be shared across requests to enable
+    multi-turn conversations. InMemorySaver loses state if recreated.
+
+    Args:
+        provider: "memory", "sqlite", or "none"
+        sqlite_path: Path to SQLite database (only for sqlite provider)
+
+    Returns:
+        Checkpointer instance or None if disabled
+    """
+    if provider == "none":
+        logger.info("Checkpointing disabled")
+        return None
+
+    if provider == "memory":
+        from langgraph.checkpoint.memory import MemorySaver
+        logger.info("Using InMemorySaver checkpointer (dev mode)")
+        return MemorySaver()
+
+    if provider == "sqlite":
+        if not sqlite_path:
+            raise ValueError("sqlite_path required for sqlite checkpointer")
+        try:
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            logger.info(f"Using SqliteSaver checkpointer: {sqlite_path}")
+            return SqliteSaver.from_conn_string(sqlite_path)
+        except ImportError:
+            raise RuntimeError(
+                "SqliteSaver requires langgraph-checkpoint-sqlite. "
+                "Install with: pip install langgraph-checkpoint-sqlite"
+            )
+
+    raise ValueError(f"Unknown checkpointer provider: {provider}")
+
+
+def get_checkpointer(settings: AviationAgentSettings) -> Any:
+    """
+    Get checkpointer based on settings.
+
+    Args:
+        settings: AviationAgentSettings with checkpointer_provider and checkpointer_sqlite_path
+
+    Returns:
+        Checkpointer instance or None if disabled
+    """
+    provider = settings.checkpointer_provider
+    if provider == "none":
+        return None
+
+    return _get_checkpointer(provider, settings.checkpointer_sqlite_path)
+
+
 from ..execution import ToolRunner
 from ..formatting import build_formatter_chain
 from ..graph import _build_agent_graph
@@ -103,13 +163,17 @@ def build_agent(
     tool_runner = ToolRunner(tool_client)
     planner = build_planner_runnable(planner_llm, tuple(tool_client.tools.values()))
 
+    # Create checkpointer for conversation memory (from settings, not behavior config)
+    checkpointer = get_checkpointer(settings)
+
     graph = _build_agent_graph(
         planner,
         tool_runner,
         formatter_llm,
         router_llm=router_llm,
         rules_llm=rules_llm,
-        behavior_config=behavior_config
+        behavior_config=behavior_config,
+        checkpointer=checkpointer,
     )
     return graph
 
@@ -122,6 +186,7 @@ def run_aviation_agent(
     formatter_llm: Optional[Runnable] = None,
     persona_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> AgentState:
     """
     Run the aviation agent on a list of messages.
@@ -133,6 +198,8 @@ def run_aviation_agent(
         formatter_llm: LLM for formatting (testing only - uses behavior_config in production)
         persona_id: Optional persona ID for the agent
         session_id: Optional session ID for tracing
+        thread_id: Optional thread ID for conversation memory. When provided with
+            checkpointing enabled, enables multi-turn conversation resume.
     """
     graph = build_agent(
         settings=settings,
@@ -146,18 +213,25 @@ def run_aviation_agent(
     # Generate run ID for LangSmith tracing
     run_id = session_id or str(uuid.uuid4())
 
-    # LangSmith config for observability
-    langsmith_config = {
+    # Generate thread_id if not provided (checkpointing requires it)
+    # This enables conversation memory even for single-turn requests
+    effective_thread_id = thread_id or f"thread_{uuid.uuid4().hex[:12]}"
+
+    # Config for LangSmith observability and checkpointing
+    config = {
         "run_name": f"aviation-agent-{run_id[:8]}",
         "tags": ["aviation-agent", "sync"],
         "metadata": {
             "session_id": session_id,
             "persona_id": persona_id,
+            "thread_id": effective_thread_id,
             "agent_version": "1.0",
         },
+        # thread_id is required when checkpointing is enabled
+        "configurable": {"thread_id": effective_thread_id},
     }
 
-    result = graph.invoke(initial_state, config=langsmith_config)
+    result = graph.invoke(initial_state, config=config)
     return result
 
 

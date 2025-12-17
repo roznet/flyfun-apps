@@ -4,13 +4,13 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List
 
 from shared.aviation_agent.adapters import (
     ChatRequest,
@@ -25,6 +25,11 @@ from shared.aviation_agent.config import AviationAgentSettings, get_settings
 
 router = APIRouter(tags=["aviation-agent"])
 logger = logging.getLogger(__name__)
+
+
+def _generate_thread_id() -> str:
+    """Generate a unique thread ID for a new conversation."""
+    return f"thread_{uuid.uuid4().hex[:12]}"
 
 
 class QuickAction(BaseModel):
@@ -49,20 +54,35 @@ def aviation_agent_chat(
     request: ChatRequest,
     settings: AviationAgentSettings = Depends(get_settings),
 ) -> ChatResponse:
+    """
+    Non-streaming chat endpoint.
+
+    Args:
+        request: ChatRequest with messages, persona_id, and optional thread_id.
+            If thread_id is provided, continues an existing conversation.
+            If thread_id is None, starts a new conversation.
+
+    Returns:
+        ChatResponse with answer, metadata, and thread_id for continuation.
+    """
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
+
+    # Generate thread_id if not provided (new conversation)
+    thread_id = request.thread_id or _generate_thread_id()
 
     try:
         state = run_aviation_agent(
             request.to_langchain(),
             settings=settings,
-            persona_id=request.persona_id
+            persona_id=request.persona_id,
+            thread_id=thread_id,
         )
     except Exception as exc:  # pragma: no cover - runtime failure surfaced to clients
         logger.exception("Aviation agent failed")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return build_chat_response(state)
+    return build_chat_response(state, thread_id=thread_id)
 
 
 @router.post("/chat/stream")
@@ -71,21 +91,35 @@ async def aviation_agent_chat_stream(
     settings: AviationAgentSettings = Depends(get_settings),
     session_id: Optional[str] = None,  # Extract from header if available
 ) -> StreamingResponse:
+    """
+    SSE streaming chat endpoint.
+
+    Args:
+        request: ChatRequest with messages, persona_id, and optional thread_id.
+            If thread_id is provided, continues an existing conversation.
+            If thread_id is None, starts a new conversation.
+
+    Returns:
+        StreamingResponse with SSE events including thread_id in the 'done' event.
+    """
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
-    
+
     try:
         graph = build_agent(settings=settings)
         messages = request.to_langchain()
         start_time = time.time()
-        
+
         # Get session_id from request or header
         if not session_id:
             session_id = getattr(request, 'session_id', None) or f"session_{int(time.time())}"
-        
+
+        # Generate thread_id if not provided (new conversation)
+        thread_id = request.thread_id or _generate_thread_id()
+
         # Setup conversation logging
         log_dir = Path(os.getenv("CONVERSATION_LOG_DIR", "conversation_logs"))
-        
+
         async def event_generator():
             final_state = None
             try:
@@ -93,7 +127,8 @@ async def aviation_agent_chat_stream(
                     messages,
                     graph,
                     session_id=session_id,
-                    persona_id=request.persona_id
+                    persona_id=request.persona_id,
+                    thread_id=thread_id,
                 ):
                     event_name = event.get("event")
                     event_data = event.get("data", {})

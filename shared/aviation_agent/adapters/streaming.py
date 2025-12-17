@@ -14,6 +14,7 @@ async def stream_aviation_agent(
     graph: Any,  # Compiled graph from LangGraph (type: CompiledGraph from langgraph.checkpoint)
     session_id: Optional[str] = None,
     persona_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> AsyncIterator[Dict[str, Any]]:
     """
     Stream agent execution with SSE-compatible events and token tracking.
@@ -22,6 +23,14 @@ async def stream_aviation_agent(
     - Streaming node execution
     - Tracking token usage from LLM calls
     - Capturing tool execution
+
+    Args:
+        messages: List of messages to process
+        graph: Compiled LangGraph graph
+        session_id: Optional session ID for tracing
+        persona_id: Optional persona ID for the agent
+        thread_id: Optional thread ID for conversation memory. When provided with
+            checkpointing enabled, enables multi-turn conversation resume.
 
     Yields SSE events:
         - {"event": "plan", "data": {...}} - Planner output
@@ -32,7 +41,7 @@ async def stream_aviation_agent(
         - {"event": "thinking_done", "data": {}} - Thinking complete
         - {"event": "ui_payload", "data": {...}} - Visualization data
         - {"event": "final_answer", "data": {"state": {...}}} - Final complete state for logging
-        - {"event": "done", "data": {"session_id": "...", "tokens": {...}}}
+        - {"event": "done", "data": {"session_id": "...", "thread_id": "...", "tokens": {...}}}
         - {"event": "error", "data": {"message": "..."}} - Error occurred
     """
     # Track token usage across all LLM calls
@@ -62,22 +71,29 @@ async def stream_aviation_agent(
         if persona_id:
             initial_state["persona_id"] = persona_id
 
-        # LangSmith config for observability
+        # Generate thread_id if not provided (checkpointing requires it)
+        # This enables conversation memory even for single-turn requests
+        effective_thread_id = thread_id or f"thread_{uuid.uuid4().hex[:12]}"
+
+        # Config for LangSmith observability and checkpointing
         # See: https://docs.langchain.com/langsmith
-        langsmith_config = {
+        config = {
             "run_name": f"aviation-agent-{run_id[:8]}",
             "tags": ["aviation-agent", "streaming"],
             "metadata": {
                 "session_id": session_id,
                 "persona_id": persona_id,
+                "thread_id": effective_thread_id,
                 "agent_version": "1.0",
             },
+            # thread_id is required when checkpointing is enabled
+            "configurable": {"thread_id": effective_thread_id},
         }
 
         async for event in graph.astream_events(
             initial_state,
             version="v2",
-            config=langsmith_config,
+            config=config,
         ):
             kind = event.get("event")
             name = event.get("name", "")
@@ -316,6 +332,7 @@ async def stream_aviation_agent(
                     "event": "done",
                     "data": {
                         "session_id": session_id,
+                        "thread_id": effective_thread_id,
                         "tokens": {
                             "input": total_input_tokens,
                             "output": total_output_tokens,
@@ -390,6 +407,7 @@ async def stream_aviation_agent(
                     "event": "done",
                     "data": {
                         "session_id": session_id,
+                        "thread_id": effective_thread_id,
                         "tokens": {
                             "input": total_input_tokens,
                             "output": total_output_tokens,

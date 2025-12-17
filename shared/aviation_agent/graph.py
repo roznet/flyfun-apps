@@ -28,6 +28,7 @@ def _build_agent_graph(
     router_llm=None,
     rules_llm=None,
     behavior_config=None,
+    checkpointer=None,
 ):
     """
     Internal: Assemble the LangGraph workflow with routing support.
@@ -42,6 +43,8 @@ def _build_agent_graph(
         router_llm: Optional LLM for query routing (uses default if None)
         rules_llm: Optional LLM for rules synthesis (uses formatter_llm if None)
         behavior_config: AgentBehaviorConfig instance (loaded from JSON)
+        checkpointer: Optional LangGraph checkpointer for conversation memory.
+            When provided, enables multi-turn conversations via thread_id.
 
     Flow:
         1. Router decides: rules, database, or both
@@ -668,5 +671,6 @@ def _build_agent_graph(
         graph.add_edge("tool", "formatter")
         graph.add_edge("formatter", END)
 
-    return graph.compile()
+    # Compile with optional checkpointer for conversation memory
+    return graph.compile(checkpointer=checkpointer)
 

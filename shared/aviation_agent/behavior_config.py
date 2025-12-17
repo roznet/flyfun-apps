@@ -93,6 +93,29 @@ class ToolsConfig(BaseModel):
 
 
 class AgentBehaviorConfig(BaseModel):
+    """
+    Agent behavior configuration - controls HOW the agent thinks and acts.
+
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │ CONFIGURATION GUIDELINES                                                 │
+    │                                                                          │
+    │ This file (behavior_config.py) is for BEHAVIOR settings:                 │
+    │   ✓ LLM models, temperatures, prompts                                    │
+    │   ✓ Feature flags that change agent logic (routing, RAG, reranking)     │
+    │   ✓ Algorithm parameters (top_k, similarity thresholds)                  │
+    │   ✓ Anything that affects "how the agent thinks"                         │
+    │                                                                          │
+    │ Environment variables (config.py / .env) are for DEPLOYMENT settings:    │
+    │   ✓ Database paths and connection strings                                │
+    │   ✓ API keys and secrets                                                 │
+    │   ✓ Feature flags for enabling/disabling entire services                 │
+    │   ✓ Storage locations (checkpointer, logs, vector DB)                    │
+    │   ✓ Anything that varies between dev/staging/prod                        │
+    │                                                                          │
+    │ The key question: "Does this change how the agent thinks, or where       │
+    │ data goes?" Behavior → JSON config. Infrastructure → .env                │
+    └─────────────────────────────────────────────────────────────────────────┘
+    """
     version: str = "1.0"
     name: Optional[str] = None
     description: Optional[str] = None
