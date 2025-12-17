@@ -207,8 +207,36 @@ class GAFriendlinessBuilder:
                         # Get reviews for this airport
                         reviews = review_source.get_reviews_for_icao(icao)
                         
-                        if not reviews:
+                        # Check for fee data availability (even if no reviews)
+                        fee_data = None
+                        has_fee_data = False
+                        if hasattr(review_source, "get_fee_data"):
+                            fee_data = review_source.get_fee_data(icao)
+                            has_fee_data = fee_data is not None
+                        elif isinstance(review_source, AirfieldDirectorySource):
+                            airport_data = review_source.get_airport_data(icao)
+                            if airport_data and "aerops" in airport_data:
+                                # Parse fee data for comparison
+                                aerops = airport_data.get("aerops", {})
+                                if isinstance(aerops, dict) and "landing_fees" in aerops:
+                                    # Convert to fee_data format for comparison
+                                    fee_data = {
+                                        "currency": aerops.get("currency", "EUR"),
+                                        "fees_last_changed": aerops.get("fees_last_changed"),
+                                        "bands": aggregate_fees_by_band(aerops),
+                                    }
+                                    has_fee_data = True
+                        
+                        # Check if airport has any data to process
+                        has_data_to_process = (
+                            len(reviews) > 0  # Has reviews
+                            or has_fee_data  # Has fee data
+                            or airports_db is not None  # Can get AIP data
+                        )
+                        
+                        if not has_data_to_process:
                             self._metrics.skipped_airports += 1
+                            logger.debug(f"Skipping {icao}: no reviews, no fees, no AIP data source")
                             continue
                         
                         # Check for changes if incremental
@@ -216,24 +244,8 @@ class GAFriendlinessBuilder:
                         fee_changes = False
                         
                         if incremental:
-                            review_changes = self.storage.has_changes(icao, reviews, since)
-                            
-                            # Check for fee changes if source supports it
-                            fee_data = None
-                            if hasattr(review_source, "get_fee_data"):
-                                fee_data = review_source.get_fee_data(icao)
-                            elif isinstance(review_source, AirfieldDirectorySource):
-                                airport_data = review_source.get_airport_data(icao)
-                                if airport_data and "aerops" in airport_data:
-                                    # Parse fee data for comparison
-                                    aerops = airport_data.get("aerops", {})
-                                    if isinstance(aerops, dict) and "landing_fees" in aerops:
-                                        # Convert to fee_data format for comparison
-                                        fee_data = {
-                                            "currency": aerops.get("currency", "EUR"),
-                                            "fees_last_changed": aerops.get("fees_last_changed"),
-                                            "bands": aggregate_fees_by_band(aerops),
-                                        }
+                            if reviews:
+                                review_changes = self.storage.has_changes(icao, reviews, since)
                             
                             if fee_data:
                                 fee_changes = self.storage.has_fee_changes(icao, fee_data)
@@ -243,15 +255,34 @@ class GAFriendlinessBuilder:
                                 self._metrics.skipped_airports += 1
                                 continue
                             
-                            # If only fees changed, update fees only
+                            # If only fees changed (and no reviews), update fees only
                             if not review_changes and fee_changes:
-                                logger.info(f"Updating fees only for {icao} (reviews unchanged)")
+                                logger.info(f"Updating fees only for {icao} (no reviews or reviews unchanged)")
                                 if fee_data:
-                                    self.storage.update_fees_only(icao, fee_data)
-                                    self._metrics.successful_airports += 1
+                                    # Check if airport exists in DB, if not we need full processing
+                                    existing_stats = self.storage.get_airfield_stats(icao)
+                                    if existing_stats is not None:
+                                        self.storage.update_fees_only(icao, fee_data)
+                                        self._metrics.successful_airports += 1
+                                    else:
+                                        # New airport with fees only, do full processing
+                                        logger.info(f"Processing new airport {icao} with fees but no reviews")
+                                        self._process_airport(icao, reviews, review_source, airports_db)
+                                        self._metrics.successful_airports += 1
+                                        self._metrics.total_reviews += len(reviews)
+                                else:
+                                    # Should not happen, but handle gracefully
+                                    continue
+                                # Track progress for resume
+                                self.storage.set_last_successful_icao(icao)
                                 continue
                         
                         # Process airport (reviews changed, or full processing)
+                        # This handles: airports with reviews, airports with fees but no reviews,
+                        # and airports with AIP data but no reviews
+                        if not reviews:
+                            logger.info(f"Processing {icao} with fees/AIP data but no reviews")
+                        
                         self._process_airport(icao, reviews, review_source, airports_db)
                         
                         self._metrics.successful_airports += 1

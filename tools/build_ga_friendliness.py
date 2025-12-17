@@ -305,14 +305,27 @@ def main() -> int:
     
     if args.dry_run and source:
         # Just show what would be done
+        # Note: This may load/parse source data but will NOT call LLM
+        # For API sources, this may download data (uses cache if available)
+        logger.info("DRY RUN MODE: No LLM calls will be made")
+        
         icaos_to_process = source.get_icaos()
         if icaos:
             icaos_to_process = icaos_to_process.intersection(set(icaos))
         
         logger.info(f"Would process {len(icaos_to_process)} airports")
         
+        # Count reviews (may load data, but no LLM processing)
         total_reviews = sum(len(source.get_reviews_for_icao(i)) for i in icaos_to_process)
         logger.info(f"Total reviews: {total_reviews}")
+        
+        # Show breakdown by airport (first 10)
+        logger.info("\nBreakdown (first 10 airports):")
+        for i, icao in enumerate(sorted(icaos_to_process)[:10]):
+            count = len(source.get_reviews_for_icao(icao))
+            logger.info(f"  {icao}: {count} reviews")
+        if len(icaos_to_process) > 10:
+            logger.info(f"  ... and {len(icaos_to_process) - 10} more airports")
         
         return 0
     

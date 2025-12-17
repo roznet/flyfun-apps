@@ -530,9 +530,15 @@ class AirportJsonDirectorySource(ReviewSource):
         return self._reviews_by_icao.get(icao.upper(), [])
 
     def get_icaos(self) -> Set[str]:
-        """Get all ICAO codes in the source."""
+        """Get all ICAO codes in the source (including airports with fees but no reviews)."""
         self._load_data()
-        return set(self._reviews_by_icao.keys()) if self._reviews_by_icao else set()
+        # Include airports with reviews OR airports with fee data
+        icaos = set()
+        if self._reviews_by_icao:
+            icaos.update(self._reviews_by_icao.keys())
+        if self._fee_data:
+            icaos.update(self._fee_data.keys())
+        return icaos
 
     def get_airport_data(self, icao: str) -> Optional[Dict]:
         """Get full airport data including airfield info and aerops."""
@@ -915,9 +921,15 @@ class AirfieldDirectoryAPISource(ReviewSource, CachedDataLoader):
         return self._reviews_by_icao.get(icao.upper(), [])
     
     def get_icaos(self) -> Set[str]:
-        """Get all ICAO codes in the source."""
+        """Get all ICAO codes in the source (including airports with fees but no reviews)."""
         self._load_data()
-        return set(self._reviews_by_icao.keys()) if self._reviews_by_icao else set()
+        # Include airports with reviews OR airports with fee data
+        icaos = set()
+        if self._reviews_by_icao:
+            icaos.update(self._reviews_by_icao.keys())
+        if self._fee_data:
+            icaos.update(self._fee_data.keys())
+        return icaos
     
     def get_airport_data(self, icao: str) -> Optional[Dict]:
         """Get full airport data including airfield info and aerops."""
