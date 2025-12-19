@@ -79,3 +79,7 @@ logs
 
 tmp
 out
+
+# Apple OAuth private key
+web/server/*.p8
+web/server/.env.backup

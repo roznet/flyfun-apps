@@ -46,7 +46,17 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            // Forward the original host and protocol to the backend
+            const host = req.headers.host || 'localhost:3001';
+            const proto = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+
+            proxyReq.setHeader('X-Forwarded-Host', host);
+            proxyReq.setHeader('X-Forwarded-Proto', proto);
+          });
+        }
       }
     }
   },

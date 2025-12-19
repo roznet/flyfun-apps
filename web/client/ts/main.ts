@@ -1650,6 +1650,29 @@ class Application {
 let app: Application | null = null;
 
 async function initApp(): Promise<void> {
+  // Check authentication first
+  const { useAuthStore } = await import('./auth');
+
+  // Initialize auth check and wait for it to complete
+  await useAuthStore.getState().checkAuth();
+
+  // Now check if authenticated (state should be updated)
+  const { isAuthenticated, isLoading } = useAuthStore.getState();
+
+  // Hide loading overlay
+  const authLoading = document.getElementById('auth-loading');
+  if (authLoading) {
+    authLoading.style.display = 'none';
+  }
+
+  if (!isAuthenticated && !isLoading) {
+    console.log('Not authenticated, redirecting to login...');
+    window.location.href = '/login.html';
+    return; // Don't initialize app if not authenticated
+  }
+
+  console.log('User is authenticated, initializing app...');
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       app = new Application();
