@@ -30,7 +30,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    port: 3001,
     host: true,
     allowedHosts: ['ovh.zhaoqian.me', 'localhost', '127.0.0.1', 'flyfun.downle.eu.org'],
     hmr: {

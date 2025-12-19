@@ -38,7 +38,7 @@ from security_config import (
 )
 
 # Import API routes
-from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness, notifications
+from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness, notifications, auth
 
 from shared.tool_context import ToolContext
 
@@ -283,6 +283,9 @@ else:
 # GA Friendliness API - always mount, graceful degradation if no DB
 app.include_router(ga_friendliness.router, prefix="/api/ga", tags=["ga-friendliness"])
 
+# Authentication API - OAuth with Google and Apple
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
 # Serve static files for client assets
 client_dir = Path(__file__).parent.parent / "client"
 
@@ -322,6 +325,13 @@ if ts_dir.exists():
 async def read_root():
     """Serve the main HTML page."""
     html_file = client_dir / "index.html"
+    return FileResponse(str(html_file))
+
+
+@app.get("/login.html")
+async def login_page():
+    """Serve the login page."""
+    html_file = client_dir / "login.html"
     return FileResponse(str(html_file))
 
 @app.get("/health")
