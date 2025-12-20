@@ -1458,15 +1458,17 @@
                     <h2 class="mb-0">
                         <i class="fas fa-plane"></i> FlyFun
                     </h2>
-                    <div class="d-flex align-items-center gap-2" style="width: 200px; justify-content: flex-end;">
+                    <div class="d-flex align-items-center gap-2" style="justify-content: flex-end;">
                         <select class="form-select form-select-sm" id="persona-selector"
                             style="width: auto; min-width: 180px;" title="Select pilot persona for relevance scoring">
                             <option value="ifr_touring_sr22">IFR Touring (SR22)</option>
                             <!-- Options populated dynamically from API -->
                         </select>
-                        <button class="btn btn-outline-primary btn-sm" id="share-button" title="Copy shareable URL">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
+                        <button class="btn btn-outline-primary btn-sm" id="share-button" title="Copy shareable URL"
+                            style="min-width: 85px;"><i class="fas fa-share-alt"></i> Share</button>
+                        <button class="btn btn-outline-danger btn-sm" id="logout-button" title="Sign out"
+                            onclick="logout()" style="min-width: 85px;"><i class="fas fa-sign-out-alt"></i>
+                            Logout</button>
                     </div>
                 </div>
                 <p class="text-center text-muted mb-2">Your intelligent aviation assistant - Interactive map with
@@ -2071,6 +2073,18 @@
             </script>
 
             <!-- TypeScript Application -->
+            <!-- Logout function -->
+            <script>
+                async function logout() {
+                    try {
+                        await fetch('/api/auth/logout', { method: 'POST' });
+                    } catch (e) {
+                        console.error('Logout error:', e);
+                    }
+                    window.location.href = '/login.html';
+                }
+            </script>
+
             <!-- In development: Vite will handle /ts/main.ts automatically -->
             <!-- In production: Use /dist/main.iife.js -->
             <script type="module">

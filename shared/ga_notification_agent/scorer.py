@@ -161,20 +161,10 @@ class NotificationScorer:
         conn = sqlite3.connect(ga_meta_db_path)
         
         try:
-            # Update notification_hassle_score in ga_airfield_stats
+            # Note: notification_hassle_score column doesn't exist in current schema
+            # Data is stored in ga_aip_rule_summary table instead
+            # This update is a no-op but kept for future schema compatibility
             updated = 0
-            for icao, score in scores.items():
-                # Update existing row or skip if airport not in stats
-                cursor = conn.execute(
-                    """
-                    UPDATE ga_airfield_stats 
-                    SET notification_hassle_score = ?
-                    WHERE icao = ?
-                    """,
-                    (score.score, icao)
-                )
-                if cursor.rowcount > 0:
-                    updated += 1
             
             # Write to ga_aip_rule_summary
             from datetime import datetime, timezone

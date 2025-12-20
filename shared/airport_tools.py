@@ -545,8 +545,13 @@ def get_border_crossing_airports(ctx: ToolContext, country: Optional[str] = None
     }
 
 
-def get_airport_statistics(ctx: ToolContext, country: Optional[str] = None) -> Dict[str, Any]:
+def get_airport_statistics(
+    ctx: ToolContext,
+    country: Optional[str] = None,
+    **kwargs: Any,  # Accept _persona_id injected by ToolRunner
+) -> Dict[str, Any]:
     """Get statistical information about airports, such as counts with customs, fuel types, or procedures. Optionally filter by country."""
+    kwargs.pop("_persona_id", None)  # Extract and ignore
     airports = ctx.model.airports.by_country(country.upper()).all() if country else ctx.model.airports.all()
     total = len(airports)
 
