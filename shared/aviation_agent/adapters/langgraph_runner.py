@@ -210,8 +210,8 @@ def run_aviation_agent(
     if persona_id:
         initial_state["persona_id"] = persona_id
 
-    # Generate run ID for LangSmith tracing
-    run_id = session_id or str(uuid.uuid4())
+    # Generate run ID for LangSmith tracing (always unique per invocation)
+    run_id = str(uuid.uuid4())
 
     # Generate thread_id if not provided (checkpointing requires it)
     # This enables conversation memory even for single-turn requests
@@ -219,6 +219,7 @@ def run_aviation_agent(
 
     # Config for LangSmith observability and checkpointing
     config = {
+        "run_id": run_id,  # Explicit run_id for LangSmith feedback tracking
         "run_name": f"aviation-agent-{run_id[:8]}",
         "tags": ["aviation-agent", "sync"],
         "metadata": {
