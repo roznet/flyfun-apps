@@ -222,6 +222,7 @@ def find_airports_near_route(
     max_distance_nm: float = 50.0,
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
+    include_large_airports: bool = False,
     priority_strategy: str = "persona_optimized",
     **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
@@ -248,6 +249,9 @@ def find_airports_near_route(
     - has_hard_runway=True for paved runways
     - has_procedures=True for IFR
     - country='XX' for specific country
+
+    **By default, large commercial airports are excluded** (not suitable for GA).
+    Set include_large_airports=True only if user explicitly asks for large/commercial airports.
 
     Useful for finding fuel stops, alternates, or customs stops along a route.
     """
@@ -309,10 +313,17 @@ def find_airports_near_route(
         if item.get("enroute_distance_nm") is not None
     }
 
-    # Apply filters using FilterEngine
+    # Build effective filters (always exclude large airports unless explicitly included)
+    effective_filters: Dict[str, Any] = {}
+    if not include_large_airports:
+        effective_filters["exclude_large_airports"] = True
     if filters:
+        effective_filters.update(filters)
+
+    # Apply filters using FilterEngine
+    if effective_filters:
         filter_engine = FilterEngine(context=ctx)
-        airport_objects = filter_engine.apply(airport_objects, filters)
+        airport_objects = filter_engine.apply(airport_objects, effective_filters)
 
     # Extract persona_id from kwargs (injected by ToolRunner)
     persona_id = kwargs.pop("_persona_id", None)
@@ -869,7 +880,11 @@ def find_airports_near_location(
     max_distance_nm: float = 50.0,
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
+    include_large_airports: bool = False,
     priority_strategy: str = "persona_optimized",
+    # Optional pre-resolved center (bypasses geocoding) - used by REST API
+    center_lat: Optional[float] = None,
+    center_lon: Optional[float] = None,
     **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
@@ -884,18 +899,29 @@ def find_airports_near_location(
     - "airports near 48.8584, 2.2945" → use this tool with location_query="48.8584, 2.2945"
 
     Process:
-    1) Geocodes the location via Geoapify to get coordinates
+    1) Geocodes the location via Geoapify to get coordinates (or uses pre-resolved center if provided)
     2) Computes distance from each airport to that point and filters by max_distance_nm
     3) Applies optional filters (fuel, customs, runway, etc.) and priority sorting
 
+    **By default, large commercial airports are excluded** (not suitable for GA).
+    Set include_large_airports=True only if user explicitly asks for large/commercial airports.
+
     **DO NOT use this tool if user provides ICAO codes** - use find_airports_near_route instead for route-based searches.
     """
-    geocode = _geoapify_geocode(location_query)
-    if not geocode:
-        return {
-            "found": False,
-            "pretty": f"Could not geocode '{location_query}'. Ensure GEOAPIFY_API_KEY is set and the query is valid."
+    # Use pre-resolved center if provided, otherwise geocode
+    if center_lat is not None and center_lon is not None:
+        geocode = {
+            "lat": center_lat,
+            "lon": center_lon,
+            "formatted": location_query or "Center"
         }
+    else:
+        geocode = _geoapify_geocode(location_query)
+        if not geocode:
+            return {
+                "found": False,
+                "pretty": f"Could not geocode '{location_query}'. Ensure GEOAPIFY_API_KEY is set and the query is valid."
+            }
 
     center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
 
@@ -913,10 +939,17 @@ def find_airports_near_location(
             candidate_airports.append(airport)
             point_distances[airport.ident] = float(distance_nm)
 
-    # Apply optional filters using FilterEngine
+    # Build effective filters (always exclude large airports unless explicitly included)
+    effective_filters: Dict[str, Any] = {}
+    if not include_large_airports:
+        effective_filters["exclude_large_airports"] = True
     if filters:
+        effective_filters.update(filters)
+
+    # Apply filters using FilterEngine
+    if effective_filters:
         filter_engine = FilterEngine(context=ctx)
-        candidate_airports = filter_engine.apply(candidate_airports, filters)
+        candidate_airports = filter_engine.apply(candidate_airports, effective_filters)
 
     # Extract persona_id from kwargs (injected by ToolRunner)
     persona_id = kwargs.pop("_persona_id", None)
@@ -1144,6 +1177,11 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                             "type": "object",
                             "description": "Airport filters (fuel, customs, runway length, etc.).",
                         },
+                        "include_large_airports": {
+                            "type": "boolean",
+                            "description": "Include large commercial airports (e.g., Heathrow, CDG, JFK). Default is False - large airports are excluded as they are not suitable for GA. Set to True ONLY if user explicitly asks for large/commercial/major airports.",
+                            "default": False,
+                        },
                         "priority_strategy": {
                             "type": "string",
                             "description": "Priority sorting strategy (e.g., persona_optimized).",
@@ -1185,6 +1223,11 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         "filters": {
                             "type": "object",
                             "description": "IMPORTANT: Use filters object to filter airports by characteristics mentioned in user's request. Examples: {'has_avgas': True} for AVGAS fuel, {'point_of_entry': True} for customs, {'has_hard_runway': True} for paved runways, {'has_procedures': True} for IFR, {'country': 'FR'} for country. ALWAYS include filters when user specifies characteristics like fuel type, customs, runway type, etc.",
+                        },
+                        "include_large_airports": {
+                            "type": "boolean",
+                            "description": "Include large commercial airports (e.g., Heathrow, CDG, JFK). Default is False - large airports are excluded as they are not suitable for GA. Set to True ONLY if user explicitly asks for large/commercial/major airports.",
+                            "default": False,
                         },
                         "priority_strategy": {
                             "type": "string",

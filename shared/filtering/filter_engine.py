@@ -13,6 +13,7 @@ from .filters import (
     HasAipDataFilter,
     HasHardRunwayFilter,
     PointOfEntryFilter,
+    ExcludeLargeAirportsFilter,
     MaxRunwayLengthFilter,
     MinRunwayLengthFilter,
     HasAvgasFilter,
@@ -60,6 +61,7 @@ FilterRegistry.register(HasProceduresFilter())
 FilterRegistry.register(HasAipDataFilter())
 FilterRegistry.register(HasHardRunwayFilter())
 FilterRegistry.register(PointOfEntryFilter())
+FilterRegistry.register(ExcludeLargeAirportsFilter())
 FilterRegistry.register(MaxRunwayLengthFilter())
 FilterRegistry.register(MinRunwayLengthFilter())
 FilterRegistry.register(HasAvgasFilter())

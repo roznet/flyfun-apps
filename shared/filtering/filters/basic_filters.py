@@ -93,3 +93,21 @@ class PointOfEntryFilter(Filter):
             return True
         is_poe = bool(getattr(airport, "point_of_entry", False))
         return is_poe == bool(value)
+
+
+class ExcludeLargeAirportsFilter(Filter):
+    """Filter to exclude large airports (typically commercial hubs not suitable for GA)."""
+    name = "exclude_large_airports"
+    description = "Exclude large commercial airports (boolean, default True for GA searches)"
+
+    def apply(
+        self,
+        airport: Airport,
+        value: Any,
+        context: Optional["ToolContext"] = None,
+    ) -> bool:
+        if value is None or not value:
+            return True  # Don't filter if not set or False
+        airport_type = getattr(airport, "type", "") or ""
+        # Exclude if type is "large_airport"
+        return airport_type.lower() != "large_airport"

@@ -359,91 +359,23 @@ async def locate_airports(
         except (ValueError, TypeError):
             center_lon_float = None
 
-    # If center provided, bypass geocoding and compute directly
-    if center_lat_float is not None and center_lon_float is not None:
-        # Prepare center navpoint
-        center = NavPoint(latitude=center_lat_float, longitude=center_lon_float, name=q or "Center")
-        # Compute distances and filter
-        filtered_airports = []
-        for a in model.airports:
-            ap = getattr(a, "navpoint", None)
-            if not ap:
-                continue
-            try:
-                _, d_nm = ap.haversine_distance(center)
-            except Exception:
-                continue
-            if d_nm > float(radius_nm):
-                continue
-            # Apply filters (same semantics as route-search)
-            if country and a.iso_country != country:
-                continue
-            if has_procedures is not None and bool(a.procedures) != has_procedures:
-                continue
-            if has_aip_data is not None and bool(a.aip_entries) != has_aip_data:
-                continue
-            if has_hard_runway is not None and getattr(a, "has_hard_runway", False) != has_hard_runway:
-                continue
-            if point_of_entry is not None and getattr(a, "point_of_entry", False) != point_of_entry:
-                continue
-            filtered_airports.append((a, float(d_nm)))
+    # Validate: need either query or pre-resolved center
+    if not q and (center_lat_float is None or center_lon_float is None):
+        raise HTTPException(status_code=400, detail="q (query) is required when center_lat/center_lon are not provided")
 
-        # Sort by distance
-        filtered_airports.sort(key=lambda x: x[1])
-        
-        # Get GA data if requested and service is available
-        ga_data: Dict[str, GAFriendlySummary] = {}
-        if include_ga:
-            ga_service = get_ga_service()
-            if ga_service and ga_service.enabled:
-                icaos = [a.ident for a, _ in filtered_airports]
-                ga_data = ga_service.get_summaries_batch(icaos)
+    # Build a lightweight tool context with the existing in-memory model
+    ctx = ToolContext(model=model)
 
-        # Build response
-        airports_resp = []
-        for a, d_nm in filtered_airports:
-            ga_summary = ga_data.get(a.ident)
-            summary = AirportSummary.from_airport(a, ga_summary).model_dump()
-            summary["distance_nm"] = round(d_nm, 2)
-            airports_resp.append(summary)
-
-        pretty = (
-            f"Found {len(airports_resp)} airports within {radius_nm}nm of {q or 'center'}."
-            if airports_resp else
-            f"No airports within {radius_nm}nm."
-        )
-        result = {
-            "found": True,
-            "count": len(airports_resp),
-            "center": {"lat": center_lat, "lon": center_lon, "label": q or "Center"},
-            "airports": airports_resp[:20],
-            "pretty": pretty,
-            "filter_profile": {
-                "location_query": q or "",
-                "radius_nm": radius_nm,
-                **({ "country": country } if country else {}),
-                **({ "has_procedures": True } if has_procedures else {}),
-                **({ "has_aip_data": True } if has_aip_data else {}),
-                **({ "has_hard_runway": True } if has_hard_runway else {}),
-                **({ "point_of_entry": True } if point_of_entry else {}),
-            },
-            "visualization": {
-                "type": "point_with_markers",
-                "point": {"label": q or "Center", "lat": center_lat, "lon": center_lon},
-                "markers": airports_resp
-            }
-        }
-    else:
-        if not q:
-            raise HTTPException(status_code=400, detail="q (query) is required when center_lat/center_lon are not provided")
-        # Build a lightweight tool context with the existing in-memory model
-        ctx = ToolContext(model=model)
-        result = find_airports_near_location(
-            ctx,
-            location_query=q,
-            max_distance_nm=radius_nm,
-            filters=filters or None
-        )
+    # Call shared tool function (handles both geocoding and pre-resolved center)
+    result = find_airports_near_location(
+        ctx,
+        location_query=q or "Center",
+        max_distance_nm=radius_nm,
+        filters=filters or None,
+        include_large_airports=False,  # Always exclude large airports for GA searches
+        center_lat=center_lat_float,
+        center_lon=center_lon_float,
+    )
 
     # Pass through relevant fields for client
     return {

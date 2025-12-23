@@ -9,6 +9,7 @@ from .basic_filters import (
     HasAipDataFilter,
     HasHardRunwayFilter,
     PointOfEntryFilter,
+    ExcludeLargeAirportsFilter,
 )
 from .runway_filters import (
     MaxRunwayLengthFilter,
@@ -33,6 +34,7 @@ __all__ = [
     "HasAipDataFilter",
     "HasHardRunwayFilter",
     "PointOfEntryFilter",
+    "ExcludeLargeAirportsFilter",
     # Runway filters
     "MaxRunwayLengthFilter",
     "MinRunwayLengthFilter",
