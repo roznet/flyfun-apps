@@ -21,6 +21,9 @@ export class ChatbotManager {
   private isProcessing: boolean = false;
   private llmIntegration: LLMIntegration;
 
+  // Feedback tracking
+  private currentRunId: string | null = null;
+
   constructor(llmIntegration: LLMIntegration) {
     this.llmIntegration = llmIntegration;
     this.initializeUI();
@@ -192,6 +195,7 @@ export class ChatbotManager {
     let visualizationApplied = false;
     let filterProfileApplied = false;
     let showRulesReceived = false;
+    let feedbackInsertPoint: HTMLElement | null = null; // Track where to insert feedback buttons
 
     // Dispatch event to reset rules panel at start of new query
     // It will be updated if RAG is used, otherwise stays hidden/reset
@@ -337,11 +341,20 @@ export class ChatbotManager {
               if (eventData.visualization) {
                 visualization = eventData.visualization;
                 console.log('ChatbotManager: Received ui_payload with visualization', visualization);
+                // Create a wrapper container for visualization indicator and feedback buttons
+                const vizWrapper = document.createElement('div');
+                vizWrapper.className = 'message-visualization-wrapper';
+                
                 // Add visualization indicator
                 const vizDiv = document.createElement('div');
                 vizDiv.className = 'message-visualization-indicator';
                 vizDiv.innerHTML = '<small><i class="fas fa-map-marked-alt"></i> Results shown on map</small>';
-                messageDiv.appendChild(vizDiv);
+                vizWrapper.appendChild(vizDiv);
+                
+                // Set insert point for feedback buttons inside the wrapper
+                feedbackInsertPoint = vizDiv;
+                
+                messageDiv.appendChild(vizWrapper);
 
                 // Apply visualization immediately (don't wait for 'done' event)
                 if (!visualizationApplied) {
@@ -404,6 +417,12 @@ export class ChatbotManager {
               this.isProcessing = false;
               this.updateSendButton(false);
 
+              // Capture run_id for feedback
+              if (eventData.run_id) {
+                this.currentRunId = eventData.run_id;
+                console.log('ChatbotManager: Captured run_id for feedback', this.currentRunId);
+              }
+
               if (!loadingRemoved) {
                 this.removeLoadingIndicator(loadingId);
                 if (this.chatMessages) {
@@ -456,6 +475,19 @@ export class ChatbotManager {
               if (visualization && visualization.filter_profile && !filterProfileApplied) {
                 this.llmIntegration.applyFilterProfile(visualization.filter_profile);
                 filterProfileApplied = true;
+              }
+
+              // Add feedback buttons if we have a run_id
+              // Insert them in the same wrapper as the visualization indicator (if present) or at the end
+              if (this.currentRunId) {
+                if (feedbackInsertPoint && feedbackInsertPoint.parentNode) {
+                  // Insert feedback buttons in the same wrapper container as the visualization indicator
+                  const feedbackContainer = this.createFeedbackButtons(this.currentRunId);
+                  feedbackInsertPoint.parentNode.appendChild(feedbackContainer);
+                } else {
+                  // Fallback: append at the end if no visualization indicator
+                  this.renderFeedbackButtons(messageDiv, this.currentRunId);
+                }
               }
 
               // Break out of inner loop
@@ -864,6 +896,145 @@ export class ChatbotManager {
     this.chatInput.style.height = Math.min(this.chatInput.scrollHeight, 150) + 'px';
     // Optionally auto-send
     this.sendMessage();
+  }
+
+  /**
+   * Create feedback buttons container (thumbs up/down)
+   * Returns the container element without appending it
+   */
+  private createFeedbackButtons(runId: string): HTMLElement {
+    const feedbackContainer = document.createElement('div');
+    feedbackContainer.className = 'feedback-container';
+
+    // Thumbs buttons
+    const thumbsContainer = document.createElement('div');
+    thumbsContainer.className = 'feedback-thumbs';
+
+    const thumbsUpBtn = document.createElement('button');
+    thumbsUpBtn.className = 'feedback-btn feedback-up';
+    thumbsUpBtn.innerHTML = '<i class="fas fa-thumbs-up"></i>';
+    thumbsUpBtn.title = 'Good response';
+    thumbsUpBtn.addEventListener('click', () => this.handleThumbsUp(runId, feedbackContainer));
+
+    const thumbsDownBtn = document.createElement('button');
+    thumbsDownBtn.className = 'feedback-btn feedback-down';
+    thumbsDownBtn.innerHTML = '<i class="fas fa-thumbs-down"></i>';
+    thumbsDownBtn.title = 'Poor response';
+    thumbsDownBtn.addEventListener('click', () => this.handleThumbsDown(runId, feedbackContainer));
+
+    thumbsContainer.appendChild(thumbsUpBtn);
+    thumbsContainer.appendChild(thumbsDownBtn);
+    feedbackContainer.appendChild(thumbsContainer);
+    return feedbackContainer;
+  }
+
+  /**
+   * Render feedback buttons (thumbs up/down) - appends to messageDiv
+   */
+  private renderFeedbackButtons(messageDiv: HTMLElement, runId: string): void {
+    const feedbackContainer = this.createFeedbackButtons(runId);
+    messageDiv.appendChild(feedbackContainer);
+  }
+
+  /**
+   * Handle thumbs up - submit immediately
+   */
+  private async handleThumbsUp(runId: string, container: HTMLElement): Promise<void> {
+    await this.submitFeedback(runId, 1, null);
+    this.showFeedbackThanks(container);
+  }
+
+  /**
+   * Handle thumbs down - show comment input
+   */
+  private handleThumbsDown(runId: string, container: HTMLElement): void {
+    // Replace thumbs with comment input
+    container.innerHTML = '';
+
+    const inputContainer = document.createElement('div');
+    inputContainer.className = 'feedback-input-container';
+
+    const label = document.createElement('label');
+    label.textContent = 'What went wrong?';
+    label.className = 'feedback-label';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'feedback-textarea';
+    textarea.placeholder = 'The answer was incorrect because...';
+    textarea.rows = 2;
+
+    const buttonsDiv = document.createElement('div');
+    buttonsDiv.className = 'feedback-actions';
+
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'btn btn-sm btn-outline-secondary';
+    skipBtn.textContent = 'Skip';
+    skipBtn.addEventListener('click', async () => {
+      await this.submitFeedback(runId, 0, null);
+      this.showFeedbackThanks(container);
+    });
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-sm btn-primary';
+    submitBtn.textContent = 'Submit';
+    submitBtn.addEventListener('click', async () => {
+      const comment = textarea.value.trim() || null;
+      await this.submitFeedback(runId, 0, comment);
+      this.showFeedbackThanks(container);
+    });
+
+    buttonsDiv.appendChild(skipBtn);
+    buttonsDiv.appendChild(submitBtn);
+
+    inputContainer.appendChild(label);
+    inputContainer.appendChild(textarea);
+    inputContainer.appendChild(buttonsDiv);
+    container.appendChild(inputContainer);
+
+    // Focus the textarea
+    textarea.focus();
+  }
+
+  /**
+   * Submit feedback to the API
+   */
+  private async submitFeedback(runId: string, score: number, comment: string | null): Promise<void> {
+    try {
+      const response = await fetch('/api/aviation-agent/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          run_id: runId,
+          score: score,
+          comment: comment
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to submit feedback:', response.status);
+      } else {
+        console.log('Feedback submitted successfully', { runId, score, hasComment: !!comment });
+      }
+    } catch (error) {
+      console.error('Error submitting feedback:', error);
+    }
+  }
+
+  /**
+   * Show thank you message after feedback
+   */
+  private showFeedbackThanks(container: HTMLElement): void {
+    container.innerHTML = '';
+    const thanks = document.createElement('div');
+    thanks.className = 'feedback-thanks';
+    thanks.innerHTML = '<i class="fas fa-check"></i> Thanks for your feedback!';
+    container.appendChild(thanks);
+
+    // Fade out after 3 seconds
+    setTimeout(() => {
+      thanks.style.opacity = '0';
+      setTimeout(() => container.remove(), 500);
+    }, 3000);
   }
 
   /**

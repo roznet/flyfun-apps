@@ -30,7 +30,7 @@ class GAFriendlinessSettings(BaseSettings):
         default=None, description="Path to euro_aip.sqlite"
     )
     ga_meta_db_path: Path = Field(
-        default=Path("ga_meta.sqlite"), description="Path to ga_meta.sqlite (output)"
+        default=Path("data/ga_persona.db"), description="Path to GA persona database (output)"
     )
     ontology_json_path: Optional[Path] = Field(
         default=None, description="Path to ontology.json"

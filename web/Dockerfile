@@ -36,6 +36,12 @@ COPY --from=client-builder /build/dist /app/web/client/dist
 COPY web/client/css/ /app/web/client/css/
 COPY web/client/index.html /app/web/client/index.html
 
+# Copy ga_persona.db into container (optional - will be in writable location)
+# This allows SQLite to work properly even if /app/data is mounted read-only
+# Create directory first, then copy if file exists
+RUN mkdir -p /app/data_builtin
+COPY data/ga_persona.db /app/data_builtin/ga_persona.db
+
 # Set correct ownership
 RUN chown -R flyfun:flyfun /app
 

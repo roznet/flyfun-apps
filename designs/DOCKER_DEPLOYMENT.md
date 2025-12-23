@@ -38,7 +38,7 @@ chmod 777 out logs out/chromadb_data
 - `data/rules.json` - Aviation rules JSON (generate from Excel if needed)
 
 **Optional:**
-- `out/ga_meta.sqlite` - GA friendliness database (build if you have export data)
+- `data/ga_persona.db` - GA friendliness persona database (build if you have export data)
 
 ### 4. Configure Environment
 
@@ -183,7 +183,7 @@ curl http://localhost:8000/api/airports/EGLL
 
 **Note:** The `data/` directory is mounted as a volume, so file changes are immediately available in containers.
 
-### Update ga_meta.sqlite
+### Update GA persona database
 
 **Option 1: Build from export data (recommended)**
 
@@ -191,7 +191,7 @@ curl http://localhost:8000/api/airports/EGLL
 # If you have airfield.directory export JSON
 docker exec -it flyfun-web-server python /app/tools/build_ga_friendliness.py \
     --export /path/to/export.json \
-    --output /app/out/ga_meta.sqlite
+    --output /app/data/ga_persona.db
 ```
 
 **Option 2: Replace existing file**
@@ -201,13 +201,13 @@ docker exec -it flyfun-web-server python /app/tools/build_ga_friendliness.py \
 docker-compose stop web-server
 
 # Replace file on host
-cp /path/to/new/ga_meta.sqlite out/ga_meta.sqlite
+cp /path/to/new/ga_persona.db data/ga_persona.db
 
 # Restart
 docker-compose start web-server
 ```
 
-**Note:** The file is in `out/ga_meta.sqlite` on the host, mounted into containers.
+**Note:** The file is in `data/ga_persona.db` on the host, mounted into containers.
 
 ### Rebuild RAG (Vector Database)
 
@@ -479,8 +479,8 @@ curl http://localhost:8000/health
 
 ```
 .
-├── data/              # Read-only: airports.db, rules.json
-├── out/               # Writable: ga_meta.sqlite, chromadb_data/
+├── data/              # Read-only: airports.db, rules.json, ga_persona.db
+├── out/               # Writable: chromadb_data/
 ├── logs/              # Writable: application logs
 ├── .env               # Environment configuration
 └── docker-compose.yml # Service orchestration

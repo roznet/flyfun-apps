@@ -1,7 +1,7 @@
 """
 Main pipeline orchestrator for building GA friendliness database.
 
-Coordinates all components to build ga_meta.sqlite from review sources.
+Coordinates all components to build ga_persona.db from review sources.
 """
 
 import logging

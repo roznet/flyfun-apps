@@ -105,7 +105,7 @@ def get_safe_ga_meta_db_path() -> str | None:
     Uses centralized config function and adds production safety validation.
     
     Returns:
-        Path to ga_meta.sqlite or None if not configured/available
+        Path to GA persona database or None if not configured/available
     """
     from shared.aviation_agent.config import get_ga_meta_db_path
     
@@ -115,7 +115,7 @@ def get_safe_ga_meta_db_path() -> str | None:
         return None
     
     # Validate and fix path using shared logic
-    db_path = _validate_and_fix_path(db_path, "ga_meta.sqlite")
+    db_path = _validate_and_fix_path(db_path, "ga_persona.db")
     
     # Verify file exists
     if not os.path.exists(db_path):

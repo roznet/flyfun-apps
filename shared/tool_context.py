@@ -54,7 +54,7 @@ class ToolContextSettings(BaseSettings):
     ga_meta_db: Optional[Path] = Field(
         default=None,
         description="Path to GA meta database (optional)",
-        alias="GA_META_DB",
+        alias="GA_PERSONA_DB",
     )
 
 

@@ -30,19 +30,22 @@ services:
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
       - GA_NOTIFICATIONS_DB=/app/data/ga_notifications.db
-      - GA_META_DB=/app/out/ga_meta.sqlite
+      - GA_PERSONA_DB=/app/data_builtin/ga_persona.db
       # Vector DB for RAG (AviationAgentSettings)
       # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
       - VECTOR_DB_URL=http://chromadb:8000
       # Local path fallback (used if VECTOR_DB_URL is not set)
       - VECTOR_DB_PATH=/app/out/rules_vector_db
+      - LOG_DIR=/app/logs
+      - CONVERSATION_LOG_DIR=/app/logs/conversations
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
-      # Output files (writable) - includes ga_meta.sqlite and rules_vector_db
+      # Output files (writable) - includes rules_vector_db
       - ${OUTPUT_DIR:-./out}:/app/out:rw
       # Logs (writable)
-      - ${LOGS_DIR:-./logs}:/app/logs:rw
+      - ${LOG_DIR:-./logs}:/app/logs:rw
+      - ${CONVERSATION_LOG_DIR:-./logs/conversations}:/app/logs/conversations:rw
       # Tools directory (for building vector DB and other utilities)
       - ${TOOLS_DIR:-./tools}:/app/tools:ro
       # Security config (optional override)

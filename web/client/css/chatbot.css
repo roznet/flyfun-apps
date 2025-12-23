@@ -362,14 +362,30 @@
     font-size: 12px;
 }
 
-.message-visualization-indicator {
+/* Wrapper for visualization indicator and feedback buttons */
+.message-visualization-wrapper {
     margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.message-visualization-indicator {
     padding: 6px 12px;
     background: #e3f2fd;
     color: #1976d2;
     border-radius: 6px;
     font-size: 12px;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+/* Feedback container positioned next to visualization indicator */
+.message-visualization-wrapper > .feedback-container {
+    margin-top: 0;
+    padding: 0;
 }
 
 /* Loading Indicator */
@@ -674,4 +690,96 @@
   color: #424242;
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* Feedback UI Styles */
+.feedback-container {
+  margin-top: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.feedback-thumbs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.feedback-btn {
+  background: transparent;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: #6c757d;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.feedback-btn:hover {
+  transform: scale(1.1);
+}
+
+.feedback-btn.feedback-up:hover {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #28a745;
+}
+
+.feedback-btn.feedback-down:hover {
+  background: #f8d7da;
+  border-color: #dc3545;
+  color: #dc3545;
+}
+
+.feedback-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.feedback-textarea {
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: none;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.feedback-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.feedback-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.feedback-thanks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #28a745;
+  font-size: 13px;
+  transition: opacity 0.5s ease;
+}
+
+.feedback-thanks i {
+  font-size: 14px;
 }

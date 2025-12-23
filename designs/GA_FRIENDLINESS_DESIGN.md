@@ -20,7 +20,7 @@ This is a **conceptual design document**. For detailed implementation architectu
 
 1. **Separation of concerns**
    - `euro_aip` is never mutated by this project.
-   - All GA friendliness information lives in a separate enrichment database `ga_meta.sqlite`.
+   - All GA friendliness information lives in a separate enrichment database `ga_persona.db`.
    - Tools and services can function with *only* `euro_aip`; GA data is an optional add-on.
 
 2. **Transparency over magic**
@@ -38,16 +38,16 @@ This is a **conceptual design document**. For detailed implementation architectu
    - Personas are defined in data (JSON/YAML), not hard-coded.
 
 4. **Offline complexity, simple runtime**
-   - Heavy work (LLM/NLP, aggregation, scoring) runs offline when building `ga_meta.sqlite`.
+   - Heavy work (LLM/NLP, aggregation, scoring) runs offline when building `ga_persona.db`.
    - Runtime services (web API, MCP tools, iOS apps) simply:
-     - ATTACH `euro_aip.sqlite` and `ga_meta.sqlite`,
+     - ATTACH `euro_aip.sqlite` and `ga_persona.db`,
      - read base feature scores from `ga_airfield_stats`,
      - compute persona scores dynamically from base features.
 
 5. **Versioned and rebuildable**
    - The whole enrichment DB is treated as a **build artifact**:
-     - Input: `euro_aip`, snapshot of airfield.directory data, ontology, persona configurations.
-     - Output: `ga_meta.sqlite` with clear version metadata.
+   - Input: `euro_aip`, snapshot of airfield.directory data, ontology, persona configurations.
+   - Output: `ga_persona.db` with clear version metadata.
    - It should be safe to throw away and regenerate when scoring logic changes.
 
 ---
@@ -69,7 +69,7 @@ This is a **conceptual design document**. For detailed implementation architectu
 
 ### 2.2 Enrichment Layer (This Design)
 
-- **Database**: `ga_meta.sqlite`
+- **Database**: `ga_persona.db`
   - Contains:
     - Aggregated per-airport GA stats (base feature scores).
     - Parsed review tags.
@@ -107,11 +107,11 @@ This is a **conceptual design document**. For detailed implementation architectu
   - Display GA friendliness scores and summaries.
   - Show top GA-friendly options along planned flight.
 
-All runtime consumers treat `ga_meta.sqlite` and config files as **read-only** data.
+All runtime consumers treat `ga_persona.db` and config files as **read-only** data.
 
 ---
 
-## 3. Data Model: `ga_meta.sqlite`
+## 3. Data Model: `ga_persona.db`
 
 This section defines the schema and relationships for the GA friendliness enrichment database.
 
@@ -126,7 +126,7 @@ Assumptions about `euro_aip`:
 
 **Key rule:**
 
-- `ga_meta.sqlite` never stores `airport.id` (internal numeric ID) from `euro_aip`.
+- `ga_persona.db` never stores `airport.id` (internal numeric ID) from `euro_aip`.
 - Link is done via **external keys**:
   - primarily `icao` (TEXT).
   - If needed, extended with `country`, etc. for disambiguation.
@@ -135,7 +135,7 @@ Assumptions about `euro_aip`:
 
 ```sql
 ATTACH DATABASE 'euro_aip.sqlite' AS aip;
-ATTACH DATABASE 'ga_meta.sqlite'  AS ga;
+ATTACH DATABASE 'ga_persona.db'   AS ga;
 
 SELECT
   aip.airport.icao,
@@ -337,7 +337,7 @@ Example keys:
   - `ga_review_ner_tags(icao, aspect)` - for aggregation performance
   - `ga_review_ner_tags(icao, review_id)` - for incremental update change detection
 
-**Geometry (R-tree)** is *not* in `ga_meta.sqlite`. Geometry lives in `euro_aip`. Route-based queries rely on `euro_aip` for spatial filtering and then join to `ga_meta` via `icao`.
+**Geometry (R-tree)** is *not* in `ga_persona.db`. Geometry lives in `euro_aip`. Route-based queries rely on `euro_aip` for spatial filtering and then join to `ga_meta` via `icao`.
 
 ### 3.4 Non-ICAO Fields (Open Topic)
 
@@ -360,7 +360,7 @@ This section describes how free-text PIREPs / reviews from airfield.directory ar
   - Stable structured tags (`ga_review_ner_tags`).
   - Short airport-level summaries & tags (`ga_review_summary`).
 - Use a **fixed ontology** to avoid inconsistent or “vibe-only” interpretations.
-- Ensure everything runs **offline**; runtime services only read from `ga_meta.sqlite`.
+- Ensure everything runs **offline**; runtime services only read from `ga_persona.db`.
 
 ### 4.2 Inputs
 

@@ -3,11 +3,11 @@
 CLI tool for building GA friendliness database.
 
 Usage:
-    python tools/build_ga_friendliness.py --export path/to/export.json --output ga_meta.sqlite
+    python tools/build_ga_friendliness.py --export path/to/export.json --output data/ga_persona.db
     
 Options:
     --export, -e          Path to airfield.directory export JSON
-    --output, -o          Output database path (default: ga_meta.sqlite)
+    --output, -o          Output database path (default: data/ga_persona.db)
     --incremental, -i     Only process changed airports
     --since               Only process reviews after this date (ISO format)
     --icaos               Comma-separated list of specific ICAOs
@@ -98,8 +98,8 @@ def parse_args() -> argparse.Namespace:
     output_group.add_argument(
         "--output", "-o",
         type=Path,
-        default=Path("ga_meta.sqlite"),
-        help="Output database path (default: ga_meta.sqlite)",
+        default=Path("data/ga_persona.db"),
+        help="Output database path (default: data/ga_persona.db)",
     )
     output_group.add_argument(
         "--cache-dir",
@@ -457,7 +457,7 @@ def main() -> int:
                     return_parsed=True,
                 )
                 
-                # Write to ga_meta.sqlite (including detailed rules)
+                # Write to GA persona database (including detailed rules)
                 updated = notification_scorer.write_to_ga_meta(
                     args.output,
                     scores,

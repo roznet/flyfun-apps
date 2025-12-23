@@ -23,4 +23,5 @@ RUN mkdir -p /app/data /app/out /app/logs
 # Set common environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV PROJECT_ROOT=/app
 

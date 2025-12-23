@@ -109,7 +109,7 @@ async def lifespan(app: FastMCP):
     if _tool_context.ga_friendliness_service:
         logger.info(f"GAFriendlinessService initialized")
     else:
-        logger.info("GAFriendlinessService not configured (GA_META_DB not set)")
+        logger.info("GAFriendlinessService not configured (GA_PERSONA_DB not set)")
 
     try:
         yield

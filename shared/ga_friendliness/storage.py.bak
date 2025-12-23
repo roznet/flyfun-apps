@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional, Set
 from .database import get_connection
 from .exceptions import StorageError
 from .interfaces import StorageInterface
+
+# Thread-local storage for database connections (for thread-safe read-only access)
+_thread_local = threading.local()
 from .models import (
     AirportStats,
     NotificationRule,
@@ -81,17 +84,30 @@ class GAMetaStorage(StorageInterface):
         """
         self.db_path = db_path
         self.readonly = readonly
-        # get_connection() uses check_same_thread=False for read-only mode,
-        # so a single shared connection is safe across threads for reads
-        self.conn = get_connection(db_path, readonly=readonly)
+        # For read-only mode, use thread-local connections for thread safety
+        # For write mode, use a single connection (write operations are serialized via lock)
+        if readonly:
+            self.conn = None  # Will be created per-thread via _get_connection()
+        else:
+            self.conn = get_connection(db_path, readonly=readonly)
         self._lock = threading.Lock()
         self._in_transaction = False
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection (same connection for all operations)."""
-        if self.conn is None:
-            raise StorageError("Database connection has been closed")
-        return self.conn
+        """
+        Get database connection, using thread-local storage for read-only mode.
+        
+        For read-only mode: creates a connection per thread (thread-safe)
+        For write mode: returns the single shared connection (serialized via lock)
+        """
+        if self.readonly:
+            # Use thread-local storage for read-only connections
+            if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
+                _thread_local.connection = get_connection(self.db_path, readonly=True)
+            return _thread_local.connection
+        else:
+            # Write mode: use shared connection (protected by lock)
+            return self.conn
     
     def _check_readonly(self) -> None:
         """Raise error if attempting write operation in readonly mode."""
@@ -116,9 +132,19 @@ class GAMetaStorage(StorageInterface):
 
     def close(self) -> None:
         """Close database connection and cleanup resources."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        if self.readonly:
+            # For read-only mode, clear thread-local connection
+            if hasattr(_thread_local, 'connection'):
+                try:
+                    _thread_local.connection.close()
+                except:
+                    pass
+                _thread_local.connection = None
+        else:
+            # For write mode, close shared connection
+            if self.conn:
+                self.conn.close()
+                self.conn = None
 
     # --- Airport Stats Operations ---
 
@@ -173,15 +199,14 @@ class GAMetaStorage(StorageInterface):
                     stats.scoring_version,
                 ))
                 if not self._in_transaction:
-                    conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write airfield stats: {e}")
 
     def get_airfield_stats(self, icao: str) -> Optional[AirportStats]:
         """Read stats for a single airport."""
         try:
-            conn = self._get_connection()
-            cursor = conn.execute(
+            cursor = self.conn.execute(
                 "SELECT * FROM ga_airfield_stats WHERE icao = ?", (icao,)
             )
             row = cursor.fetchone()
@@ -224,8 +249,7 @@ class GAMetaStorage(StorageInterface):
     def get_all_icaos(self) -> List[str]:
         """Get list of all ICAOs in ga_airfield_stats."""
         try:
-            conn = self._get_connection()
-            cursor = conn.execute(
+            cursor = self.conn.execute(
                 "SELECT icao FROM ga_airfield_stats ORDER BY icao"
             )
             return [row[0] for row in cursor.fetchall()]
@@ -242,16 +266,14 @@ class GAMetaStorage(StorageInterface):
                 now = datetime.now(timezone.utc).isoformat()
 
                 # Delete existing tags for this icao
-                conn = self._get_connection()
-                conn.execute(
+                self.conn.execute(
                     "DELETE FROM ga_review_ner_tags WHERE icao = ?", (icao,)
                 )
 
                 # Insert new tags
                 for extraction in tags:
                     for aspect_label in extraction.aspects:
-                        conn = self._get_connection()
-                conn.execute("""
+                        self.conn.execute("""
                             INSERT INTO ga_review_ner_tags 
                             (icao, review_id, aspect, label, confidence, timestamp, created_utc)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -266,8 +288,7 @@ class GAMetaStorage(StorageInterface):
                         ))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write review tags: {e}")
 
@@ -277,20 +298,19 @@ class GAMetaStorage(StorageInterface):
         """Write tags for multiple airports in a single transaction."""
         self._check_readonly()
         with self._lock:
-            conn = self._get_connection()
             try:
                 now = datetime.now(timezone.utc).isoformat()
 
                 for icao, extractions in tags_by_icao.items():
                     # Delete existing tags for this icao
-                    conn.execute(
+                    self.conn.execute(
                         "DELETE FROM ga_review_ner_tags WHERE icao = ?", (icao,)
                     )
 
                     # Insert new tags
                     for extraction in extractions:
                         for aspect_label in extraction.aspects:
-                            conn.execute("""
+                            self.conn.execute("""
                                 INSERT INTO ga_review_ner_tags 
                                 (icao, review_id, aspect, label, confidence, timestamp, created_utc)
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -305,16 +325,14 @@ class GAMetaStorage(StorageInterface):
                             ))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write review tags batch: {e}")
 
     def get_processed_review_ids(self, icao: str) -> Set[str]:
         """Get set of review_ids already processed for this airport."""
         try:
-            conn = self._get_connection()
-            cursor = conn.execute(
+            cursor = self.conn.execute(
                 "SELECT DISTINCT review_id FROM ga_review_ner_tags WHERE icao = ? AND review_id IS NOT NULL",
                 (icao,)
             )
@@ -332,16 +350,14 @@ class GAMetaStorage(StorageInterface):
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
-                conn = self._get_connection()
-                conn.execute("""
+                self.conn.execute("""
                     INSERT OR REPLACE INTO ga_review_summary 
                     (icao, summary_text, tags_json, last_updated_utc)
                     VALUES (?, ?, ?, ?)
                 """, (icao, summary_text, json.dumps(tags_json), now))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write review summary: {e}")
 
@@ -352,23 +368,20 @@ class GAMetaStorage(StorageInterface):
         self._check_readonly()
         with self._lock:
             try:
-                conn = self._get_connection()
-                conn.execute("""
+                self.conn.execute("""
                     INSERT OR REPLACE INTO ga_meta_info (key, value)
                     VALUES (?, ?)
                 """, (key, value))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write meta info: {e}")
 
     def get_meta_info(self, key: str) -> Optional[str]:
         """Read from ga_meta_info table."""
         try:
-            conn = self._get_connection()
-            cursor = conn.execute(
+            cursor = self.conn.execute(
                 "SELECT value FROM ga_meta_info WHERE key = ?", (key,)
             )
             row = cursor.fetchone()
@@ -546,8 +559,7 @@ class GAMetaStorage(StorageInterface):
         
         with self._lock:
             try:
-                conn = self._get_connection()
-                conn.execute("""
+                self.conn.execute("""
                     UPDATE ga_airfield_stats SET
                         fee_band_0_749kg = ?,
                         fee_band_750_1199kg = ?,
@@ -571,8 +583,7 @@ class GAMetaStorage(StorageInterface):
                 ))
                 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to update fees for {icao}: {e}")
 
@@ -599,15 +610,13 @@ class GAMetaStorage(StorageInterface):
                 now = datetime.now(timezone.utc).isoformat()
 
                 # Delete existing rules for this icao
-                conn = self._get_connection()
-                conn.execute(
+                self.conn.execute(
                     "DELETE FROM ga_notification_requirements WHERE icao = ?", (icao,)
                 )
 
                 # Insert new rules
                 for rule in rules:
-                    conn = self._get_connection()
-                conn.execute("""
+                    self.conn.execute("""
                         INSERT INTO ga_notification_requirements (
                             icao, rule_type, weekday_start, weekday_end,
                             notification_hours, notification_type, specific_time,
@@ -640,8 +649,7 @@ class GAMetaStorage(StorageInterface):
                     ))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write notification requirements: {e}")
 
@@ -651,8 +659,7 @@ class GAMetaStorage(StorageInterface):
         with self._lock:
             try:
                 now = datetime.now(timezone.utc).isoformat()
-                conn = self._get_connection()
-                conn.execute("""
+                self.conn.execute("""
                     INSERT OR REPLACE INTO ga_aip_rule_summary 
                     (icao, notification_summary, hassle_level, notification_score, last_updated_utc)
                     VALUES (?, ?, ?, ?, ?)
@@ -665,8 +672,7 @@ class GAMetaStorage(StorageInterface):
                 ))
 
                 if not self._in_transaction:
-                    conn = self._get_connection()
-                conn.commit()
+                    self.conn.commit()
             except sqlite3.Error as e:
                 raise StorageError(f"Failed to write AIP rule summary: {e}")
 
@@ -695,8 +701,7 @@ class GAMetaStorage(StorageInterface):
     def compute_global_priors(self) -> Dict[str, float]:
         """Compute global average scores across all airports."""
         try:
-            conn = self._get_connection()
-            cursor = conn.execute("""
+            cursor = self.conn.execute("""
                 SELECT
                     AVG(review_cost_score) as review_cost_score,
                     AVG(review_hassle_score) as review_hassle_score,

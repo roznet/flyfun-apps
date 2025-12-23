@@ -7,7 +7,7 @@ based on reviews, fees, and operational characteristics.
 Main components:
     - Models: Pydantic models for data structures
     - Config: Configuration loading and validation
-    - Storage: Database operations for ga_meta.sqlite
+    - Storage: Database operations for GA persona database
     - Ontology: Aspect/label ontology management
     - Personas: Persona-based scoring
 

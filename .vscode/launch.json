@@ -2,8 +2,10 @@
     "version": "0.2.0",
     "configurations": [
       
+
+      
       {
-        "name": "Web Server (dev.env)",
+        "name": "Web Server (.env)",
         "type": "debugpy",
         "request": "launch",
         "program": "${workspaceFolder}/web/server/main.py",
@@ -13,7 +15,7 @@
         "env": {"LOG_TO_STDERR": "1"}
       },
       {
-        "name": "MCP Server (dev.env)",
+        "name": "MCP Server (.env)",
         "type": "debugpy",
         "request": "launch",
         "program": "${workspaceFolder}/mcp_server/main.py",
@@ -21,6 +23,23 @@
         "cwd": "${workspaceFolder}/mcp_server",
         "envFile": "${workspaceFolder}/.env",
         "console": "integratedTerminal"
+      },
+      {
+        "name": "Python: Debug current file (ask for args)",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${file}",
+        "console": "integratedTerminal",
+        "args": "${input:programArgs}",
+        "envFile": "${workspaceFolder}/.env"
       }
-    ]
+    ],
+    "inputs": [
+    {
+      "id": "programArgs",
+      "type": "promptString",
+      "description": "Enter command-line arguments",
+      "default": ""
+    }
+  ]
   }

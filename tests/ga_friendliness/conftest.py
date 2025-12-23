@@ -161,7 +161,7 @@ def temp_dir():
 @pytest.fixture
 def temp_db_path(temp_dir: Path) -> Path:
     """Return path to temporary database."""
-    return temp_dir / "test_ga_meta.sqlite"
+    return temp_dir / "test_ga_persona.db"
 
 
 @pytest.fixture

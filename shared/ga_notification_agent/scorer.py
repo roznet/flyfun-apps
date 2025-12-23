@@ -25,7 +25,7 @@ class NotificationScorer:
     """
     Score notification hassle from parsed rules.
     
-    Also handles loading data from airports.db and writing to ga_meta.sqlite.
+    Also handles loading data from airports.db and writing to the GA persona database.
     """
     
     # Standard field IDs
@@ -148,10 +148,10 @@ class NotificationScorer:
         parsed_rules: Optional[Dict[str, ParsedNotificationRules]] = None,
     ) -> int:
         """
-        Write scores and rules to ga_meta.sqlite.
+        Write scores and rules to the GA persona database.
         
         Args:
-            ga_meta_db_path: Path to ga_meta.sqlite
+            ga_meta_db_path: Path to GA persona database
             scores: Dict mapping ICAO -> HassleScore
             parsed_rules: Optional dict of parsed rules to also store
             
@@ -186,7 +186,7 @@ class NotificationScorer:
                     self._write_notification_rules(conn, icao, parsed, now)
             
             conn.commit()
-            logger.info(f"Updated {updated} airports in ga_meta.sqlite")
+            logger.info(f"Updated {updated} airports in GA persona database")
             return updated
             
         finally:

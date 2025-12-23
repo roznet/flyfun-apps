@@ -58,8 +58,9 @@ async def stream_aviation_agent(
     # Track the routing path for metadata (updated when router completes)
     routing_path: Optional[str] = None
 
-    # Generate a unique run ID if session_id not provided
-    run_id = session_id or str(uuid.uuid4())
+    # Generate a unique run ID for LangSmith tracing
+    # This is always a fresh UUID to ensure unique tracking per conversation turn
+    run_id = str(uuid.uuid4())
 
     try:
         # Use LangGraph's astream_events for fine-grained streaming
@@ -78,6 +79,7 @@ async def stream_aviation_agent(
         # Config for LangSmith observability and checkpointing
         # See: https://docs.langchain.com/langsmith
         config = {
+            "run_id": run_id,  # Explicit run_id for LangSmith feedback tracking
             "run_name": f"aviation-agent-{run_id[:8]}",
             "tags": ["aviation-agent", "streaming"],
             "metadata": {
@@ -333,6 +335,7 @@ async def stream_aviation_agent(
                     "data": {
                         "session_id": session_id,
                         "thread_id": effective_thread_id,
+                        "run_id": run_id,  # For LangSmith feedback
                         "tokens": {
                             "input": total_input_tokens,
                             "output": total_output_tokens,
@@ -408,6 +411,7 @@ async def stream_aviation_agent(
                     "data": {
                         "session_id": session_id,
                         "thread_id": effective_thread_id,
+                        "run_id": run_id,  # For LangSmith feedback
                         "tokens": {
                             "input": total_input_tokens,
                             "output": total_output_tokens,

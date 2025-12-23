@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Mapping
@@ -60,7 +61,21 @@ class AviationToolClient:
     def invoke(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         tool = self.get_tool(tool_name)
         try:
-            return tool.handler(self._context, **arguments)
+            # Filter out _persona_id if the tool handler doesn't accept it
+            # Check if function accepts **kwargs or has _persona_id parameter
+            sig = inspect.signature(tool.handler)
+            accepts_kwargs = any(
+                param.kind == inspect.Parameter.VAR_KEYWORD
+                for param in sig.parameters.values()
+            )
+            has_persona_param = "_persona_id" in sig.parameters
+            
+            # Filter arguments based on function signature
+            filtered_args = dict(arguments)
+            if "_persona_id" in filtered_args and not (accepts_kwargs or has_persona_param):
+                filtered_args = {k: v for k, v in filtered_args.items() if k != "_persona_id"}
+            
+            return tool.handler(self._context, **filtered_args)
         except Exception as exc:  # pragma: no cover - surface entire exception message
             raise AviationToolInvocationError(f"Tool '{tool_name}' failed: {exc}") from exc
 

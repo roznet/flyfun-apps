@@ -26,6 +26,22 @@ from shared.aviation_agent.config import AviationAgentSettings, get_settings
 router = APIRouter(tags=["aviation-agent"])
 logger = logging.getLogger(__name__)
 
+# Lazy-loaded LangSmith client for feedback
+_langsmith_client = None
+
+
+def _get_langsmith_client():
+    """Get or create LangSmith client (lazy initialization)."""
+    global _langsmith_client
+    if _langsmith_client is None:
+        try:
+            from langsmith import Client
+            _langsmith_client = Client()
+        except Exception as e:
+            logger.warning(f"Failed to initialize LangSmith client: {e}")
+            return None
+    return _langsmith_client
+
 
 def _generate_thread_id() -> str:
     """Generate a unique thread ID for a new conversation."""
@@ -42,6 +58,19 @@ class QuickAction(BaseModel):
 class QuickActionsResponse(BaseModel):
     """Response containing quick actions."""
     actions: List[QuickAction]
+
+
+class FeedbackRequest(BaseModel):
+    """User feedback for a conversation."""
+    run_id: str
+    score: int  # 1 = thumbs up, 0 = thumbs down
+    comment: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    """Response after submitting feedback."""
+    status: str
+    feedback_id: Optional[str] = None
 
 
 def feature_enabled(settings: Optional[AviationAgentSettings] = None) -> bool:
@@ -218,6 +247,44 @@ def get_quick_actions(
             prompt="What are the rules for flying IFR to an uncontrolled airport in France?"
         ),
     ]
-    
+
     return QuickActionsResponse(actions=actions)
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(
+    request: FeedbackRequest,
+    settings: AviationAgentSettings = Depends(get_settings),
+) -> FeedbackResponse:
+    """
+    Submit user feedback (thumbs up/down) for a conversation.
+
+    This feedback is sent to LangSmith for quality monitoring and analysis.
+
+    Args:
+        request: FeedbackRequest with run_id, score (1=good, 0=bad), and optional comment
+
+    Returns:
+        FeedbackResponse with status and feedback_id
+    """
+    if not settings.enabled:
+        raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
+
+    client = _get_langsmith_client()
+    if client is None:
+        logger.warning("LangSmith client not available, feedback not recorded")
+        return FeedbackResponse(status="skipped", feedback_id=None)
+
+    try:
+        feedback = client.create_feedback(
+            run_id=request.run_id,
+            key="user-rating",
+            score=request.score,
+            comment=request.comment,
+        )
+        logger.info(f"Feedback submitted for run {request.run_id}: score={request.score}")
+        return FeedbackResponse(status="ok", feedback_id=str(feedback.id))
+    except Exception as e:
+        logger.error(f"Failed to submit feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit feedback")
 
