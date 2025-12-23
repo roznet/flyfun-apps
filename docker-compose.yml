@@ -15,8 +15,8 @@ services:
       dockerfile: web/Dockerfile
     image: flyfun-web-server:latest
     container_name: flyfun-web-server
-    expose:
-      - "${WEB_PORT:-8000}:8000"  # Only accessible within Docker network (Caddy handles external traffic)
+    ports:
+      - "${WEB_PORT:-8000}:8000"
     # Load environment variables from .env file
     # This is more standard, maintainable, and secure than listing all variables explicitly
     # Variables in .env are automatically loaded into the container
