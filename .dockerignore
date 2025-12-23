@@ -34,6 +34,7 @@ prod.env
 
 # Data files (mounted as volumes)
 data/
+!data/ga_persona.db
 out/
 cache/
 logs/
