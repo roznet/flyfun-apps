@@ -50,7 +50,6 @@ services:
     restart: unless-stopped
     networks:
       - flyfun-network
-      - shared-services  # For Caddy reverse proxy
     depends_on:
       chromadb:
         condition: service_healthy
@@ -130,5 +129,3 @@ services:
 networks:
   flyfun-network:
     driver: bridge
-  shared-services:
-    external: true  # Created by shared-infra
