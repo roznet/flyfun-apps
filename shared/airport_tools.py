@@ -290,6 +290,14 @@ def find_airports_near_route(
         max_distance_nm
     )
 
+    # Calculate total route distance for position-based sorting
+    total_route_distance_nm = 0.0
+    if hasattr(from_airport, 'navpoint') and hasattr(to_airport, 'navpoint'):
+        try:
+            _, total_route_distance_nm = from_airport.navpoint.haversine_distance(to_airport.navpoint)
+        except Exception:
+            pass  # Keep as 0.0 if calculation fails
+
     # Extract airports and build distance map for context
     airport_objects = [item["airport"] for item in results]
     segment_distances = {
@@ -308,11 +316,17 @@ def find_airports_near_route(
 
     # Extract persona_id from kwargs (injected by ToolRunner)
     persona_id = kwargs.pop("_persona_id", None)
-    
+
     # Apply priority sorting using PriorityEngine
+    # Default sort_by is "halfway" - airports near middle of route rank higher
     priority_engine = PriorityEngine(context=ctx)
     priority_context = _build_priority_context(
-        base_context={"segment_distances": segment_distances, "enroute_distances": enroute_distances},
+        base_context={
+            "segment_distances": segment_distances,
+            "enroute_distances": enroute_distances,
+            "total_route_distance_nm": total_route_distance_nm,
+            "sort_by": "halfway",  # Default: prioritize airports near middle of route
+        },
         persona_id=persona_id
     )
     sorted_airports = priority_engine.apply(
