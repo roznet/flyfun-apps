@@ -364,6 +364,22 @@ class GAFriendlinessService:
             # Get notification/customs summary from ga_notifications.db
             notification_summary = _get_notification_summary(icao)
             hassle_level = None  # TODO: compute from notification data if needed
+
+            # Derive human-readable hospitality info from AIP-encoded fields
+            def _decode_hospitality(code: Optional[int]) -> Optional[str]:
+                if code is None:
+                    return None
+                if code == 2:
+                    return "at_airport"
+                if code == 1:
+                    return "vicinity"
+                if code == 0:
+                    return "unknown"
+                # Fallback for unexpected values
+                return None
+
+            hotel_info = _decode_hospitality(getattr(stats, "aip_hotel_info", None))
+            restaurant_info = _decode_hospitality(getattr(stats, "aip_restaurant_info", None))
             
             return {
                 "icao": stats.icao,
@@ -379,8 +395,8 @@ class GAFriendlinessService:
                 "summary_text": summary_text,
                 "notification_summary": notification_summary,
                 "hassle_level": hassle_level,
-                "hotel_info": stats.hotel_info,
-                "restaurant_info": stats.restaurant_info,
+                "hotel_info": hotel_info,
+                "restaurant_info": restaurant_info,
             }
             
         except Exception as e:
