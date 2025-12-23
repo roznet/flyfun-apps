@@ -14,7 +14,8 @@ from shared.tool_context import ToolContext
 logger = logging.getLogger(__name__)
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Use CONFIGS_DIR env var if set (for Docker), otherwise derive from file location
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 
 
 def _get_path_from_env(env_var: str, default_filename: str, allow_default: bool = False) -> Path:
