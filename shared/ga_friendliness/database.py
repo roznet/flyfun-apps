@@ -335,22 +335,15 @@ def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
         # Use URI mode with ?mode=ro to prevent SQLite from creating temporary files
         # This is necessary when the database file is in a read-only directory (like Docker volume :ro)
         # SQLite normally tries to create .db-shm and .db-wal files even for read-only access
-        db_uri = f"file:{db_path}?mode=ro"
         conn = sqlite3.connect(db_uri, uri=True)
         conn.row_factory = sqlite3.Row
         return conn
     
-    # Write mode: create database and enable WAL for concurrent access
-    # Create parent dirs if needed
-    db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Create connection
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
-    # Set pragmas for better performance
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout = 30000")  # 30 seconds
 
     # Ensure schema is current
     ensure_schema_version(conn)
