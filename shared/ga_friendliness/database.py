@@ -332,8 +332,11 @@ def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
         if not db_path.exists():
             raise StorageError(f"Database not found (readonly mode): {db_path}")
         
-        # Just open it, like DatabaseStorage does - simple and works without write permissions
-        conn = sqlite3.connect(str(db_path))
+        # Use URI mode with ?mode=ro to prevent SQLite from creating temporary files
+        # This is necessary when the database file is in a read-only directory (like Docker volume :ro)
+        # SQLite normally tries to create .db-shm and .db-wal files even for read-only access
+        db_uri = f"file:{db_path}?mode=ro"
+        conn = sqlite3.connect(db_uri, uri=True)
         conn.row_factory = sqlite3.Row
         return conn
     
