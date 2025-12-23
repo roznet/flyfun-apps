@@ -113,14 +113,14 @@ def search_airports(
     
     if country_code:
         # Search by country code
-        for a in ctx.model.airports.values():
+        for a in ctx.model.airports:
             if (a.iso_country or "").upper() == country_code:
                 matches.append(a)
                 if len(matches) >= 200:
                     break
     else:
         # Standard search: ICAO, name, IATA, municipality, or ISO country
-        for a in ctx.model.airports.values():
+        for a in ctx.model.airports:
             if (
                 (q in a.ident)
                 or (a.name and q in a.name.upper())
@@ -138,7 +138,7 @@ def search_airports(
         if geocode:
             # Find airports near the geocoded location (within 50nm by default)
             center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
-            for airport in ctx.model.airports.values():
+            for airport in ctx.model.airports:
                 if not getattr(airport, "navpoint", None):
                     continue
                 try:
@@ -570,7 +570,7 @@ def get_border_crossing_airports(
     """
     # Get all border crossing airports (point_of_entry=True)
     airports_list = [
-        a for a in ctx.model.airports.values()
+        a for a in ctx.model.airports
         if getattr(a, 'point_of_entry', False)
         and (not country or (a.iso_country or '').upper() == country.upper())
     ]
@@ -650,9 +650,9 @@ def get_border_crossing_airports(
 def get_airport_statistics(ctx: ToolContext, country: Optional[str] = None) -> Dict[str, Any]:
     """Get statistical information about airports, such as counts with customs, fuel types, or procedures. Optionally filter by country."""
     if country:
-        airports = [a for a in ctx.model.airports.values() if (a.iso_country or '').upper() == country.upper()]
+        airports = [a for a in ctx.model.airports if (a.iso_country or '').upper() == country.upper()]
     else:
-        airports = list(ctx.model.airports.values())
+        airports = list(ctx.model.airports)
     total = len(airports)
 
     stats = {
@@ -908,7 +908,7 @@ def _find_nearest_airport_in_db(
     nearest_any = None
     nearest_any_distance = float('inf')
 
-    for apt in ctx.model.airports.values():
+    for apt in ctx.model.airports:
         if not getattr(apt, "navpoint", None):
             continue
         try:
@@ -1010,7 +1010,7 @@ def find_airports_near_location(
     # Compute distances to all airports and filter by radius
     candidate_airports: List[Airport] = []
     point_distances: Dict[str, float] = {}
-    for airport in ctx.model.airports.values():
+    for airport in ctx.model.airports:
         if not getattr(airport, "navpoint", None):
             continue
         try:
@@ -1221,7 +1221,7 @@ def find_airports_by_notification(
 
     # 4. Load Airport objects from airport database
     matching_set = set(icao.upper() for icao in matching_icaos)
-    airports_list = [a for a in ctx.model.airports.values() if a.ident in matching_set]
+    airports_list = [a for a in ctx.model.airports if a.ident in matching_set]
 
     # 5. Build effective filters (always exclude large airports unless explicitly included)
     effective_filters: Dict[str, Any] = {}
