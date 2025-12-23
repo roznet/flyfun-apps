@@ -18,27 +18,47 @@ from euro_aip.models.runway import Runway
 from .notifications import get_notification_service
 
 
+class NotificationSummary(BaseModel):
+    """
+    Notification requirement data for an airport.
+
+    Used for UI legend coloring:
+    - Green: H24 or ≤24h notice
+    - Yellow: 25-48h notice
+    - Red: >48h notice
+    - Gray: Unknown or on-request without hours
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    notification_type: Optional[str] = None  # 'h24', 'hours', 'on_request', 'business_day'
+    hours_notice: Optional[int] = None
+    is_h24: bool = False
+    is_on_request: bool = False
+    easiness_score: Optional[float] = None  # 0-100 scale
+    summary: Optional[str] = None
+
+
 class GAFriendlySummary(BaseModel):
     """
     GA Friendliness data - isolated from airport structure.
-    
+
     Contains all raw feature scores and pre-computed persona scores,
     enabling instant persona switching in the UI without additional API calls.
     """
     model_config = ConfigDict(from_attributes=True)
-    
+
     # Raw feature scores (0-1 normalized) - for UI breakdown display
     features: Dict[str, Optional[float]]
     # e.g., {"ga_cost_score": 0.7, "ga_review_score": 0.85, ...}
-    
+
     # Pre-computed scores for ALL personas - enables instant UI toggle
     persona_scores: Dict[str, Optional[float]]
     # e.g., {"ifr_touring_sr22": 0.72, "vfr_budget_flyer": 0.65, ...}
-    
+
     # Review metadata
     review_count: int = 0
     last_review_utc: Optional[str] = None
-    
+
     # Optional enrichment (for detail view)
     tags: Optional[List[str]] = None
     summary_text: Optional[str] = None
@@ -71,9 +91,16 @@ class AirportSummary(BaseModel):
     
     # GA Friendliness data - optional, populated when include_ga=True
     ga: Optional[GAFriendlySummary] = None
-    
+    # Notification requirements - optional, populated when include_notification=True
+    notification: Optional[NotificationSummary] = None
+
     @classmethod
-    def from_airport(cls, airport: Airport, ga_summary: Optional[GAFriendlySummary] = None):
+    def from_airport(
+        cls,
+        airport: Airport,
+        ga_summary: Optional[GAFriendlySummary] = None,
+        notification_summary: Optional[NotificationSummary] = None,
+    ):
         """Create AirportSummary from Airport domain model."""
         return cls(
             ident=airport.ident,
@@ -95,7 +122,8 @@ class AirportSummary(BaseModel):
             procedure_count=len(airport.procedures),
             runway_count=len(airport.runways),
             aip_entry_count=len(airport.aip_entries),
-            ga=ga_summary
+            ga=ga_summary,
+            notification=notification_summary,
         )
 
 
