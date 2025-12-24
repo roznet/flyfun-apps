@@ -7,7 +7,7 @@ import logging
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.airport import Airport
 from euro_aip.models.navpoint import NavPoint
-from .models import AirportSummary, AirportDetail, AIPEntryResponse, GAFriendlySummary, NotificationSummary
+from .models import AirportSummary, AirportDetail, AIPEntryResponse, GAFriendlySummary, NotificationSummary, BulkProcedureLinesRequest
 from .ga_friendliness import get_service as get_ga_service
 from . import notifications
 from shared.airport_tools import find_airports_near_location
@@ -685,30 +685,40 @@ async def get_airport_procedure_lines(
 @router.post("/bulk/procedure-lines")
 async def get_bulk_procedure_lines(
     request: Request,
-    airports: List[str] = Body(..., description="List of ICAO airport codes", max_items=100),
-    distance_nm: float = Body(10.0, description="Distance in nautical miles for procedure lines", ge=0.1, le=100.0)
+    body: BulkProcedureLinesRequest
 ):
     """Get procedure lines for multiple airports in a single request."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
     
-    if len(airports) > 100:
-        raise HTTPException(status_code=400, detail="Maximum 100 airports allowed per request")
+    airports = body.airports
+    distance_nm = body.distance_nm
+    
+    logger.debug(f"Bulk procedure lines request: {len(airports)} airports, distance_nm={distance_nm}")
     
     result = {}
 
     for icao in airports:
         airport = model.airports.where(ident=icao.upper()).first()
-        if airport:
-            try:
-                procedure_lines = airport.get_procedure_lines(distance_nm)
-                result[icao.upper()] = procedure_lines
-            except Exception as e:
-                # Log error but continue with other airports
-                print(f"Error getting procedure lines for {icao}: {e}")
-                result[icao.upper()] = {"procedure_lines": [], "error": str(e)}
-        else:
+        if not airport:
             result[icao.upper()] = {"procedure_lines": [], "error": "Airport not found"}
+            continue
+        
+        # Skip airports without procedures - no need to compute procedure lines
+        if not airport.procedures:
+            result[icao.upper()] = {
+                "airport_ident": icao.upper(),
+                "procedure_lines": []
+            }
+            continue
+        
+        try:
+            procedure_lines = airport.get_procedure_lines(distance_nm)
+            result[icao.upper()] = procedure_lines
+        except Exception as e:
+            # Log error but continue with other airports
+            logger.warning(f"Error getting procedure lines for {icao}: {e}")
+            result[icao.upper()] = {"procedure_lines": [], "error": str(e)}
     
     return result
 

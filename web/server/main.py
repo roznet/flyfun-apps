@@ -20,6 +20,7 @@ load_component_env(component_dir)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
@@ -261,6 +262,24 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# Add exception handler for validation errors to log details
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log validation errors for debugging."""
+    logger.warning(f"Validation error on {request.url.path}: {exc.errors()}")
+    # Log the body if available
+    if hasattr(exc, 'body') and exc.body:
+        try:
+            body_str = exc.body.decode('utf-8') if isinstance(exc.body, bytes) else str(exc.body)
+            logger.debug(f"Request body: {body_str}")
+        except Exception:
+            pass
+    # Return the default FastAPI validation error response
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body) if hasattr(exc, 'body') and exc.body else None}
+    )
 
 # Include API routes
 app.include_router(airports.router, prefix="/api/airports", tags=["airports"])

@@ -4,7 +4,7 @@
 Pydantic models for API responses that extend the euro_aip domain models.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -400,3 +400,10 @@ class CountryRulesResponse(BaseModel):
     country: str
     total_rules: int
     categories: List[RuleCategoryResponse]
+
+
+class BulkProcedureLinesRequest(BaseModel):
+    """Request model for bulk procedure lines endpoint."""
+    
+    airports: List[str] = Field(..., description="List of ICAO airport codes", min_length=1)
+    distance_nm: float = Field(10.0, description="Distance in nautical miles for procedure lines", ge=0.1, le=100.0)
