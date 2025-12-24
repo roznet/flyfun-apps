@@ -147,9 +147,14 @@ class TestQueryRouter:
         assert "FR" in decision.countries  # LFMD → FR
     
     def test_multi_country(self, router):
-        """Test extraction of multiple countries."""
+        """Test extraction of multiple countries for comparison queries.
+
+        Comparison queries route to 'database' path because compare_rules_between_countries
+        is a database tool that uses the ComparisonService for embedding-based comparison.
+        """
         decision = router.route("Compare rules between France and Germany")
-        assert decision.path == "rules"
+        # Comparison queries with 2+ countries go to database path (compare_rules_between_countries tool)
+        assert decision.path == "database"
         assert "FR" in decision.countries
         assert "DE" in decision.countries
     

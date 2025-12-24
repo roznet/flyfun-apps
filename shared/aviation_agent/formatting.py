@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, AsyncIterator, Dict, Iterable, List
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
 
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -46,6 +46,25 @@ def build_formatter_chain(llm: Runnable, system_prompt: Optional[str] = None) ->
     )
 
     # Build chain - Use directly in node so LangGraph can capture streaming
+    return prompt | llm | StrOutputParser()
+
+
+def build_comparison_formatter_chain(llm: Runnable, system_prompt: str) -> Runnable:
+    """
+    Build a formatter chain for comparison tool results.
+
+    Uses the comparison_synthesis prompt which expects:
+    - countries: comma-separated list of countries being compared
+    - topic_context: optional tag/category context
+    - rules_context: pre-formatted rules differences
+
+    This follows the design principle: tools return DATA, formatters do SYNTHESIS.
+    """
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+    ])
+
+    # Build chain - LangGraph can capture streaming
     return prompt | llm | StrOutputParser()
 
 

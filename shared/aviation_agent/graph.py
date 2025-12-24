@@ -419,10 +419,19 @@ def _build_agent_graph(
             logger.error(f"Tool execution error: {e}", exc_info=True)
             return {"error": str(e)}
 
-    # Build formatter chain directly - this allows LangGraph to capture streaming
-    # Load prompt from config
+    # Build formatter chains - this allows LangGraph to capture streaming
+    # Load prompts from config for different strategies
     formatter_prompt = behavior_config.load_prompt("formatter")
     formatter_chain = build_formatter_chain(formatter_llm, system_prompt=formatter_prompt)
+
+    # Build comparison formatter chain with specialized prompt
+    comparison_prompt = behavior_config.load_prompt("comparison_synthesis")
+    comparison_formatter_chain = None
+    if comparison_prompt:
+        from .formatting import build_comparison_formatter_chain
+        comparison_formatter_chain = build_comparison_formatter_chain(
+            formatter_llm, system_prompt=comparison_prompt
+        )
     
     def formatter_node(state: AgentState) -> Dict[str, Any]:
         # Handle errors gracefully
@@ -476,11 +485,44 @@ def _build_agent_graph(
             if has_rules and not has_database:
                 # Rules answer is already final_answer from rules_agent_node
                 return {}  # No changes needed
-            
+
             # Database-only path (existing formatter logic)
             plan = state.get("plan")
             tool_result = state.get("tool_result") or {}
-            
+
+            # Check if this is a comparison tool - use specialized formatter
+            if tool_result.get("_tool_type") == "comparison" and comparison_formatter_chain:
+                logger.info(f"📋 Using comparison formatter for synthesis")
+
+                # Build topic context for prompt
+                topic_parts = []
+                if tool_result.get("tag"):
+                    topic_parts.append(f"Topic: {tool_result['tag']}")
+                if tool_result.get("category"):
+                    topic_parts.append(f"Category: {tool_result['category']}")
+                topic_context = "\n".join(topic_parts) if topic_parts else ""
+
+                # Invoke comparison formatter with structured context
+                chain_result = comparison_formatter_chain.invoke({
+                    "countries": ", ".join(tool_result.get("countries", [])),
+                    "topic_context": topic_context,
+                    "rules_context": tool_result.get("rules_context", "No differences found."),
+                })
+
+                answer = chain_result if isinstance(chain_result, str) else str(
+                    chain_result.content if hasattr(chain_result, 'content') else chain_result
+                )
+
+                from .formatting import build_ui_payload
+                suggested_queries = state.get("suggested_queries")
+                ui_payload = build_ui_payload(plan, tool_result, suggested_queries) if plan else None
+
+                return {
+                    "final_answer": answer.strip(),
+                    "thinking": state.get("planning_reasoning", ""),
+                    "ui_payload": ui_payload,
+                }
+
             chain_result = formatter_chain.invoke(
                 {
                     "messages": state.get("messages") or [],

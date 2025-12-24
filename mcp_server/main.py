@@ -34,15 +34,12 @@ from shared.airport_tools import (
     find_airports_near_route as shared_find_airports_near_route,
     find_airports_near_location as shared_find_airports_near_location,
     get_airport_details as shared_get_airport_details,
-    get_border_crossing_airports as shared_get_border_crossing_airports,
-    get_airport_statistics as shared_get_airport_statistics,
     list_rules_for_country as shared_list_rules_for_country,
     compare_rules_between_countries as shared_compare_rules_between_countries,
     get_answers_for_questions as shared_get_answers_for_questions,
     list_rule_categories_and_tags as shared_list_rule_categories_and_tags,
     list_rule_countries as shared_list_rule_countries,
     get_notification_for_airport as shared_get_notification_for_airport,
-    find_airports_by_notification as shared_find_airports_by_notification,
 )
 from shared.tool_context import ToolContext
 
@@ -234,18 +231,6 @@ def list_rule_categories_and_tags(ctx: Context = None) -> Dict[str, Any]:
 def list_rule_countries(ctx: Context = None) -> Dict[str, Any]:
     context = _require_tool_context()
     return shared_list_rule_countries(context)
-
-
-@mcp.tool(name="get_border_crossing_airports", description=_desc(shared_get_border_crossing_airports))
-def get_border_crossing_airports(country: Optional[str] = None, ctx: Context = None) -> Dict[str, Any]:
-    context = _require_tool_context()
-    return shared_get_border_crossing_airports(context, country)
-
-
-@mcp.tool(name="get_airport_statistics", description=_desc(shared_get_airport_statistics))
-def get_airport_statistics(country: Optional[str] = None, ctx: Context = None) -> Dict[str, Any]:
-    context = _require_tool_context()
-    return shared_get_airport_statistics(context, country)
 
 
 if __name__ == "__main__":

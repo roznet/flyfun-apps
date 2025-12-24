@@ -731,17 +731,29 @@ def compare_rules_between_countries(
     countries = [country1.upper(), country2.upper()]
 
     # Try embedding-based comparison first (smarter - detects semantic differences)
+    # NOTE: Tool returns DATA only - synthesis is done by formatter
     if use_embeddings and ctx.comparison_service:
         try:
             result = ctx.comparison_service.compare_countries(
                 countries=countries,
                 category=category,
                 tag=tag,
-                synthesize=True,
+                synthesize=False,  # Never synthesize in tool - formatter does this
             )
 
             # Build differences for response
             differences = result.differences if result.differences else []
+
+            # Build rules_context for formatter (pre-formatted for synthesis prompt)
+            rules_context_lines = []
+            for i, diff in enumerate(differences, 1):
+                rules_context_lines.append(f"\n### {i}. {diff.get('question_text', 'Unknown question')}")
+                rules_context_lines.append(f"Category: {diff.get('category', 'N/A')} | Tags: {', '.join(diff.get('tags', []))}")
+                rules_context_lines.append(f"Semantic difference score: {diff.get('difference_score', 0):.2f}")
+                rules_context_lines.append("")
+                for cc, answer in diff.get("answers", {}).items():
+                    rules_context_lines.append(f"**{cc}**: {answer}")
+                rules_context_lines.append("")
 
             return {
                 "found": True,
@@ -752,10 +764,11 @@ def compare_rules_between_countries(
                 "questions_analyzed": result.questions_analyzed,
                 "filtered_by_embedding": result.filtered_by_embedding,
                 "differences": differences,
-                "synthesis": result.synthesis,
-                "formatted_summary": result.synthesis,  # For backward compatibility
+                "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
                 "total_differences": len(differences),
                 "message": f"Comparison between {countries[0]} and {countries[1]} complete.",
+                # Mark this as a comparison tool for formatter routing
+                "_tool_type": "comparison",
             }
         except Exception as e:
             # Log and fall back to simple comparison
@@ -774,15 +787,25 @@ def compare_rules_between_countries(
 
     diff_count = len(comparison.get('differences', []))
 
+    # Build rules_context from text-based comparison for formatter
+    rules_context_lines = []
+    for i, diff in enumerate(comparison.get('differences', []), 1):
+        rules_context_lines.append(f"\n### {i}. {diff.get('category', 'General')}")
+        for cc, rule in diff.get('rules', {}).items():
+            rules_context_lines.append(f"**{cc}**: {rule}")
+        rules_context_lines.append("")
+
     return {
         "found": True,
         "countries": countries,
         "category": category,
         "comparison": comparison,
-        "formatted_summary": comparison.get('summary', ''),
+        "differences": comparison.get('differences', []),
+        "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
         "total_differences": diff_count,
         "filtered_by_embedding": False,
-        "message": f"Comparison between {countries[0]} and {countries[1]} complete."
+        "message": f"Comparison between {countries[0]} and {countries[1]} complete.",
+        "_tool_type": "comparison",
     }
 
 
@@ -825,13 +848,6 @@ def list_rule_categories_and_tags(ctx: ToolContext) -> Dict[str, Any]:
     by_category = rules_manager.rules_index.get("categories", {})
     by_tag = rules_manager.rules_index.get("tags", {})
 
-    pretty = ["**Categories:**"]
-    for c in categories:
-        pretty.append(f"- {c} ({len(by_category.get(c, []))})")
-    pretty.append("")
-    pretty.append("**Tags:**")
-    for t in tags:
-        pretty.append(f"- {t} ({len(by_tag.get(t, []))})")
 
     return {
         "categories": categories,
@@ -840,7 +856,6 @@ def list_rule_categories_and_tags(ctx: ToolContext) -> Dict[str, Any]:
             "by_category": {c: len(by_category.get(c, [])) for c in categories},
             "by_tag": {t: len(by_tag.get(t, [])) for t in tags},
         },
-        "pretty": "\n".join(pretty),
     }
 
 
@@ -848,8 +863,7 @@ def list_rule_countries(ctx: ToolContext) -> Dict[str, Any]:
     """List available countries (ISO-2 codes) present in the aviation rules store."""
     rules_manager = ctx.ensure_rules_manager()
     countries = rules_manager.get_available_countries()
-    pretty = "**Rule Countries (ISO-2):**\n" + ("\n".join(f"- {c}" for c in countries) if countries else "(none)")
-    return {"count": len(countries), "items": countries, "pretty": pretty}
+    return {"count": len(countries), "items": countries}
 
 
 def _compare_rules_between_countries_tool(
@@ -1579,7 +1593,8 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                     },
                 },
-                "expose_to_llm": True,
+                # Not exposed to LLM - use search_airports with point_of_entry filter instead
+                "expose_to_llm": False,
             },
         ),
         (
@@ -1597,7 +1612,8 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                     },
                 },
-                "expose_to_llm": True,
+                # Not exposed to LLM - rarely useful for pilots
+                "expose_to_llm": False,
             },
         ),
         (
@@ -1759,7 +1775,8 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                     },
                 },
-                "expose_to_llm": True,
+                # Not exposed to LLM - use find_airports_near_location/route with max_hours_notice filter
+                "expose_to_llm": False,
             },
         ),
     ])
