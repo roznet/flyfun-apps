@@ -56,6 +56,14 @@ class FilterRegistry:
 
 
 # Auto-register all filters
+#
+# IMPORTANT: If you add or rename a filter that should be exposed to the LLM planner,
+# you MUST also update the filter list in:
+#   configs/aviation_agent/prompts/planner_v1.md
+#
+# Filters NOT exposed to LLM (internal use only):
+#   - has_aip_data, exclude_large_airports, trip_distance
+#
 FilterRegistry.register(CountryFilter())
 FilterRegistry.register(HasProceduresFilter())
 FilterRegistry.register(HasAipDataFilter())
