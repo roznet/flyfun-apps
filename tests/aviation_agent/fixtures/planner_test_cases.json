@@ -383,7 +383,7 @@
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
       "countries": ["FR", "GB"],
-      "tags": ["airspace"]
+      "tags": ["airspace", "procedure"]
     },
     "description": "Compare controlled airspace transit rules FR vs UK"
   },
@@ -401,7 +401,7 @@
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
       "countries": ["FR", "GB"],
-      "tags": ["transponder"]
+      "tags": ["transponder", "air_traffic_service"]
     },
     "description": "Compare transponder requirements - implicit FR vs UK comparison"
   },

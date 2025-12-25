@@ -74,15 +74,25 @@ def build_planner_runnable(
     llm: Runnable,
     tools: Sequence[AviationTool],
     system_prompt: Optional[str] = None,
+    available_tags: Optional[List[str]] = None,
 ) -> Runnable:
     """
     Create a runnable that turns conversation history into an AviationPlan.
-    
+
     Uses native structured output when available (e.g., ChatOpenAI.with_structured_output),
     which is more reliable with conversation history. Falls back to PydanticOutputParser if not available.
+
+    Args:
+        llm: Language model to use for planning
+        tools: Available tools for the planner to choose from
+        system_prompt: Optional custom system prompt (loaded from config if not provided)
+        available_tags: Optional list of valid tags for rules filtering (injected into prompt)
     """
 
     tool_catalog = render_tool_catalog(tools)
+
+    # Format available tags for prompt injection (comma-separated list)
+    available_tags_str = ", ".join(available_tags) if available_tags else ""
     
     # Load system prompt and examples from config if not provided
     example_messages: list[BaseMessage] = []
@@ -121,7 +131,11 @@ def build_planner_runnable(
             chain = prompt | structured_llm
             
             def _invoke(state: Dict[str, Any]) -> AviationPlan:
-                plan = chain.invoke({"messages": state["messages"], "tool_catalog": tool_catalog})
+                plan = chain.invoke({
+                    "messages": state["messages"],
+                    "tool_catalog": tool_catalog,
+                    "available_tags": available_tags_str,
+                })
                 _validate_plan(plan, tools)
                 return plan
             
@@ -150,6 +164,7 @@ def build_planner_runnable(
         return {
             "messages": state["messages"],
             "tool_catalog": tool_catalog,
+            "available_tags": available_tags_str,
             "format_instructions": format_instructions,
         }
 

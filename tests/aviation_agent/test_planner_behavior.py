@@ -129,10 +129,16 @@ def test_planner_selects_correct_tool(
         expected_tools = [expected_tool_raw]
         expected_args_list = [expected_args_raw]
 
+    # Get available tags from rules manager for dynamic prompt injection
+    available_tags = None
+    if behavior_tool_client._context.rules_manager:
+        available_tags = behavior_tool_client._context.rules_manager.get_available_tags()
+
     # Build planner with live LLM
     planner = build_planner_runnable(
         live_planner_llm,
-        tuple(behavior_tool_client.tools.values())
+        tuple(behavior_tool_client.tools.values()),
+        available_tags=available_tags,
     )
 
     # Run planner
@@ -233,13 +239,31 @@ def test_planner_selects_correct_tool(
                         f"got '{plan_value}'"
                     )
             elif key == "tags" and isinstance(expected_value, list) and isinstance(plan_value, list):
-                # For tags, check that all expected tags are present (superset OK)
-                # This allows planner to add extra relevant tags
+                # For tags, require exact match (order-independent)
+                # This ensures we notice when planner starts returning extra/different tags
                 expected_set = set(expected_value)
                 actual_set = set(plan_value)
-                assert expected_set.issubset(actual_set), (
-                    f"Expected tags {expected_value} to be subset of actual tags {plan_value}"
-                )
+
+                missing_tags = expected_set - actual_set
+                extra_tags = actual_set - expected_set
+
+                if missing_tags:
+                    assert False, (
+                        f"Missing tags for question: \"{question[:60]}...\"\n"
+                        f"  Missing: {sorted(missing_tags)}\n"
+                        f"  Expected: {sorted(expected_set)}\n"
+                        f"  Actual:   {sorted(actual_set)}"
+                    )
+
+                if extra_tags:
+                    assert False, (
+                        f"New tags appeared for question: \"{question[:60]}...\"\n"
+                        f"  Extra tags: {sorted(extra_tags)}\n"
+                        f"  Expected:   {sorted(expected_set)}\n"
+                        f"  Actual:     {sorted(actual_set)}\n\n"
+                        f"  → Should we expand the expectation to include {sorted(extra_tags)}?\n"
+                        f"  → If yes, update the test fixture. If no, check why planner added these tags."
+                    )
             else:
                 assert plan_value == expected_value, (
                     f"Expected '{key}' = {expected_value}, got {plan_value}"

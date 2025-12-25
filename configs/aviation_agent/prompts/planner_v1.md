@@ -11,12 +11,15 @@ country (ISO-2 code), min_runway_length_ft, max_runway_length_ft, max_landing_fe
 **Tag Extraction (for rules tools):**
 For list_rules_for_country and compare_rules_between_countries, extract 'tags' array to focus on specific topics.
 ONLY use tags from this list (do not invent new tags):
-airspace, flight_plan, transponder, permission, procedure, clearance, air_traffic_service, airfield, international, uncontrolled, join, penetration, semicircle, zones.
+{available_tags}
 
 Tag hints (concept → tag):
 - routing, route planning, IFR routes, route validation → flight_plan
 - restricted areas, danger zones, prohibited areas → zones, airspace
 - ATS, FIS, flight information service → air_traffic_service
+- IFR-specific rules, IFR flight, instrument flight → ifr
+- VFR-specific rules, VFR flight, visual flight → vfr
+- autorouter, foreflight, garmin, weather apps, EFB → tools
 
 Examples:
 - "Flight plans and transponder rules" → tags: ["flight_plan", "transponder"]

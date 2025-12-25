@@ -159,11 +159,18 @@ def build_agent(
         else:
             rules_llm = formatter_llm  # Default to formatter LLM for rules
 
-    tool_client = AviationToolClient(settings.build_tool_context())
+    tool_context = settings.build_tool_context()
+    tool_client = AviationToolClient(tool_context)
     tool_runner = ToolRunner(tool_client)
     # Only expose LLM-visible tools to planner (filter out internal/MCP-only tools)
     llm_tools = tuple(t for t in tool_client.tools.values() if t.expose_to_llm)
-    planner = build_planner_runnable(planner_llm, llm_tools)
+
+    # Get available tags from rules manager for dynamic prompt injection
+    available_tags = None
+    if tool_context.rules_manager:
+        available_tags = tool_context.rules_manager.get_available_tags()
+
+    planner = build_planner_runnable(planner_llm, llm_tools, available_tags=available_tags)
 
     # Create checkpointer for conversation memory (from settings, not behavior config)
     checkpointer = get_checkpointer(settings)

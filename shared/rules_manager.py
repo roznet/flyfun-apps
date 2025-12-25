@@ -106,8 +106,7 @@ class RulesManager:
             question_prefix = question.get('question_prefix', "")
             category = question.get('category') or "General"
             # Normalize tags: lowercase and replace spaces with underscores
-            # IMPORTANT: If you add new tags to the rules data, also update the tag list in:
-            #   configs/aviation_agent/prompts/planner_v1.md
+            # Tags are dynamically injected into the planner prompt via get_available_tags()
             raw_tags = question.get('tags') or []
             tags = [normalize_tag(t) for t in raw_tags]
             answers_by_country = question.get('answers_by_country') or {}
