@@ -26,7 +26,14 @@ class LLMsConfig(BaseModel):
 
 
 class RoutingConfig(BaseModel):
-    enabled: bool = True
+    """
+    Legacy routing configuration.
+
+    NOTE: Routing is deprecated. The planner now handles all tool selection directly,
+    including rules tools (answer_rules_question, browse_rules, compare_rules_between_countries).
+    This config is kept for backwards compatibility but has no effect.
+    """
+    enabled: bool = False  # Deprecated - routing is no longer used
 
 
 class QueryReformulationConfig(BaseModel):
@@ -275,7 +282,7 @@ class AgentBehaviorConfig(BaseModel):
                 router=LLMConfig(model="gpt-4o-mini", temperature=0.0, streaming=False),
                 rules=None,  # Uses formatter
             ),
-            routing=RoutingConfig(enabled=True),
+            routing=RoutingConfig(enabled=False),  # Deprecated - routing is no longer used
             query_reformulation=QueryReformulationConfig(enabled=True),
             rag=RAGConfig(
                 embedding_model="text-embedding-3-small",
