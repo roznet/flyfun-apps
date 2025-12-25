@@ -152,6 +152,109 @@
   },
 
   {
+    "_comment": "=== Filter Combinations ==="
+  },
+  {
+    "question": "Show me airports near Lyon with AVGAS and instrument approaches",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Lyon",
+      "filters": {
+        "has_avgas": true,
+        "has_procedures": true
+      }
+    },
+    "description": "AVGAS + instrument procedures combination"
+  },
+  {
+    "question": "Find airports between LFPG and LSGG that have IFR procedures and AVGAS",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "LFPG",
+      "to_location": "LSGG",
+      "filters": {
+        "has_avgas": true,
+        "has_procedures": true
+      }
+    },
+    "description": "Route with AVGAS + IFR procedures"
+  },
+  {
+    "question": "Airports near Toulouse with JetA fuel",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Toulouse",
+      "filters": {
+        "has_jet_a": true
+      }
+    },
+    "description": "JetA fuel filter"
+  },
+  {
+    "question": "Find airports with customs clearance and instrument approaches along EGLL to LFPG",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EGLL",
+      "to_location": "LFPG",
+      "filters": {
+        "point_of_entry": true,
+        "has_procedures": true
+      }
+    },
+    "description": "Border crossing + IFR procedures combination"
+  },
+  {
+    "question": "Show me border crossing airports with hard runways near Strasbourg",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Strasbourg",
+      "filters": {
+        "point_of_entry": true,
+        "has_hard_runway": true
+      }
+    },
+    "description": "Point of entry + hard runway combination"
+  },
+  {
+    "question": "Airports with published approaches between EHAM and EDDF",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EHAM",
+      "to_location": "EDDF",
+      "filters": {
+        "has_procedures": true
+      }
+    },
+    "description": "Has procedures filter only"
+  },
+  {
+    "question": "Find GA-friendly airports with AVGAS, hard runway and customs near Geneva",
+    "expected_tool": "find_airports_near_location",
+    "expected_arguments": {
+      "location_query": "Geneva",
+      "filters": {
+        "has_avgas": true,
+        "has_hard_runway": true,
+        "point_of_entry": true
+      }
+    },
+    "description": "Triple filter: AVGAS + hard runway + customs"
+  },
+  {
+    "question": "Route from EDDM to LIRF, show airports with JetA and instrument procedures",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EDDM",
+      "to_location": "LIRF",
+      "filters": {
+        "has_jet_a": true,
+        "has_procedures": true
+      }
+    },
+    "description": "JetA + IFR procedures on route"
+  },
+
+  {
     "_comment": "=== Ambiguous Names (country matters!) ===",
     "question": "Airports near Vik, Iceland",
     "expected_tool": "find_airports_near_location",

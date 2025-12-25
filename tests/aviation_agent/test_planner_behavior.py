@@ -37,7 +37,9 @@ def _load_test_cases() -> list[Dict[str, Any]]:
     """Load test cases from JSON fixture file."""
     fixture_path = Path(__file__).parent / "fixtures" / "planner_test_cases.json"
     with open(fixture_path) as f:
-        return json.load(f)
+        all_cases = json.load(f)
+    # Filter out comment-only entries (those without a "question" field)
+    return [tc for tc in all_cases if "question" in tc]
 
 
 def _should_run_behavior_tests() -> bool:
@@ -195,13 +197,25 @@ def test_planner_selects_correct_tool(
                     f"got {plan_value[nested_key]}"
                 )
         else:
-            # For simple values, check exact match (case-insensitive for strings)
+            # For simple values, check match
             plan_value = plan_args[key]
             if isinstance(expected_value, str) and isinstance(plan_value, str):
-                assert plan_value.upper() == expected_value.upper(), (
-                    f"Expected '{key}' = '{expected_value}' (case-insensitive), "
-                    f"got '{plan_value}'"
-                )
+                # For location fields, allow country disambiguation suffix
+                # e.g., "Paris" matches "Paris, France", "Bromley" matches "Bromley, UK"
+                location_fields = {"from_location", "to_location", "location_query"}
+                if key in location_fields:
+                    # Accept if actual starts with expected (case-insensitive)
+                    # This allows "Paris, France" to match expected "Paris"
+                    assert plan_value.upper().startswith(expected_value.upper()), (
+                        f"Expected '{key}' to start with '{expected_value}', "
+                        f"got '{plan_value}'"
+                    )
+                else:
+                    # Exact match (case-insensitive) for other string fields
+                    assert plan_value.upper() == expected_value.upper(), (
+                        f"Expected '{key}' = '{expected_value}' (case-insensitive), "
+                        f"got '{plan_value}'"
+                    )
             else:
                 assert plan_value == expected_value, (
                     f"Expected '{key}' = {expected_value}, got {plan_value}"
