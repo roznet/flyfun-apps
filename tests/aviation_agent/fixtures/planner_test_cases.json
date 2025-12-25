@@ -32,11 +32,11 @@
   },
   {
     "question": "What are the aviation rules for France?",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "browse_rules",
     "expected_arguments": {
       "country_code": "FR"
     },
-    "description": "Rules query for a country"
+    "description": "General rules browse for a country"
   },
   {
     "question": "Compare customs rules between France and UK",
@@ -310,40 +310,43 @@
   },
 
   {
-    "_comment": "=== Rules Questions - Single Country (RAG path) ==="
+    "_comment": "=== Rules Questions - Single Country (answer_rules_question) ==="
   },
   {
     "question": "What should i know about use of Language in Germany",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
-      "country_code": "DE"
+      "country_code": "DE",
+      "question": "What should i know about use of Language in Germany"
     },
     "description": "Single country rules query - Germany, general topic"
   },
   {
     "question": "How is the IFR routing philosophy: route availability, and how hard the system is on validation in France",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
       "country_code": "FR",
-      "tags": ["flight_plan"]
+      "question": "How is the IFR routing philosophy: route availability, and how hard the system is on validation in France",
+      "tags": ["flight_plan", "ifr"]
     },
-    "description": "Single country rules - France IFR routing (no specific tag, general IFR)"
+    "description": "Single country rules - France IFR routing"
   },
   {
     "question": "Anything to know about Restricted / danger / prohibited areas and airspace management style if i go to France?",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
       "country_code": "FR",
+      "question": "Anything to know about Restricted / danger / prohibited areas and airspace management style if i go to France?",
       "tags": ["zones", "airspace"]
     },
     "description": "Single country rules - France airspace restrictions"
   },
   {
     "question": "How is Aerodrome ATS unit authority in UK?",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
       "country_code": "GB",
-      "tags": ["air_traffic_service"]
+      "question": "How is Aerodrome ATS unit authority in UK?"
     },
     "description": "Single country rules - UK aerodrome ATS authority"
   },
@@ -383,7 +386,7 @@
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
       "countries": ["FR", "GB"],
-      "tags": ["airspace", "procedure"]
+      "tags": ["airspace"]
     },
     "description": "Compare controlled airspace transit rules FR vs UK"
   },
@@ -426,18 +429,42 @@
 
   {
     "question": "Opening/closing/amending FPLs in France",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
-      "country_code": "FR"
+      "country_code": "FR",
+      "question": "Opening/closing/amending FPLs in France"
     },
     "description": "Flight plan procedures for France"
   },
   {
     "question": "Night VFR and Special VFR policy in France (what's permitted and under what constraints)",
-    "expected_tool": "list_rules_for_country",
+    "expected_tool": "answer_rules_question",
     "expected_arguments": {
-      "country_code": "FR"
+      "country_code": "FR",
+      "question": "Night VFR and Special VFR policy in France (what's permitted and under what constraints)"
     },
     "description": "Night/Special VFR policy for France"
+  },
+
+  {
+    "_comment": "=== Browse Rules (list all in category) ==="
+  },
+  {
+    "question": "List all flight plan rules for France",
+    "expected_tool": "browse_rules",
+    "expected_arguments": {
+      "country_code": "FR",
+      "tags": ["flight_plan"]
+    },
+    "description": "Browse/list flight plan rules for France"
+  },
+  {
+    "question": "Show me all transponder rules in Germany",
+    "expected_tool": "browse_rules",
+    "expected_arguments": {
+      "country_code": "DE",
+      "tags": ["transponder"]
+    },
+    "description": "Browse/list transponder rules for Germany"
   }
 ]

@@ -927,17 +927,58 @@ def get_notification_for_airport(
 # Country Rules
 # -----------------------------------------------------------------------------
 
-def list_rules_for_country(
+def answer_rules_question(
     ctx: ToolContext,
     country_code: str,
-    tags: Optional[List[str]] = None
+    question: str,
+    tags: Optional[List[str]] = None,
+    use_rag: bool = True,
 ) -> Dict[str, Any]:
     """
-    List aviation rules and regulations for a specific country (iso-2 code eg FR,GB),
-    including customs, flight plans, and operational requirements.
-    Can be filtered by tags like flight_plan, transponder, airspace, etc.
+    Answer a specific question about aviation rules for a country.
+    Uses semantic search (RAG) to find the most relevant Q&A pairs.
+
+    Args:
+        country_code: ISO-2 country code (e.g., FR, GB)
+        question: The user's actual question
+        tags: Optional tags to filter results (used as fallback if RAG unavailable)
+        use_rag: Use RAG semantic search (default: True). Falls back to tags if False or RAG unavailable.
     """
+    country_code = country_code.upper()
     rules_manager = ctx.ensure_rules_manager()
+
+    # Try RAG-based retrieval first
+    if use_rag and ctx.rules_rag:
+        try:
+            results = ctx.rules_rag.retrieve_rules(
+                query=question,
+                countries=[country_code],
+                top_k=5,
+                similarity_threshold=0.3,
+            )
+
+            if results:
+                # Format results for display
+                formatted_lines = []
+                for r in results:
+                    q = r.get('question_text', '')
+                    a = r.get('answer_html', r.get('answer', ''))
+                    score = r.get('similarity', 0)
+                    formatted_lines.append(f"**Q: {q}**\nA: {a}\n(relevance: {score:.2f})")
+
+                return {
+                    "found": True,
+                    "country_code": country_code,
+                    "count": len(results),
+                    "retrieval_mode": "rag",
+                    "rules": results,
+                    "formatted_text": "\n\n".join(formatted_lines),
+                }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"RAG retrieval failed, falling back to tags: {e}")
+
+    # Fallback to tag-based retrieval
     rules = rules_manager.get_rules_for_country(
         country_code=country_code,
         tags=tags
@@ -947,21 +988,78 @@ def list_rules_for_country(
         available = ", ".join(rules_manager.get_available_countries())
         return {
             "found": False,
-            "country_code": country_code.upper(),
+            "country_code": country_code,
             "count": 0,
-            "message": f"No rules found for {country_code.upper()}. Available countries: {available}"
+            "retrieval_mode": "tags",
+            "message": f"No rules found for {country_code}. Available countries: {available}"
         }
 
     formatted_text = rules_manager.format_rules_for_display(rules, group_by_category=True)
-    categories = list({r.get('category', 'General') for r in rules})
 
     return {
         "found": True,
-        "country_code": country_code.upper(),
+        "country_code": country_code,
         "count": len(rules),
-        "rules": rules[:50],
+        "retrieval_mode": "tags",
+        "rules": rules[:20],  # Limit for tag-based (less targeted)
         "formatted_text": formatted_text,
-        "categories": categories
+    }
+
+
+def browse_rules(
+    ctx: ToolContext,
+    country_code: str,
+    tags: Optional[List[str]] = None,
+    offset: int = 0,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    """
+    Browse/list aviation rules for a country with pagination.
+    Use this when user wants to see all rules in a category, not answer a specific question.
+
+    Args:
+        country_code: ISO-2 country code (e.g., FR, GB)
+        tags: Optional tags to filter rules (e.g., ['flight_plan', 'transponder'])
+        offset: Starting index for pagination (default: 0)
+        limit: Maximum rules to return (default: 10, max: 50)
+    """
+    country_code = country_code.upper()
+    limit = min(limit, 50)  # Cap at 50
+
+    rules_manager = ctx.ensure_rules_manager()
+    all_rules = rules_manager.get_rules_for_country(
+        country_code=country_code,
+        tags=tags
+    )
+
+    if not all_rules:
+        available = ", ".join(rules_manager.get_available_countries())
+        return {
+            "found": False,
+            "country_code": country_code,
+            "total": 0,
+            "message": f"No rules found for {country_code}. Available countries: {available}"
+        }
+
+    total = len(all_rules)
+    paginated_rules = all_rules[offset:offset + limit]
+    has_more = (offset + limit) < total
+
+    formatted_text = rules_manager.format_rules_for_display(paginated_rules, group_by_category=True)
+    categories = list({r.get('category', 'General') for r in paginated_rules})
+
+    return {
+        "found": True,
+        "country_code": country_code,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "count": len(paginated_rules),
+        "has_more": has_more,
+        "rules": paginated_rules,
+        "formatted_text": formatted_text,
+        "categories": categories,
+        "next_offset": offset + limit if has_more else None,
     }
 
 
@@ -1292,11 +1390,39 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
         # RULES
         # -----------------------------------------------------------------
         (
-            "list_rules_for_country",
+            "answer_rules_question",
             {
-                "name": "list_rules_for_country",
-                "handler": list_rules_for_country,
-                "description": _get_tool_description(list_rules_for_country, "list_rules_for_country"),
+                "name": "answer_rules_question",
+                "handler": answer_rules_question,
+                "description": _get_tool_description(answer_rules_question, "answer_rules_question"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "country_code": {
+                            "type": "string",
+                            "description": "ISO-2 country code (e.g., FR, GB).",
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "The user's question about aviation rules.",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional tags to help filter results (e.g., ['flight_plan', 'transponder']).",
+                        },
+                    },
+                    "required": ["country_code", "question"],
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        (
+            "browse_rules",
+            {
+                "name": "browse_rules",
+                "handler": browse_rules,
+                "description": _get_tool_description(browse_rules, "browse_rules"),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1307,7 +1433,15 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         "tags": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Optional list of tags to filter rules (e.g., ['flight_plan', 'transponder']).",
+                            "description": "Optional tags to filter rules (e.g., ['flight_plan', 'transponder']).",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Starting index for pagination (default: 0).",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum rules to return (default: 10, max: 50).",
                         },
                     },
                     "required": ["country_code"],

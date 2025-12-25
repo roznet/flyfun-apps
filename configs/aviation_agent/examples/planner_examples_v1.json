@@ -12,6 +12,26 @@
     "answer": "{\"selected_tool\": \"find_airports_near_route\", \"arguments\": {\"from_location\": \"LFPG\", \"to_location\": \"LEMD\", \"filters\": {\"has_avgas\": true}}, \"answer_style\": \"narrative_markdown\"}"
   },
   {
+    "question": "How do I file a flight plan in France?",
+    "answer": "{\"selected_tool\": \"answer_rules_question\", \"arguments\": {\"country_code\": \"FR\", \"question\": \"How do I file a flight plan in France?\", \"tags\": [\"flight_plan\"]}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "What are the transponder requirements in Germany?",
+    "answer": "{\"selected_tool\": \"answer_rules_question\", \"arguments\": {\"country_code\": \"DE\", \"question\": \"What are the transponder requirements in Germany?\", \"tags\": [\"transponder\"]}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "Do I need PPR for airfields in the UK?",
+    "answer": "{\"selected_tool\": \"answer_rules_question\", \"arguments\": {\"country_code\": \"GB\", \"question\": \"Do I need PPR for airfields in the UK?\", \"tags\": [\"permission\", \"airfield\"]}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "List all flight plan rules for France",
+    "answer": "{\"selected_tool\": \"browse_rules\", \"arguments\": {\"country_code\": \"FR\", \"tags\": [\"flight_plan\"]}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
+    "question": "Show me all transponder regulations in Germany",
+    "answer": "{\"selected_tool\": \"browse_rules\", \"arguments\": {\"country_code\": \"DE\", \"tags\": [\"transponder\"]}, \"answer_style\": \"narrative_markdown\"}"
+  },
+  {
     "question": "What's the difference between France and Germany for flight plans?",
     "answer": "{\"selected_tool\": \"compare_rules_between_countries\", \"arguments\": {\"countries\": [\"FR\", \"DE\"], \"tags\": [\"flight_plan\"]}, \"answer_style\": \"narrative_markdown\"}"
   },
