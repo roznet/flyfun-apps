@@ -28,15 +28,5 @@
     "countries": ["FR", "DE"],
     "tags": ["flight_plan", "transponder"],
     "description": "Compare flight plan AND transponder rules between France and Germany (multiple tags)"
-  },
-  {
-    "countries": ["FR", "DE"],
-    "category": "VFR",
-    "description": "Compare all VFR rules between France and Germany (category filter)"
-  },
-  {
-    "countries": ["GB", "FR"],
-    "category": "IFR",
-    "description": "Compare all IFR rules between UK and France (category filter)"
   }
 ]

@@ -78,7 +78,6 @@ class SynthesizedComparison:
 
     countries: List[str]
     tags: Optional[List[str]]
-    category: Optional[str]
     synthesis: str  # LLM-generated summary
     differences: List[Dict[str, Any]]  # Raw differences for reference
     total_questions: int
@@ -140,7 +139,6 @@ class RulesComparisonService:
         self,
         countries: List[str],
         tags: Optional[List[str]] = None,
-        category: Optional[str] = None,
         max_questions: Optional[int] = None,
         min_difference: Optional[float] = None,
         synthesize: bool = True,
@@ -151,7 +149,6 @@ class RulesComparisonService:
         Args:
             countries: List of country codes to compare (e.g., ["FR", "DE"])
             tags: Optional list of tags to filter questions (e.g., ["airspace", "flight_plan"])
-            category: Optional category to filter (e.g., "VFR")
             max_questions: Override config max_questions
             min_difference: Override config min_difference
             synthesize: Whether to generate LLM synthesis
@@ -167,7 +164,6 @@ class RulesComparisonService:
         comparison = self.answer_comparer.compare_countries(
             countries=countries,
             tags=tags,
-            category=category,
             max_questions=effective_max,
             min_difference=effective_min_diff,
             send_all_threshold=self.config.send_all_threshold,
@@ -185,13 +181,11 @@ class RulesComparisonService:
                 countries=countries,
                 differences=comparison.differences,
                 tags=tags,
-                category=category,
             )
 
         return SynthesizedComparison(
             countries=countries,
             tags=tags,
-            category=category,
             synthesis=synthesis,
             differences=differences_dicts,
             total_questions=comparison.total_questions,
@@ -292,22 +286,16 @@ class RulesComparisonService:
         countries: List[str],
         differences: List[AnswerDifference],
         tags: Optional[List[str]],
-        category: Optional[str],
     ) -> str:
         """Generate LLM synthesis for comparison."""
         # Build topic context
-        topic_parts = []
-        if tags:
-            topic_parts.append(f"Topics: {', '.join(tags)}")
-        if category:
-            topic_parts.append(f"Category: {category}")
-        topic_context = "\n".join(topic_parts) if topic_parts else ""
+        topic_context = f"Topics: {', '.join(tags)}" if tags else ""
 
         # Build rules context
         rules_lines = []
         for i, diff in enumerate(differences, 1):
             rules_lines.append(f"\n### {i}. {diff.question_text}")
-            rules_lines.append(f"Category: {diff.category} | Tags: {', '.join(diff.tags)}")
+            rules_lines.append(f"Tags: {', '.join(diff.tags)}")
             rules_lines.append(f"Semantic difference score: {diff.difference_score:.2f}")
             rules_lines.append("")
             for country, answer in diff.answers.items():

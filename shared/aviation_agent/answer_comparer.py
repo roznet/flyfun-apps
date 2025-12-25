@@ -61,7 +61,6 @@ class ComparisonResult:
 
     countries: List[str]
     tags: Optional[List[str]]
-    category: Optional[str]
     differences: List[AnswerDifference]
     total_questions: int
     questions_compared: int
@@ -460,20 +459,18 @@ class AnswerComparer:
         self,
         countries: List[str],
         tags: Optional[List[str]] = None,
-        category: Optional[str] = None,
         max_questions: int = 15,
         min_difference: float = 0.1,
         send_all_threshold: int = 10,
     ) -> ComparisonResult:
         """
-        Compare rules between countries, optionally filtered by tags or category.
+        Compare rules between countries, optionally filtered by tags.
 
         This is the main entry point for cross-country comparison.
 
         Args:
             countries: List of country codes to compare
             tags: Optional list of tags to filter questions (union of all tag matches)
-            category: Optional category to filter questions
             max_questions: Maximum questions to include
             min_difference: Minimum semantic difference threshold
             send_all_threshold: If total questions <= this, include all
@@ -486,7 +483,6 @@ class AnswerComparer:
             return ComparisonResult(
                 countries=countries,
                 tags=tags,
-                category=category,
                 differences=[],
                 total_questions=0,
                 questions_compared=0,
@@ -496,11 +492,9 @@ class AnswerComparer:
         if not self.rules_manager.loaded:
             self.rules_manager.load_rules()
 
-        # Get question IDs based on filters
+        # Get question IDs based on tags filter
         if tags:
             question_ids = self.rules_manager.get_questions_by_tags(tags)
-        elif category:
-            question_ids = self.rules_manager.get_questions_by_category(category)
         else:
             # All questions
             question_ids = list(self.rules_manager.question_map.keys())
@@ -527,7 +521,6 @@ class AnswerComparer:
         return ComparisonResult(
             countries=countries,
             tags=tags,
-            category=category,
             differences=differences,
             total_questions=total_questions,
             questions_compared=len(differences),

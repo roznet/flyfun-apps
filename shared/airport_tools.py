@@ -930,18 +930,16 @@ def get_notification_for_airport(
 def list_rules_for_country(
     ctx: ToolContext,
     country_code: str,
-    category: Optional[str] = None,
     tags: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     List aviation rules and regulations for a specific country (iso-2 code eg FR,GB),
     including customs, flight plans, and operational requirements.
-    Can be filtered by category like IFR/VFR, airspace, etc.
+    Can be filtered by tags like flight_plan, transponder, airspace, etc.
     """
     rules_manager = ctx.ensure_rules_manager()
     rules = rules_manager.get_rules_for_country(
         country_code=country_code,
-        category=category,
         tags=tags
     )
 
@@ -973,21 +971,18 @@ def list_rules_for_country(
 
 def compare_rules_between_countries(
     ctx: ToolContext,
-    country1: str,
-    country2: str,
-    category: Optional[str] = None,
+    countries: List[str],
     tags: Optional[List[str]] = None,
     use_embeddings: bool = True,
 ) -> Dict[str, Any]:
     """
-    Compare aviation rules and regulations between two countries (iso-2 code eg FR,GB)
-    and highlight differences in answers. Can be filtered by category like IFR/VFR,
-    airspace, etc. or by tags like flight_plan, transponder, etc.
+    Compare aviation rules and regulations between countries (iso-2 codes eg FR,GB,DE).
+    Can be filtered by tags like flight_plan, transponder, airspace, etc.
 
     This tool returns DATA only - synthesis is done by the formatter node.
     Returns a _tool_type="comparison" marker for formatter routing.
     """
-    countries = [country1.upper(), country2.upper()]
+    countries = [c.upper() for c in countries]
 
     # Try embedding-based comparison first (smarter - detects semantic differences)
     # NOTE: Tool returns DATA only - synthesis is done by formatter
@@ -995,7 +990,6 @@ def compare_rules_between_countries(
         try:
             result = ctx.comparison_service.compare_countries(
                 countries=countries,
-                category=category,
                 tags=tags,
                 synthesize=False,  # Never synthesize in tool - formatter does this
             )
@@ -1007,17 +1001,17 @@ def compare_rules_between_countries(
             rules_context_lines = []
             for i, diff in enumerate(differences, 1):
                 rules_context_lines.append(f"\n### {i}. {diff.get('question_text', 'Unknown question')}")
-                rules_context_lines.append(f"Category: {diff.get('category', 'N/A')} | Tags: {', '.join(diff.get('tags', []))}")
+                rules_context_lines.append(f"Tags: {', '.join(diff.get('tags', []))}")
                 rules_context_lines.append(f"Semantic difference score: {diff.get('difference_score', 0):.2f}")
                 rules_context_lines.append("")
                 for cc, answer in diff.get("answers", {}).items():
                     rules_context_lines.append(f"**{cc}**: {answer}")
                 rules_context_lines.append("")
 
+            countries_str = ", ".join(countries)
             return {
                 "found": True,
                 "countries": countries,
-                "category": category,
                 "tags": tags,
                 "total_questions": result.total_questions,
                 "questions_analyzed": result.questions_analyzed,
@@ -1025,7 +1019,7 @@ def compare_rules_between_countries(
                 "differences": differences,
                 "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
                 "total_differences": len(differences),
-                "message": f"Comparison between {countries[0]} and {countries[1]} complete.",
+                "message": f"Comparison between {countries_str} complete.",
                 # Mark this as a comparison tool for formatter routing
                 "_tool_type": "comparison",
             }
@@ -1036,43 +1030,44 @@ def compare_rules_between_countries(
                 f"Embedding comparison failed, falling back to text: {e}"
             )
 
-    # Fall back to simple text-based comparison
+    # Fall back to simple text-based comparison (only supports 2 countries)
     rules_manager = ctx.ensure_rules_manager()
-    comparison = rules_manager.compare_rules_between_countries(
-        country1=country1,
-        country2=country2,
-        category=category
-    )
+    if len(countries) >= 2:
+        comparison = rules_manager.compare_rules_between_countries(
+            country1=countries[0],
+            country2=countries[1],
+        )
+    else:
+        comparison = {"differences": []}
 
     diff_count = len(comparison.get('differences', []))
 
     # Build rules_context from text-based comparison for formatter
     rules_context_lines = []
     for i, diff in enumerate(comparison.get('differences', []), 1):
-        rules_context_lines.append(f"\n### {i}. {diff.get('category', 'General')}")
+        rules_context_lines.append(f"\n### {i}. {diff.get('question_text', 'Unknown')}")
         for cc, rule in diff.get('rules', {}).items():
             rules_context_lines.append(f"**{cc}**: {rule}")
         rules_context_lines.append("")
 
+    countries_str = ", ".join(countries)
     return {
         "found": True,
         "countries": countries,
-        "category": category,
+        "tags": tags,
         "comparison": comparison,
         "differences": comparison.get('differences', []),
         "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
         "total_differences": diff_count,
         "filtered_by_embedding": False,
-        "message": f"Comparison between {countries[0]} and {countries[1]} complete.",
+        "message": f"Comparison between {countries_str} complete.",
         "_tool_type": "comparison",
     }
 
 
 def _compare_rules_between_countries_tool(
     ctx: ToolContext,
-    country1: str,
-    country2: str,
-    category: Optional[str] = None,
+    countries: List[str],
     tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -1080,7 +1075,7 @@ def _compare_rules_between_countries_tool(
     Used as the actual handler in the tool registry.
     """
     result = compare_rules_between_countries(
-        ctx, country1, country2, category=category, tags=tags
+        ctx, countries, tags=tags
     )
     if result.get("formatted_summary") and "pretty" not in result:
         result["pretty"] = result["formatted_summary"]
@@ -1309,14 +1304,10 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                             "type": "string",
                             "description": "ISO-2 country code (e.g., FR, GB).",
                         },
-                        "category": {
-                            "type": "string",
-                            "description": "Optional category filter (e.g., Customs).",
-                        },
                         "tags": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Optional list of tags to filter rules.",
+                            "description": "Optional list of tags to filter rules (e.g., ['flight_plan', 'transponder']).",
                         },
                     },
                     "required": ["country_code"],
@@ -1333,17 +1324,10 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "country1": {
-                            "type": "string",
-                            "description": "First ISO-2 country code.",
-                        },
-                        "country2": {
-                            "type": "string",
-                            "description": "Second ISO-2 country code.",
-                        },
-                        "category": {
-                            "type": "string",
-                            "description": "Optional category filter (e.g., VFR, IFR, Customs).",
+                        "countries": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of ISO-2 country codes to compare (e.g., ['FR', 'GB', 'DE']).",
                         },
                         "tags": {
                             "type": "array",
@@ -1351,7 +1335,7 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                             "description": "Optional list of tags to filter (e.g., ['flight_plan', 'transponder']).",
                         },
                     },
-                    "required": ["country1", "country2"],
+                    "required": ["countries"],
                 },
                 "expose_to_llm": True,
             },

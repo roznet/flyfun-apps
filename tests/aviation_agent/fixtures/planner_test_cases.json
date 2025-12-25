@@ -42,9 +42,7 @@
     "question": "Compare customs rules between France and UK",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "FR",
-      "country2": "GB",
-      "category": "Customs"
+      "countries": ["FR", "GB"]
     },
     "description": "Rules comparison query"
   },
@@ -323,10 +321,11 @@
     "description": "Single country rules query - Germany, general topic"
   },
   {
-    "question": "How is the IFR routing philosophy: FRA, route availability, and how hard the system is on validation in France",
+    "question": "How is the IFR routing philosophy: route availability, and how hard the system is on validation in France",
     "expected_tool": "list_rules_for_country",
     "expected_arguments": {
-      "country_code": "FR"
+      "country_code": "FR",
+      "tags": ["flight_plan"]
     },
     "description": "Single country rules - France IFR routing (no specific tag, general IFR)"
   },
@@ -334,7 +333,8 @@
     "question": "Anything to know about Restricted / danger / prohibited areas and airspace management style if i go to France?",
     "expected_tool": "list_rules_for_country",
     "expected_arguments": {
-      "country_code": "FR"
+      "country_code": "FR",
+      "tags": ["zones", "airspace"]
     },
     "description": "Single country rules - France airspace restrictions"
   },
@@ -342,7 +342,8 @@
     "question": "How is Aerodrome ATS unit authority in UK?",
     "expected_tool": "list_rules_for_country",
     "expected_arguments": {
-      "country_code": "GB"
+      "country_code": "GB",
+      "tags": ["air_traffic_service"]
     },
     "description": "Single country rules - UK aerodrome ATS authority"
   },
@@ -354,8 +355,7 @@
     "question": "What are the Airspace design choices differences between UK and France?",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "GB",
-      "country2": "FR",
+      "countries": ["GB", "FR"],
       "tags": ["airspace"]
     },
     "description": "Compare airspace rules between UK and France"
@@ -364,16 +364,16 @@
     "question": "Tell me about IFR/VFR transition differences between Germany, UK and Belgium",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
+      "countries": ["DE", "GB", "BE"],
       "tags": ["procedure", "airspace"]
     },
-    "description": "Compare IFR/VFR transition - 3 countries mentioned, planner picks 2"
+    "description": "Compare IFR/VFR transition - 3 countries mentioned"
   },
   {
     "question": "How FIS works, what services it provides in France and UK",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "FR",
-      "country2": "GB",
+      "countries": ["FR", "GB"],
       "tags": ["air_traffic_service"]
     },
     "description": "Compare FIS services between France and UK"
@@ -382,8 +382,7 @@
     "question": "What should i know about Controlled airspace transit (VFR & IFR) in France and UK",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "FR",
-      "country2": "GB",
+      "countries": ["FR", "GB"],
       "tags": ["airspace"]
     },
     "description": "Compare controlled airspace transit rules FR vs UK"
@@ -392,8 +391,7 @@
     "question": "When a flight plan is mandatory in sweden and germany",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "SE",
-      "country2": "DE",
+      "countries": ["SE", "DE"],
       "tags": ["flight_plan"]
     },
     "description": "Compare flight plan requirements Sweden vs Germany"
@@ -402,8 +400,7 @@
     "question": "If I know france, anything to know about Transponder and radio mandates outside controlled airspace in the UK?",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "FR",
-      "country2": "GB",
+      "countries": ["FR", "GB"],
       "tags": ["transponder"]
     },
     "description": "Compare transponder requirements - implicit FR vs UK comparison"
@@ -412,8 +409,7 @@
     "question": "Tell me about Airfield accessibility: PPR, Slots, Military airfields in UK and Spain",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "GB",
-      "country2": "ES",
+      "countries": ["GB", "ES"],
       "tags": ["airfield", "permission"]
     },
     "description": "Compare airfield accessibility UK vs Spain"
@@ -422,8 +418,7 @@
     "question": "Is Visual circuit joining & calls the same in france and uk?",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "country1": "FR",
-      "country2": "GB",
+      "countries": ["FR", "GB"],
       "tags": ["procedure", "join"]
     },
     "description": "Compare visual circuit procedures FR vs UK"

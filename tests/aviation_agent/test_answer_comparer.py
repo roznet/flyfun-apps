@@ -378,7 +378,6 @@ class TestRulesComparisonService:
         comparer.compare_countries.return_value = ComparisonResult(
             countries=["FR", "DE"],
             tags=["vfr"],
-            category=None,
             differences=[
                 AnswerDifference(
                     question_id="test-q1",

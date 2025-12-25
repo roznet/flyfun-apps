@@ -141,14 +141,12 @@ def test_comparison_retrieval(test_case: Dict[str, Any], answer_comparer):
     """
     countries = test_case["countries"]
     tags = test_case.get("tags")
-    category = test_case.get("category")
     description = test_case.get("description", "")
 
     # Compare countries
     result = answer_comparer.compare_countries(
         countries=countries,
         tags=tags,
-        category=category,
         max_questions=20,  # Get more for inspection
         min_difference=0.05,  # Lower threshold for more results
     )
@@ -156,7 +154,7 @@ def test_comparison_retrieval(test_case: Dict[str, Any], answer_comparer):
     # Log results for inspection
     print(f"\n{'='*70}")
     print(f"Countries: {countries}")
-    print(f"Tags: {tags or 'None'} | Category: {category or 'None'}")
+    print(f"Tags: {tags or 'None'}")
     print(f"Description: {description}")
     print(f"Total questions: {result.total_questions}")
     print(f"Questions compared: {result.questions_compared}")
