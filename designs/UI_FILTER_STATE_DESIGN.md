@@ -35,7 +35,12 @@ This document describes the architecture and design of the FlyFun Airport Explor
 
 3. **Events** (For Cross-Component Communication): Custom DOM events for loose coupling
    - `trigger-search` event - Allows any component to trigger a search (handled in `main.ts`)
+   - `trigger-locate` event - Allows any component to trigger a locate search (handled in `main.ts`)
    - `render-route` event - Allows route rendering from any component
+   - `reset-rules-panel` event - Clears rules panel state
+   - `show-country-rules` event - Displays country rules in Rules panel
+   - `airport-click` event - Triggers airport selection and details loading
+   - `display-airport-details` event - Displays airport details in right panel
 
 **Design Pattern: LLMIntegration Communication**
 
@@ -71,7 +76,7 @@ interface AppState {
   visualization: {
     legendMode: LegendMode;         // Current legend mode
     highlights: Map<string, Highlight>; // Active highlights
-    overlays: Map<string, any>;     // Map overlays
+    overlays: Map<string, Overlay>; // Map overlays
     showProcedureLines: boolean;    // Procedure lines visibility
     showRoute: boolean;             // Route visibility
   };
@@ -83,8 +88,10 @@ interface AppState {
     loading: boolean;              // Loading state
     error: string | null;          // Error message
     searchQuery: string;           // Search input value
-    activeTab: 'details' | 'aip' | 'rules'; // Active detail tab
+    activeTab: 'details' | 'aip' | 'rules' | 'relevance'; // Active detail tab
   };
+  ga: GAState;                      // GA Friendliness state
+  rules: RulesState;                // Rules/Regulations state
 }
 ```
 
@@ -92,6 +99,7 @@ interface AppState {
 
 All state modifications go through store actions:
 
+**Core Actions:**
 - `setAirports(airports)` - Set airports and auto-filter
 - `setFilters(filters)` - Update filters and re-filter airports
 - `setLegendMode(mode)` - Change legend mode
@@ -109,12 +117,34 @@ All state modifications go through store actions:
 - `clearFilters()` - Clear all filters
 - `resetState()` - Reset entire state
 
+**GA Friendliness Actions:**
+- `setGAConfig(config)` - Set GA config from API
+- `setGAConfigError(error)` - Set GA config error
+- `setGASelectedPersona(personaId)` - Set selected persona
+- `setGAScores(scores)` - Set GA scores (batch update) and compute quartiles
+- `setGASummary(icao, summary)` - Set GA summary for single airport
+- `setGALoading(loading)` - Set GA loading state
+- `setGAComputedQuartiles(quartiles)` - Set computed quartile thresholds
+- `clearGAScores()` - Clear GA scores
+
+**Rules/Regulations Actions:**
+- `setRulesForCountry(countryCode, rules)` - Store rules for a country
+- `setRulesSelection(countries, visualFilter)` - Set active countries and visual filter
+- `setRulesTextFilter(text)` - Update free-text filter
+- `setRuleSectionState(sectionId, expanded)` - Persist expand/collapse state
+- `clearRules()` - Clear all rules state
+
 #### Filtering Logic
 
-Client-side filtering is performed in `filterAirports()` function in `store.ts`. Filters include:
+Client-side filtering is performed in `filterAirports()` function in `store.ts`. Currently implements basic filtering with a TODO to integrate with the shared `FilterEngine` from the Python backend (`shared/filtering/filter_engine.py`).
+
+**Current Implementation:**
 - Country filter
 - Boolean filters (has_procedures, has_aip_data, has_hard_runway, point_of_entry)
-- Additional filters are applied on the backend via API
+- Additional filters (has_avgas, has_jet_a, runway length, landing fee) are applied on the backend via API
+
+**Future Enhancement:**
+- Integration with shared FilterEngine for consistent filtering logic across frontend and backend
 
 ### 2. Visualization Engine (`ts/engines/visualization-engine.ts`)
 
@@ -140,6 +170,10 @@ Manages Leaflet map rendering and all map-related operations.
 - `setView(lat, lng, zoom)` - Set map view
 - `getMap()` - Get Leaflet map instance
 - `fitBounds()` - Fit map bounds to show all airports
+- `loadBulkProcedureLines(airports, apiAdapter)` - Load procedure lines in bulk for multiple airports
+- `clearProcedureLines()` - Clear all procedure lines
+- `getRelevanceColor(airport)` - Get color based on GA relevance score and quartiles (private)
+- `getNotificationColor(airport)` - Get color based on notification requirements (private)
 
 #### Legend Modes
 
@@ -147,6 +181,8 @@ Manages Leaflet map rendering and all map-related operations.
 - **`procedure-precision`**: Colors by procedure precision (ILS, RNAV, etc.)
 - **`runway-length`**: Colors by runway length
 - **`country`**: Colors by country
+- **`relevance`**: Colors by GA Friendliness relevance score (quartile-based, persona-specific)
+- **`notification`**: Colors by notification requirements (H24, hours notice, on request)
 
 ### 3. UI Manager (`ts/managers/ui-manager.ts`)
 
@@ -163,6 +199,7 @@ Handles all DOM interactions and updates UI based on state changes.
 
 #### Key Methods
 
+**Initialization & Core:**
 - `init()` - Initialize UI manager
 - `updateUI(state)` - Update UI based on state
 - `updateFilterControls(filters)` - Sync filter controls with state
@@ -171,9 +208,26 @@ Handles all DOM interactions and updates UI based on state changes.
 - `updateErrorState(error)` - Display error message
 - `updateAirportCount(count)` - Update airport count display
 - `applyFilters()` - Trigger API call with current filters
+- `syncFiltersToUI(filters)` - Public method for LLM to sync filter UI
+
+**Search & Route:**
 - `handleSearch(query)` - Handle search input (private)
 - `handleRouteSearch(routeAirports)` - Handle route search (private)
-- `syncFiltersToUI(filters)` - Public method for LLM to sync filter UI
+- `applyRouteSearch(route)` - Apply route search with current filters (private)
+- `applyLocateWithCenter(locate)` - Apply locate search with cached center (private)
+
+**AIP Filtering:**
+- `loadAIPFilters()` - Load AIP fields and presets from API
+- `wireUpAIPFilters()` - Wire up AIP filter control event listeners
+- `handleAIPFieldChange()` - Handle AIP field/operator/value changes
+- `applyAIPPreset(preset)` - Apply AIP filter preset
+- `clearAIPFilter()` - Clear AIP filter
+- `updateActiveAIPFilter(field, operator, value)` - Update active filter display
+
+**Persona/GA Management:**
+- `populatePersonaSelector()` - Populate persona selector dropdown from GA config
+- `updatePersonaSelectorVisibility(legendMode)` - Update persona selector visibility (now always visible)
+- `triggerGAScoresLoad()` - Trigger loading of GA scores for visible airports
 
 ### 4. API Adapter (`ts/adapters/api-adapter.ts`)
 
@@ -181,6 +235,7 @@ Handles all communication with the backend API using Fetch API.
 
 #### Endpoints
 
+**Airport Data:**
 - `getAirports(filters)` - Get airports with filters
 - `getAirportDetail(icao)` - Get airport details
 - `searchAirports(query, limit)` - Search airports
@@ -190,10 +245,22 @@ Handles all communication with the backend API using Fetch API.
 - `getAirportProcedures(icao)` - Get airport procedures
 - `getAirportRunways(icao)` - Get airport runways
 - `getAirportAIPEntries(icao)` - Get AIP entries
-- `getCountryRules(countryCode)` - Get country rules
+- `getBulkProcedureLines(airports, distanceNm)` - Get procedure lines for multiple airports
+
+**Filters & Metadata:**
 - `getAllFilters()` - Get available filters metadata
 - `getAIPFilterPresets()` - Get AIP filter presets
 - `getAvailableAIPFields()` - Get available AIP fields
+
+**Rules/Regulations:**
+- `getCountryRules(countryCode)` - Get country rules
+
+**GA Friendliness:**
+- `getGAConfig()` - Get GA configuration (features, personas, buckets)
+- `getGAPersonas()` - Get list of available personas
+- `getGAScores(icaos, persona)` - Get GA scores for multiple airports (max 200)
+- `getGASummary(icao, persona)` - Get full GA summary for single airport
+- `getGAHealth()` - Check GA service health
 
 ### 5. LLM Integration (`ts/adapters/llm-integration.ts`)
 
@@ -207,6 +274,7 @@ The LLM can return these visualization types:
    - Sets airports in store via `store.setAirports()`
    - Applies filter profile if provided
    - Fits map bounds to show all airports
+   - Supports `style` field (e.g., "customs") for special highlighting
 
 2. **`route_with_markers`**: Display route with airports
    - Clears old LLM highlights
@@ -219,7 +287,8 @@ The LLM can return these visualization types:
    - Sets airports in store
    - Sets locate state with point coordinates
    - Applies filter profile if provided
-   - Fits map bounds to show all airports
+   - Triggers locate search via `trigger-locate` event
+   - Shows all airports within radius with highlights on recommended airports
 
 4. **`marker_with_details`**: Focus on specific airport
    - Updates search query in store
@@ -286,6 +355,7 @@ When a user types a route (e.g., "EGKB LFPG") in the search input:
 
 **Key Details:**
 - Route detection: All parts must be 4-letter ICAO codes (regex: `/^[A-Za-z]{4}$/`)
+- Single-airport routes: Supported (for locate-style searches with distance radius)
 - Debouncing: 500ms delay prevents excessive API calls
 - Route state: Stores both ICAO codes and coordinates for route line rendering
 - Filter integration: Route search results are filtered by current filters
@@ -346,6 +416,142 @@ Filter checkbox toggled
 ```
 
 This ensures filters work correctly with route searches by re-running the API call with updated filters.
+
+## GA Friendliness State Management
+
+### Overview
+
+The GA (General Aviation) Friendliness system provides persona-based relevance scoring for airports. Scores are pre-computed for all personas and embedded in airport data, with quartile thresholds computed dynamically based on visible airports.
+
+### State Structure
+
+```typescript
+interface GAState {
+  config: GAConfig | null;              // GA configuration from API
+  configLoaded: boolean;                // Whether config has been loaded
+  configError: string | null;           // Error loading config
+  selectedPersona: string;               // Current persona ID (e.g., 'ifr_touring_sr22')
+  scores: Map<string, AirportGAScore>;  // GA scores per airport (ICAO -> score)
+  summaries: Map<string, AirportGASummary>; // Full GA summaries per airport
+  isLoading: boolean;                    // Loading state
+  computedQuartiles: QuartileThresholds | null; // Quartile thresholds for relevance coloring
+}
+```
+
+### Data Flow
+
+**Initialization:**
+```
+App starts → PersonaManager.init() → APIAdapter.getGAConfig() → store.setGAConfig()
+```
+
+**Persona Selection:**
+```
+User selects persona → store.setGASelectedPersona() → Quartiles reset → PersonaManager.computeQuartiles()
+```
+
+**Score Loading:**
+```
+Airports displayed → PersonaManager.loadScores(icaos) → APIAdapter.getGAScores() → store.setGAScores()
+→ Quartiles computed → store.setGAComputedQuartiles()
+```
+
+**Relevance Coloring:**
+```
+Legend mode = 'relevance' → VisualizationEngine.getRelevanceColor() → 
+Uses airport.ga.persona_scores[selectedPersona] → Compares to quartiles → Returns bucket color
+```
+
+### Key Concepts
+
+- **Personas**: Pre-defined GA pilot profiles with feature weights (e.g., IFR Touring SR22, VFR Day Trip)
+- **Quartiles**: Dynamic thresholds (Q1, Q2, Q3) computed from visible airport scores
+- **Relevance Buckets**: Four quartiles (top, second, third, bottom) plus "unknown" for airports without data
+- **Embedded Scores**: All persona scores are pre-computed and embedded in `airport.ga.persona_scores`
+
+## Rules/Regulations State Management
+
+### Overview
+
+The Rules system manages country-specific aviation regulations, with support for LLM-provided visual filters and free-text search.
+
+### State Structure
+
+```typescript
+interface RulesState {
+  allRulesByCountry: Record<string, CountryRules>; // All loaded rules, keyed by ISO country code
+  activeCountries: string[];                     // Currently selected countries (display order)
+  visualFilter: RulesVisualFilter | null;        // LLM-provided visual filter (categoriesByCountry)
+  textFilter: string;                             // Free-text filter from Rules search box
+  sectionState: Record<string, boolean>;          // Expand/collapse state per section (sectionId -> expanded)
+}
+```
+
+### Data Flow
+
+**Loading Rules:**
+```
+LLM sends 'show-country-rules' event → main.ts loads rules → APIAdapter.getCountryRules() → 
+store.setRulesForCountry() → store.setRulesSelection() → Rules panel renders
+```
+
+**Visual Filtering:**
+```
+LLM provides categoriesByCountry → store.setRulesSelection(countries, visualFilter) → 
+Rules panel filters to show only specified categories per country
+```
+
+**Text Filtering:**
+```
+User types in Rules search box → store.setRulesTextFilter() → Rules panel re-renders → 
+Filters rules by question, answer, tags, category name, country
+```
+
+**Section State:**
+```
+User expands/collapses section → store.setRuleSectionState() → State persisted in localStorage → 
+Restored on next render
+```
+
+### Key Concepts
+
+- **Visual Filter**: LLM can provide `categoriesByCountry` to show only relevant categories
+- **Text Filter**: Free-text search across question, answer, tags, category, and country
+- **Section State**: Expand/collapse state persisted per section ID
+- **Store-Driven Rendering**: Rules panel renders from centralized store state, not direct API calls
+
+## AIP Filtering System
+
+### Overview
+
+AIP (Aeronautical Information Publication) filtering allows users to filter airports by specific AIP field values using operators (contains, equals, not_empty, starts_with, ends_with).
+
+### Data Flow
+
+**Loading Metadata:**
+```
+UIManager.init() → loadAIPFilters() → 
+APIAdapter.getAvailableAIPFields() + getAIPFilterPresets() → 
+Populates field select and preset buttons
+```
+
+**Applying Filter:**
+```
+User selects field/operator/value → handleAIPFieldChange() → store.setFilters() → 
+Active filter displayed → API call includes AIP filter parameters
+```
+
+**Presets:**
+```
+User clicks preset button → applyAIPPreset() → Sets field/operator/value → handleAIPFieldChange()
+```
+
+### Key Concepts
+
+- **Presets**: Pre-defined common AIP filters (e.g., "Has Customs", "Has Fuel")
+- **Operators**: contains, equals, not_empty, starts_with, ends_with
+- **Active Filter Display**: Shows current AIP filter in UI when active
+- **Backend Filtering**: AIP filters are applied on backend, not client-side
 
 ## Common Patterns
 
