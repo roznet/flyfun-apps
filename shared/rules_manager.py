@@ -19,6 +19,46 @@ def normalize_tag(tag: str) -> str:
     return tag.lower().strip().replace(" ", "_")
 
 
+# Tag specificity: more specific tags suppress broader ones when both are inferred.
+# This prevents overly broad queries when a specific tag captures the intent.
+# Format: "specific_tag": ["broader_tag1", "broader_tag2", ...]
+TAG_SUPPRESSION_RULES: Dict[str, List[str]] = {
+    # If asking about VFR/IFR transition, don't also pull in all VFR and IFR questions
+    "vfr_ifr_transition": ["vfr", "ifr"],
+    "ifr": ["vfr"],
+}
+
+
+def apply_tag_preferences(tags: List[str]) -> List[str]:
+    """
+    Remove lower-priority tags when higher-priority (more specific) ones are present.
+
+    For example, if 'vfr_ifr_transition' is in tags, remove 'vfr' and 'ifr'
+    since the transition tag is more specific and we don't want to pull in
+    all general VFR/IFR questions.
+
+    Args:
+        tags: List of tags (will be normalized)
+
+    Returns:
+        Filtered list with suppressed tags removed
+    """
+    if not tags:
+        return tags
+
+    # Normalize input tags
+    normalized = [normalize_tag(t) for t in tags]
+
+    # Collect all tags that should be suppressed
+    suppressed: Set[str] = set()
+    for tag in normalized:
+        if tag in TAG_SUPPRESSION_RULES:
+            suppressed.update(TAG_SUPPRESSION_RULES[tag])
+
+    # Return tags that aren't suppressed
+    return [t for t in normalized if t not in suppressed]
+
+
 class RulesManager:
     """Manages aviation rules data for multiple countries."""
 
