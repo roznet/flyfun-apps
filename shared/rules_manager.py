@@ -236,11 +236,14 @@ class RulesManager:
         if category:
             entries = [r for r in entries if category.lower() in r.get('category').lower()]
 
-        # Apply tags filter
+        # Apply tags filter (with suppression rules for domain-specific optimization)
         if tags:
+            # Apply tag suppression: if specific tags are present, remove broader ones
+            # e.g., 'vfr_ifr_transition' suppresses 'vfr' and 'ifr'
+            filtered_tags = apply_tag_preferences(tags)
             entries = [
                 r for r in entries
-                if any(tag in (r.get('tags') or []) for tag in tags)
+                if any(tag in (r.get('tags') or []) for tag in filtered_tags)
             ]
 
         # Apply search term filter
@@ -558,6 +561,9 @@ class RulesManager:
         """
         Get question IDs that have any of the specified tags (union).
 
+        Applies tag suppression rules: if specific tags are present, broader
+        ones are removed (e.g., 'vfr_ifr_transition' suppresses 'vfr', 'ifr').
+
         Args:
             tags: List of tag names to filter by (each will be normalized)
 
@@ -569,8 +575,11 @@ class RulesManager:
         if not self.loaded:
             return []
 
+        # Apply tag suppression for domain-specific optimization
+        filtered_tags = apply_tag_preferences(tags)
+
         question_id_set: Set[str] = set()
-        for tag in tags:
+        for tag in filtered_tags:
             normalized_tag = normalize_tag(tag)
             question_id_set.update(self.rules_index.get('tags', {}).get(normalized_tag, set()))
         return sorted(question_id_set)
