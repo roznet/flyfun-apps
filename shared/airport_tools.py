@@ -76,9 +76,20 @@ class ToolSpec(TypedDict):
 # Geocoding & Location Helpers
 # -----------------------------------------------------------------------------
 
+# European country codes for geocoding preference
+EUROPEAN_COUNTRY_CODES = {
+    "DE", "FR", "GB", "ES", "IT", "NL", "BE", "CH", "AT", "PL", "PT",
+    "GR", "IE", "SE", "NO", "DK", "FI", "CZ", "HU", "HR", "SI", "SK",
+    "RO", "BG", "TR", "MT", "LU", "IS", "EE", "LV", "LT", "CY", "RS",
+    "AL", "ME", "MK", "BA", "GG", "JE", "IM", "FO", "MC", "AD", "LI",
+}
+
+
 def _geoapify_geocode(query: str) -> Optional[Dict[str, Any]]:
     """
     Forward-geocode a free-text location using Geoapify.
+
+    Prefers European locations for ambiguous queries (e.g., "Bromley" returns UK, not USA).
 
     Args:
         query: Free-text location name (e.g., "Paris", "Lake Geneva")
@@ -93,7 +104,7 @@ def _geoapify_geocode(query: str) -> Optional[Dict[str, Any]]:
     base_url = "https://api.geoapify.com/v1/geocode/search"
     params = {
         "text": query,
-        "limit": 1,
+        "limit": 5,  # Get multiple results to find European match
         "format": "json",
         "apiKey": api_key,
     }
@@ -105,16 +116,28 @@ def _geoapify_geocode(query: str) -> Optional[Dict[str, Any]]:
             results = data.get("results") or []
             if not results:
                 return None
-            top = results[0]
-            lat = top.get("lat")
-            lon = top.get("lon")
+
+            # Prefer European results for ambiguous queries like "Bromley"
+            selected = None
+            for result in results:
+                country_code = (result.get("country_code") or "").upper()
+                if country_code in EUROPEAN_COUNTRY_CODES:
+                    selected = result
+                    break
+
+            # Fall back to first result if no European match
+            if not selected:
+                selected = results[0]
+
+            lat = selected.get("lat")
+            lon = selected.get("lon")
             if lat is None or lon is None:
                 return None
             return {
                 "lat": float(lat),
                 "lon": float(lon),
-                "formatted": top.get("formatted") or query,
-                "country_code": top.get("country_code"),  # ISO-2 country code (e.g., "IS", "GB")
+                "formatted": selected.get("formatted") or query,
+                "country_code": selected.get("country_code"),
             }
     except Exception:
         return None
@@ -591,11 +614,12 @@ def find_airports_near_location(
     **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
-    Find airports near a geographic location (free-text location name, city, landmark, or coordinates) within a specified distance.
+    Find airports near a geographic location (ICAO code, free-text location name, city, landmark, or coordinates) within a specified distance.
 
-    **USE THIS TOOL when user asks about airports "near", "around", "close to" a location that is NOT an ICAO code.**
+    **USE THIS TOOL when user asks about airports "near", "around", "close to" a location.**
 
     Examples:
+    - "airports near EGTF" → use this tool with location_query="EGTF"
     - "airports near Paris" → use this tool with location_query="Paris"
     - "airports around Lake Geneva" → use this tool with location_query="Lake Geneva"
     - "airports close to Zurich" → use this tool with location_query="Zurich"
@@ -603,17 +627,16 @@ def find_airports_near_location(
     - "airports near Vannes with less than 24h notice" → use with max_hours_notice=24
 
     Process:
-    1) Geocodes the location via Geoapify to get coordinates (or uses pre-resolved center if provided)
-    2) Computes distance from each airport to that point and filters by max_distance_nm
-    3) Applies optional filters (fuel, customs, runway, etc.) and priority sorting
-    4) If max_hours_notice is set, filters to airports requiring at most that many hours notice
+    1) If location_query is an ICAO code, uses that airport's coordinates as center
+    2) Otherwise geocodes the location via Geoapify (or uses pre-resolved center if provided)
+    3) Computes distance from each airport to that point and filters by max_distance_nm
+    4) Applies optional filters (fuel, customs, runway, etc.) and priority sorting
+    5) If max_hours_notice is set, filters to airports requiring at most that many hours notice
 
     **By default, large commercial airports are excluded** (not suitable for GA).
     Set include_large_airports=True only if user explicitly asks for large/commercial airports.
-
-    **DO NOT use this tool if user provides ICAO codes** - use find_airports_near_route instead for route-based searches.
     """
-    # Use pre-resolved center if provided, otherwise geocode
+    # Use pre-resolved center if provided, otherwise try ICAO lookup then geocode
     if center_lat is not None and center_lon is not None:
         geocode = {
             "lat": center_lat,
@@ -621,12 +644,23 @@ def find_airports_near_location(
             "formatted": location_query or "Center"
         }
     else:
-        geocode = _geoapify_geocode(location_query)
-        if not geocode:
-            return {
-                "found": False,
-                "pretty": f"Could not geocode '{location_query}'. Ensure GEOAPIFY_API_KEY is set and the query is valid."
+        # First try direct ICAO lookup (handles "airports near EGTF" queries)
+        icao = location_query.strip().upper()
+        airport = ctx.model.airports.get(icao)
+        if airport and hasattr(airport, 'navpoint') and airport.navpoint:
+            geocode = {
+                "lat": airport.navpoint.latitude,
+                "lon": airport.navpoint.longitude,
+                "formatted": f"{airport.name} ({icao})"
             }
+        else:
+            # Not found as ICAO - try geocoding as location name
+            geocode = _geoapify_geocode(location_query)
+            if not geocode:
+                return {
+                    "found": False,
+                    "pretty": f"Could not geocode '{location_query}'. Ensure GEOAPIFY_API_KEY is set and the query is valid."
+                }
 
     center_point = NavPoint(latitude=geocode["lat"], longitude=geocode["lon"], name=geocode["formatted"])
 

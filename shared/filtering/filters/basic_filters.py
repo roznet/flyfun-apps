@@ -40,7 +40,7 @@ class HasProceduresFilter(Filter):
     ) -> bool:
         if value is None:
             return True
-        has_procedures = bool(airport.has_procedures)
+        has_procedures = bool(airport.procedures)
         return has_procedures == bool(value)
 
 
