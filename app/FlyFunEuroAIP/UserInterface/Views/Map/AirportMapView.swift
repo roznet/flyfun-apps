@@ -33,7 +33,8 @@ struct AirportMapView: View {
                         airport: airport,
                         legendMode: currentLegendMode,
                         isSelected: airport.icao == state?.airports.selectedAirport?.icao,
-                        isBorderCrossing: state?.airports.isBorderCrossing(airport) ?? false
+                        isBorderCrossing: state?.airports.isBorderCrossing(airport) ?? false,
+                        notificationInfo: state?.notificationService?.getNotification(icao: airport.icao)
                     )
                 }
                 .tag(airport.icao)
@@ -270,6 +271,7 @@ struct AirportMarkerView: View {
     let legendMode: LegendMode
     let isSelected: Bool
     let isBorderCrossing: Bool
+    let notificationInfo: NotificationInfo?
     
     var body: some View {
         ZStack {
@@ -309,6 +311,22 @@ struct AirportMarkerView: View {
             return procedureSize
         case .country:
             return 14 // Fixed size for country mode
+        case .notification:
+            return notificationSize
+        }
+    }
+
+    /// Notification mode: Size by easiness (easier = larger)
+    private var notificationSize: CGFloat {
+        guard let info = notificationInfo else {
+            return 8 // No data
+        }
+        let score = info.easinessScore
+        switch score {
+        case 80...100: return 16  // Easy
+        case 60..<80: return 14   // Moderate
+        case 40..<60: return 12   // Some hassle
+        default: return 10        // High hassle
         }
     }
     
@@ -348,6 +366,8 @@ struct AirportMarkerView: View {
             return procedureColor
         case .country:
             return countryColor
+        case .notification:
+            return notificationColor
         }
     }
     
@@ -405,7 +425,20 @@ struct AirportMarkerView: View {
         ]
         return colors[hash % colors.count]
     }
-    
+
+    /// Notification mode - based on easiness score:
+    /// - Green = H24 or easy (score >= 80)
+    /// - Blue = Moderate ease (score 60-79)
+    /// - Orange = Some hassle (score 40-59)
+    /// - Red = High hassle (score < 40)
+    /// - Gray = No notification data
+    private var notificationColor: Color {
+        guard let info = notificationInfo else {
+            return .gray
+        }
+        return info.legendColor
+    }
+
     // MARK: - Helpers
     
     /// Get longest runway length in feet
@@ -423,6 +456,7 @@ extension LegendMode {
         case .runwayLength: return "road.lanes"
         case .procedures: return "arrow.down.to.line.compact"
         case .country: return "flag"
+        case .notification: return "bell"
         }
     }
     
@@ -451,6 +485,14 @@ extension LegendMode {
         case .country:
             return [
                 LegendItem(color: .blue, size: 14, label: "Colored by country"),
+            ]
+        case .notification:
+            return [
+                LegendItem(color: .green, size: 16, label: "H24 / Easy"),
+                LegendItem(color: .blue, size: 14, label: "Moderate"),
+                LegendItem(color: .orange, size: 12, label: "Some hassle"),
+                LegendItem(color: .red, size: 10, label: "High hassle"),
+                LegendItem(color: .gray, size: 8, label: "No data"),
             ]
         }
     }

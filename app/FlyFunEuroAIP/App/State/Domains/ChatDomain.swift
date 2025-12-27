@@ -21,7 +21,10 @@ final class ChatDomain {
     var currentThinking: String?
     var currentToolCall: String?
     var error: String?
-    
+
+    /// Follow-up query suggestions from last response
+    var suggestedQueries: [SuggestedQuery] = []
+
     /// Tools used during current streaming session
     private var toolsUsed: [String] = []
     
@@ -65,6 +68,7 @@ final class ChatDomain {
         currentThinking = nil
         currentToolCall = nil
         toolsUsed = []  // Reset tools for new message
+        suggestedQueries = []  // Clear previous suggestions
         
         Logger.app.info("Sending chat message: \(userMessage)")
         
@@ -124,6 +128,11 @@ final class ChatDomain {
             
         case .uiPayload(let payload):
             Logger.app.info("Received visualization: \(payload.kind.rawValue)")
+            // Capture suggested queries from payload
+            if let queries = payload.suggestedQueries, !queries.isEmpty {
+                suggestedQueries = queries
+                Logger.app.info("Received \(queries.count) suggested queries")
+            }
             onVisualization?(payload)
             
         case .plan(let plan):
@@ -178,6 +187,16 @@ final class ChatDomain {
         currentThinking = nil
         currentToolCall = nil
         error = nil
+        suggestedQueries = []
+    }
+
+    /// Use a suggested query - sets input and optionally sends
+    func useSuggestion(_ query: SuggestedQuery, autoSend: Bool = true) async {
+        input = query.text
+        suggestedQueries = []  // Clear suggestions after use
+        if autoSend {
+            await send()
+        }
     }
     
     /// Add a message programmatically

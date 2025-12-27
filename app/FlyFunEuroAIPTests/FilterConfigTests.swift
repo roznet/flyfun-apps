@@ -109,6 +109,30 @@ struct FilterConfigTests {
         #expect(config.activeFilterCount == 1)
     }
 
+    @Test func avgasFilterIsActive() {
+        var config = FilterConfig.default
+        config.hasAvgas = true
+
+        #expect(config.hasActiveFilters == true)
+        #expect(config.activeFilterCount == 1)
+    }
+
+    @Test func jetAFilterIsActive() {
+        var config = FilterConfig.default
+        config.hasJetA = true
+
+        #expect(config.hasActiveFilters == true)
+        #expect(config.activeFilterCount == 1)
+    }
+
+    @Test func maxLandingFeeFilterIsActive() {
+        var config = FilterConfig.default
+        config.maxLandingFee = 50.0
+
+        #expect(config.hasActiveFilters == true)
+        #expect(config.activeFilterCount == 1)
+    }
+
     // MARK: - Multiple Filters
 
     @Test func multipleFiltersAreCounted() {
@@ -170,6 +194,24 @@ struct FilterConfigTests {
     @Test func emptyDescriptionForNoFilters() {
         let config = FilterConfig.default
         #expect(config.description == "No filters")
+    }
+
+    @Test func descriptionShowsFuelFilters() {
+        var config = FilterConfig.default
+        config.hasAvgas = true
+        config.hasJetA = true
+
+        let description = config.description
+        #expect(description.contains("Has AVGAS"))
+        #expect(description.contains("Has Jet-A"))
+    }
+
+    @Test func descriptionShowsLandingFee() {
+        var config = FilterConfig.default
+        config.maxLandingFee = 100.0
+
+        let description = config.description
+        #expect(description.contains("Landing fee ≤ €100"))
     }
 
     // MARK: - Codable

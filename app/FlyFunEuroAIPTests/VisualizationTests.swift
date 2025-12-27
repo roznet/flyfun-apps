@@ -220,6 +220,150 @@ struct ChatVisualizationPayloadTests {
     }
 }
 
+// MARK: - SuggestedQuery Tests
+
+struct SuggestedQueryTests {
+
+    @Test func parsesSuggestedQuery() {
+        let dict: [String: Any] = [
+            "text": "Show airports with ILS",
+            "tool": "search_airports",
+            "category": "search",
+            "priority": 1
+        ]
+
+        let query = SuggestedQuery(from: dict)
+
+        #expect(query != nil)
+        #expect(query?.text == "Show airports with ILS")
+        #expect(query?.tool == "search_airports")
+        #expect(query?.category == "search")
+        #expect(query?.priority == 1)
+    }
+
+    @Test func requiresTextField() {
+        let dict: [String: Any] = [
+            "tool": "search_airports"
+        ]
+
+        let query = SuggestedQuery(from: dict)
+
+        #expect(query == nil)
+    }
+
+    @Test func optionalFieldsAreOptional() {
+        let dict: [String: Any] = [
+            "text": "Find airports"
+        ]
+
+        let query = SuggestedQuery(from: dict)
+
+        #expect(query != nil)
+        #expect(query?.text == "Find airports")
+        #expect(query?.tool == nil)
+        #expect(query?.category == nil)
+        #expect(query?.priority == nil)
+    }
+
+    @Test func parsesSuggestedQueriesInPayload() {
+        let dict: [String: Any] = [
+            "kind": "list",
+            "suggested_queries": [
+                ["text": "Query 1"],
+                ["text": "Query 2", "priority": 2],
+                ["invalid": "no text"]  // Should be skipped
+            ]
+        ]
+
+        let payload = ChatVisualizationPayload(from: dict)
+
+        #expect(payload.suggestedQueries?.count == 2)
+        #expect(payload.suggestedQueries?[0].text == "Query 1")
+        #expect(payload.suggestedQueries?[1].text == "Query 2")
+        #expect(payload.suggestedQueries?[1].priority == 2)
+    }
+
+    @Test func emptySuggestedQueriesIsNil() {
+        let dict: [String: Any] = [
+            "kind": "airport"
+        ]
+
+        let payload = ChatVisualizationPayload(from: dict)
+
+        #expect(payload.suggestedQueries == nil)
+    }
+}
+
+// MARK: - ChatFilters Tests
+
+struct ChatFiltersTests {
+
+    @Test func toFilterConfigMapsAllFields() {
+        // Simulate API response with snake_case keys
+        let dict: [String: Any] = [
+            "country": "FR",
+            "has_procedures": true,
+            "has_hard_runway": true,
+            "has_lighted_runway": true,
+            "point_of_entry": true,
+            "min_runway_length_ft": 3000,
+            "max_runway_length_ft": 8000,
+            "has_ils": true,
+            "has_rnav": true,
+            "has_precision_approach": true,
+            "has_avgas": true,
+            "has_jet_a": true,
+            "max_landing_fee": 75.0
+        ]
+
+        let chatFilters = ChatFilters(from: dict)
+        let config = chatFilters.toFilterConfig()
+
+        // Verify all fields are mapped correctly
+        #expect(config.country == "FR")
+        #expect(config.hasProcedures == true)
+        #expect(config.hasHardRunway == true)
+        #expect(config.hasLightedRunway == true)
+        #expect(config.pointOfEntry == true)
+        #expect(config.minRunwayLengthFt == 3000)
+        #expect(config.maxRunwayLengthFt == 8000)
+        #expect(config.hasILS == true)
+        #expect(config.hasRNAV == true)
+        #expect(config.hasPrecisionApproach == true)
+        #expect(config.hasAvgas == true)
+        #expect(config.hasJetA == true)
+        #expect(config.maxLandingFee == 75.0)
+    }
+
+    @Test func toFilterConfigHandlesMissingFields() {
+        // Simulate partial API response
+        let dict: [String: Any] = [
+            "country": "DE",
+            "has_procedures": true
+        ]
+
+        let chatFilters = ChatFilters(from: dict)
+        let config = chatFilters.toFilterConfig()
+
+        // Only specified fields should be set
+        #expect(config.country == "DE")
+        #expect(config.hasProcedures == true)
+        #expect(config.hasHardRunway == nil)
+        #expect(config.hasAvgas == nil)
+        #expect(config.maxLandingFee == nil)
+    }
+
+    @Test func parseIsoCountryAlternative() {
+        // API sometimes sends iso_country instead of country
+        let dict: [String: Any] = [
+            "iso_country": "GB"
+        ]
+
+        let chatFilters = ChatFilters(from: dict)
+        #expect(chatFilters.country == "GB")
+    }
+}
+
 // MARK: - MapHighlight Tests
 
 struct MapHighlightTests {

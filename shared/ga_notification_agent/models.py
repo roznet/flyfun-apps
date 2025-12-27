@@ -289,13 +289,22 @@ class NotificationInfo:
         if self.is_h24():
             return 100.0
 
+        if self.notification_type == "not_available":
+            return 0.0  # Not available at all
+
         if self.is_on_request():
             return 70.0  # Generally easy, just need to call
+
+        if self.notification_type == "business_day":
+            return 55.0  # Business day notice - treat as ~24h hassle
 
         max_hours = self.get_max_notice_hours()
 
         if max_hours is None:
-            return 50.0  # Unknown, assume moderate
+            # For "hours" type with no hours_notice: operating hours only, no advance notice
+            if self.notification_type == "hours":
+                return 85.0  # Easy - just has operating hours constraint
+            return 50.0  # Truly unknown
 
         if max_hours == 0:
             return 100.0

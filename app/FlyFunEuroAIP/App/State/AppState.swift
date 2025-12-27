@@ -40,7 +40,10 @@ final class AppState {
     
     /// User preferences and session state
     let settings: SettingsDomain
-    
+
+    /// Notification service for customs/immigration requirements
+    let notificationService: NotificationService?
+
     // MARK: - Dependencies (kept for reference)
     private let repository: AirportRepositoryProtocol
     
@@ -58,7 +61,10 @@ final class AppState {
         self.navigation = NavigationDomain()
         self.system = SystemDomain(connectivityMonitor: connectivityMonitor)
         self.settings = SettingsDomain()
-        
+
+        // Initialize notification service from bundled DB
+        self.notificationService = NotificationService.createFromBundle()
+
         // Wire up cross-domain communication
         setupCrossDomainWiring()
     }
@@ -90,11 +96,14 @@ final class AppState {
     /// Called when app appears - initialize state
     func onAppear() async {
         Logger.app.info("AppState.onAppear")
-        
+
         system.startMonitoring()
         system.setLoading(true)
         defer { system.setLoading(false) }
-        
+
+        // Preload notification data (fast, ~100ms for ~600 entries)
+        await notificationService?.preloadAll()
+
         // Restore session state if enabled
         if settings.restoreSessionOnLaunch {
             navigation.selectedTab = settings.lastTab
@@ -102,7 +111,7 @@ final class AppState {
             airports.filters = settings.defaultFilters
             airports.legendMode = settings.defaultLegendMode
         }
-        
+
         do {
             try await airports.load()
             

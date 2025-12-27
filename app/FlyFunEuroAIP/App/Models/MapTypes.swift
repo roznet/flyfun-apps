@@ -138,7 +138,8 @@ enum LegendMode: String, CaseIterable, Identifiable, Sendable, Codable {
     case runwayLength = "Runway Length"
     case procedures = "IFR Procedures"
     case country = "Country"
-    
+    case notification = "Notification"
+
     var id: String { rawValue }
 }
 

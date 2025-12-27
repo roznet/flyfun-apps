@@ -971,35 +971,54 @@ if entry.standardField == 302,
 
 ## 7. Progress Tracking
 
-### Phase 1: Filter System Alignment
-- [ ] Add fuel/fee filters to FilterConfig
-- [ ] Complete ChatFilters parsing (all 13 fields)
-- [ ] Complete ChatFilters.toFilterConfig() mapping
-- [ ] Add ILS/RNAV filtering in applyInMemoryFilters
-- [ ] Update filter UI (optional)
-- [ ] Write unit tests
+### Phase 1: Filter System Alignment ✅ COMPLETE (2025-12-26)
+- [x] Add fuel/fee filters to FilterConfig (`hasAvgas`, `hasJetA`, `maxLandingFee`)
+- [x] Complete ChatFilters parsing (all 13 fields)
+- [x] Complete ChatFilters.toFilterConfig() mapping (all fields mapped)
+- [x] Add ILS/RNAV filtering in applyInMemoryFilters (using `Procedure.ApproachType`)
+- [ ] Update filter UI (optional - deferred)
+- [x] Write unit tests (FilterConfigTests + ChatFiltersTests)
 - [ ] Manual testing
 
-### Phase 2: UI Payload Enhancements
-- [ ] **Fix applyVisualization filter reload bug**
-- [ ] Add SuggestedQuery model
-- [ ] Parse suggested_queries in ChatVisualizationPayload
-- [ ] Add suggestedQueries to ChatDomain
-- [ ] Create SuggestedQueriesView
-- [ ] Integrate into ChatView
-- [ ] Write unit tests
+**Implementation Notes:**
+- ILS filtering: Matches `.ils` approach type
+- RNAV filtering: Matches `.rnav` or `.rnp` approach types
+- Fuel/fee filters added but not yet applied in `applyInMemoryFilters` (requires RZFlight enhancement)
+- Static helper functions `hasILSApproach`/`hasRNAVApproach` added to `LocalAirportDataSource`
+
+### Phase 2: UI Payload Enhancements ✅ COMPLETE (2025-12-26)
+- [x] **Fix applyVisualization filter reload bug** - Now calls `applyFilters()` when filters provided
+- [x] Add SuggestedQuery model (in VisualizationPayload.swift)
+- [x] Parse suggested_queries in ChatVisualizationPayload
+- [x] Add suggestedQueries to ChatDomain
+- [x] Create SuggestedQueriesView (horizontal scrolling chips)
+- [x] Integrate into ChatView (shows above input bar when queries available)
+- [x] Write unit tests (SuggestedQueryTests, ChatDomainTests)
 - [ ] Manual testing
 
-### Phase 3: Notification Support
-- [ ] Create NotificationInfo model
-- [ ] Create NotificationService (with bundled DB)
-- [ ] Integrate NotificationService into AppState
-- [ ] Add notification legend mode
-- [ ] Implement notification marker coloring
-- [ ] Create NotificationSummaryView
-- [ ] Update AIPTab to show notification summary
-- [ ] Write unit tests
+**Implementation Notes:**
+- `applyVisualization` refactored to call `applyFilters()` then `applyVisualizationHighlights()`
+- SuggestedQuery: id, text, tool?, category?, priority?
+- ChatDomain.useSuggestion() auto-sends query
+- SuggestedQueriesView hidden during streaming
+
+### Phase 3: Notification Support ✅ COMPLETE (2025-12-26)
+- [x] Create NotificationInfo model
+- [x] Create NotificationService (with bundled DB)
+- [x] Integrate NotificationService into AppState
+- [x] Add notification legend mode
+- [x] Implement notification marker coloring
+- [x] Create NotificationSummaryView
+- [x] Update AIPTab to show notification summary
+- [x] Write unit tests (37+ tests in NotificationTests.swift)
 - [ ] Manual testing
+
+**Implementation Notes:**
+- NotificationInfo: NotificationType enum (h24, hours, onRequest, businessDay, notAvailable, unknown)
+- EasinessScore (0-100): h24=100, short notice=90, moderate=60-80, long notice=10-40
+- NotificationService: Preloads from bundled ga_notifications.db, thread-safe cache
+- NotificationSummaryView: Full summary with icon, type, hours, contact, EasinessBadge
+- Legend colors: green (easy), blue (moderate), orange (some hassle), red (high hassle), gray (no data)
 
 ---
 

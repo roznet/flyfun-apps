@@ -9,11 +9,17 @@ import SwiftUI
 import RZFlight
 
 struct AIPTab: View {
+    @Environment(\.appState) private var state
     let airport: RZFlight.Airport
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // Notification summary at top (if available)
+                if let notification = state?.notificationService?.getNotification(icao: airport.icao) {
+                    NotificationSummaryView(notification: notification)
+                }
+
                 if airport.aipEntries.isEmpty {
                     ContentUnavailableView {
                         Label("No AIP Data", systemImage: "doc.text")
@@ -32,7 +38,7 @@ struct AIPTab: View {
             .padding()
         }
     }
-    
+
     private var groupedEntries: [RZFlight.AIPEntry.Section: [RZFlight.AIPEntry]] {
         Dictionary(grouping: airport.aipEntries, by: { $0.section })
     }

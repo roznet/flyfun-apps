@@ -62,7 +62,19 @@ struct ChatView: View {
             }
             
             Divider()
-            
+
+            // Suggested queries (show after response, hide during streaming)
+            if let queries = state?.chat.suggestedQueries,
+               !queries.isEmpty,
+               !(state?.chat.isStreaming ?? false) {
+                SuggestedQueriesView(queries: queries) { query in
+                    Task {
+                        await state?.chat.useSuggestion(query)
+                    }
+                }
+                .padding(.top, 8)
+            }
+
             // Input bar
             ChatInputBar(
                 text: Binding(

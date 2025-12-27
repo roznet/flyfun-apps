@@ -109,10 +109,10 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
     }
     
     // MARK: - In-Memory Filtering (No DB Access)
-    
+
     func applyInMemoryFilters(_ filters: FilterConfig, to airports: [RZFlight.Airport]) -> [RZFlight.Airport] {
         var result = airports
-        
+
         if let country = filters.country {
             result = result.inCountry(country)
         }
@@ -136,7 +136,21 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
         if filters.hasLightedRunway == true {
             result = result.withLightedRunways()
         }
-        
+
+        // ILS filtering - filter by approach type
+        if filters.hasILS == true {
+            result = result.filter(Self.hasILSApproach)
+        }
+
+        // RNAV filtering - filter by approach type
+        if filters.hasRNAV == true {
+            result = result.filter(Self.hasRNAVApproach)
+        }
+
+        // Note: hasAvgas, hasJetA, maxLandingFee filters require AIP field parsing
+        // These will be implemented in Phase 4+ with RZFlight enhancements
+        // For now, these filters are accepted but not applied locally
+
         return result
     }
     
@@ -153,6 +167,18 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
         // Get all border crossing airports and return their ICAOs
         let borderCrossingAirports = knownAirports.airportsWithBorderCrossing()
         return Set(borderCrossingAirports.map(\.icao))
+    }
+
+    // MARK: - Private Helpers
+
+    /// Check if airport has an ILS approach
+    private nonisolated static func hasILSApproach(_ airport: RZFlight.Airport) -> Bool {
+        airport.procedures.contains { $0.approachType == .ils }
+    }
+
+    /// Check if airport has an RNAV/RNP approach
+    private nonisolated static func hasRNAVApproach(_ airport: RZFlight.Airport) -> Bool {
+        airport.procedures.contains { $0.approachType == .rnav || $0.approachType == .rnp }
     }
 }
 

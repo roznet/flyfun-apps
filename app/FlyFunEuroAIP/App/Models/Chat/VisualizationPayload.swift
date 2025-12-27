@@ -14,19 +14,22 @@ import CoreLocation
 struct ChatVisualizationPayload: Sendable {
     /// Kind of visualization (airport, route, list, etc.)
     let kind: Kind
-    
+
     /// Visualization data (markers, routes, highlights)
     let visualization: VisualizationData?
-    
+
     /// Filter configuration suggested by the chatbot
     let filters: ChatFilters?
-    
+
     /// List of airport ICAOs to highlight
     let airports: [String]?
-    
+
+    /// Follow-up query suggestions
+    let suggestedQueries: [SuggestedQuery]?
+
     /// Raw data from API
     let raw: [String: Any]
-    
+
     enum Kind: String, Sendable {
         case airport
         case route
@@ -34,33 +37,69 @@ struct ChatVisualizationPayload: Sendable {
         case search
         case unknown
     }
-    
+
     init(from dict: [String: Any]) {
         self.raw = dict
-        
+
         // Parse kind
         if let kindStr = dict["kind"] as? String {
             self.kind = Kind(rawValue: kindStr) ?? .unknown
         } else {
             self.kind = .unknown
         }
-        
+
         // Parse visualization (flattened at top level)
         if let vizDict = dict["visualization"] as? [String: Any] {
             self.visualization = VisualizationData(from: vizDict)
         } else {
             self.visualization = nil
         }
-        
+
         // Parse filters
         if let filtersDict = dict["filters"] as? [String: Any] {
             self.filters = ChatFilters(from: filtersDict)
         } else {
             self.filters = nil
         }
-        
+
         // Parse airports list
         self.airports = dict["airports"] as? [String]
+
+        // Parse suggested queries (top-level field)
+        if let queries = dict["suggested_queries"] as? [[String: Any]] {
+            self.suggestedQueries = queries.compactMap { SuggestedQuery(from: $0) }
+        } else {
+            self.suggestedQueries = nil
+        }
+    }
+}
+
+// MARK: - Suggested Query
+
+/// A follow-up query suggestion from the chatbot
+struct SuggestedQuery: Sendable, Identifiable, Equatable {
+    let id: String
+    let text: String
+    let tool: String?
+    let category: String?
+    let priority: Int?
+
+    init?(from dict: [String: Any]) {
+        guard let text = dict["text"] as? String else { return nil }
+        self.id = UUID().uuidString
+        self.text = text
+        self.tool = dict["tool"] as? String
+        self.category = dict["category"] as? String
+        self.priority = dict["priority"] as? Int
+    }
+
+    // For testing
+    init(id: String = UUID().uuidString, text: String, tool: String? = nil, category: String? = nil, priority: Int? = nil) {
+        self.id = id
+        self.text = text
+        self.tool = tool
+        self.category = category
+        self.priority = priority
     }
 }
 
@@ -225,29 +264,89 @@ struct Coordinate: Sendable {
 // MARK: - Chat Filters
 
 /// Filters suggested by the chatbot
+/// Maps API snake_case fields to FilterConfig camelCase fields
 struct ChatFilters: Sendable {
+    // Geographic
     let country: String?
+
+    // Feature filters
     let hasProcedures: Bool?
     let hasHardRunway: Bool?
+    let hasLightedRunway: Bool?
     let pointOfEntry: Bool?
+
+    // Runway filters
     let minRunwayLengthFt: Int?
-    
+    let maxRunwayLengthFt: Int?
+
+    // Approach filters
+    let hasILS: Bool?
+    let hasRNAV: Bool?
+    let hasPrecisionApproach: Bool?
+
+    // Fuel filters
+    let hasAvgas: Bool?
+    let hasJetA: Bool?
+
+    // Fee filters
+    let maxLandingFee: Double?
+
     init(from dict: [String: Any]) {
+        // Geographic
         self.country = dict["country"] as? String ?? dict["iso_country"] as? String
+
+        // Feature filters
         self.hasProcedures = dict["has_procedures"] as? Bool
         self.hasHardRunway = dict["has_hard_runway"] as? Bool
+        self.hasLightedRunway = dict["has_lighted_runway"] as? Bool
         self.pointOfEntry = dict["point_of_entry"] as? Bool
+
+        // Runway filters
         self.minRunwayLengthFt = dict["min_runway_length_ft"] as? Int
+        self.maxRunwayLengthFt = dict["max_runway_length_ft"] as? Int
+
+        // Approach filters
+        self.hasILS = dict["has_ils"] as? Bool
+        self.hasRNAV = dict["has_rnav"] as? Bool
+        self.hasPrecisionApproach = dict["has_precision_approach"] as? Bool
+
+        // Fuel filters
+        self.hasAvgas = dict["has_avgas"] as? Bool
+        self.hasJetA = dict["has_jet_a"] as? Bool
+
+        // Fee filters
+        self.maxLandingFee = dict["max_landing_fee"] as? Double
     }
-    
-    /// Convert to FilterConfig
+
+    /// Convert to FilterConfig for application
     func toFilterConfig() -> FilterConfig {
         var config = FilterConfig()
+
+        // Geographic
         config.country = country
+
+        // Feature filters
         config.hasProcedures = hasProcedures
         config.hasHardRunway = hasHardRunway
+        config.hasLightedRunway = hasLightedRunway
         config.pointOfEntry = pointOfEntry
+
+        // Runway filters
         config.minRunwayLengthFt = minRunwayLengthFt
+        config.maxRunwayLengthFt = maxRunwayLengthFt
+
+        // Approach filters
+        config.hasILS = hasILS
+        config.hasRNAV = hasRNAV
+        config.hasPrecisionApproach = hasPrecisionApproach
+
+        // Fuel filters
+        config.hasAvgas = hasAvgas
+        config.hasJetA = hasJetA
+
+        // Fee filters
+        config.maxLandingFee = maxLandingFee
+
         return config
     }
 }

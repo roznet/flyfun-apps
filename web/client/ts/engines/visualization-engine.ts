@@ -305,9 +305,10 @@ export class VisualizationEngine {
 
   /**
    * Get notification color based on hours notice required
-   * Green: H24 or ≤24h notice
-   * Yellow: 25-48h notice
-   * Red: >48h notice
+   * Green: H24, operating hours only (no advance notice), or ≤12h notice
+   * Blue: On request or 13-24h notice
+   * Yellow/Orange: 25-48h notice or business day
+   * Red: >48h notice or not available
    * Gray: Unknown/no data
    */
   private getNotificationColor(airport: Airport): string {
@@ -323,23 +324,38 @@ export class VisualizationEngine {
       return '#28a745'; // Green
     }
 
-    // On request only - uncertain
-    if (notification.is_on_request && !notification.hours_notice) {
-      return '#6c757d'; // Dark gray
+    // Not available
+    if (notification.notification_type === 'not_available') {
+      return '#dc3545'; // Red
+    }
+
+    // On request - need to call ahead
+    if (notification.is_on_request) {
+      return '#007bff'; // Blue - moderate hassle
+    }
+
+    // Business day notice
+    if (notification.notification_type === 'business_day') {
+      return '#ffc107'; // Yellow - some hassle
     }
 
     const hours = notification.hours_notice;
 
-    // No hours data
+    // "hours" type with no hours_notice = operating hours only, no advance notice needed
     if (hours === null || hours === undefined) {
-      return '#95a5a6'; // Gray
+      if (notification.notification_type === 'hours') {
+        return '#28a745'; // Green - just operating hours constraint
+      }
+      return '#95a5a6'; // Gray - truly unknown
     }
 
     // Color based on hours
-    if (hours <= 24) {
-      return '#28a745'; // Green - easy, ≤24h
+    if (hours <= 12) {
+      return '#28a745'; // Green - easy, ≤12h
+    } else if (hours <= 24) {
+      return '#007bff'; // Blue - moderate, 13-24h
     } else if (hours <= 48) {
-      return '#ffc107'; // Yellow - moderate, 25-48h
+      return '#ffc107'; // Yellow - some hassle, 25-48h
     } else {
       return '#dc3545'; // Red - difficult, >48h
     }

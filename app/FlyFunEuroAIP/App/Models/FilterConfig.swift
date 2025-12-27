@@ -30,7 +30,14 @@ struct FilterConfig: Codable, Equatable, Sendable {
     
     // MARK: - AIP Filters
     var aipField: String?
-    
+
+    // MARK: - Fuel Filters
+    var hasAvgas: Bool?
+    var hasJetA: Bool?
+
+    // MARK: - Fee Filters
+    var maxLandingFee: Double?
+
     // MARK: - Default
     static let `default` = FilterConfig()
     
@@ -48,7 +55,10 @@ struct FilterConfig: Codable, Equatable, Sendable {
         hasILS == true ||
         hasRNAV == true ||
         hasPrecisionApproach == true ||
-        aipField != nil
+        aipField != nil ||
+        hasAvgas == true ||
+        hasJetA == true ||
+        maxLandingFee != nil
     }
     
     /// Count of active filters
@@ -65,6 +75,9 @@ struct FilterConfig: Codable, Equatable, Sendable {
         if hasRNAV == true { count += 1 }
         if hasPrecisionApproach == true { count += 1 }
         if aipField != nil { count += 1 }
+        if hasAvgas == true { count += 1 }
+        if hasJetA == true { count += 1 }
+        if maxLandingFee != nil { count += 1 }
         return count
     }
     
@@ -82,6 +95,9 @@ struct FilterConfig: Codable, Equatable, Sendable {
         if hasRNAV == true { parts.append("Has RNAV") }
         if hasPrecisionApproach == true { parts.append("Precision approach") }
         if let field = aipField { parts.append("AIP field: \(field)") }
+        if hasAvgas == true { parts.append("Has AVGAS") }
+        if hasJetA == true { parts.append("Has Jet-A") }
+        if let fee = maxLandingFee { parts.append("Landing fee ≤ €\(Int(fee))") }
         return parts.isEmpty ? "No filters" : parts.joined(separator: ", ")
     }
     

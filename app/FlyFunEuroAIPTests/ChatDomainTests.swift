@@ -100,6 +100,43 @@ struct ChatDomainTests {
         domain.error = nil
         #expect(domain.error == nil)
     }
+
+    // MARK: - Suggested Queries
+
+    @Test func initialSuggestedQueriesIsEmpty() {
+        let domain = ChatDomain()
+
+        #expect(domain.suggestedQueries.isEmpty)
+    }
+
+    @Test func clearClearsSuggestedQueries() {
+        let domain = ChatDomain()
+
+        domain.suggestedQueries = [
+            SuggestedQuery(text: "Query 1"),
+            SuggestedQuery(text: "Query 2")
+        ]
+
+        #expect(domain.suggestedQueries.count == 2)
+
+        domain.clear()
+
+        #expect(domain.suggestedQueries.isEmpty)
+    }
+
+    @Test func suggestedQueriesCanBeSet() {
+        let domain = ChatDomain()
+
+        let queries = [
+            SuggestedQuery(text: "Show ILS airports"),
+            SuggestedQuery(text: "Filter by France")
+        ]
+
+        domain.suggestedQueries = queries
+
+        #expect(domain.suggestedQueries.count == 2)
+        #expect(domain.suggestedQueries[0].text == "Show ILS airports")
+    }
 }
 
 // MARK: - ChatMessage Tests

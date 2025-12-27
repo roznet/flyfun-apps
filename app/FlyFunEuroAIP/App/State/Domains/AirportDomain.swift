@@ -296,15 +296,35 @@ final class AirportDomain {
     /// Apply visualization from chat API response
     func applyVisualization(_ chatPayload: ChatVisualizationPayload) {
         Logger.app.info("Applying chat visualization: \(chatPayload.kind.rawValue)")
-        
+
         // Clear previous chat highlights
         clearChatHighlights()
-        
-        // Apply filters if provided
+
+        // Apply filters if provided - reload airports to show filtered results
         if let chatFilters = chatPayload.filters {
-            filters = chatFilters.toFilterConfig()
+            let newFilters = chatFilters.toFilterConfig()
+            if newFilters.hasActiveFilters {
+                filters = newFilters
+                // Reload airports with new filters, then apply visualization
+                Task {
+                    do {
+                        try await applyFilters()
+                        // After reload, apply highlights
+                        applyVisualizationHighlights(chatPayload)
+                    } catch {
+                        Logger.app.error("Failed to apply filters from chat: \(error)")
+                    }
+                }
+                return // Early return - visualization applied after reload
+            }
         }
-        
+
+        // No filters or empty filters - apply visualization directly
+        applyVisualizationHighlights(chatPayload)
+    }
+
+    /// Apply visualization highlights (markers, routes, etc.)
+    private func applyVisualizationHighlights(_ chatPayload: ChatVisualizationPayload) {
         // Apply visualization data
         if let viz = chatPayload.visualization {
             // Handle markers
