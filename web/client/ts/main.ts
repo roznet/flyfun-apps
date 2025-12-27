@@ -10,6 +10,7 @@ import { UIManager } from './managers/ui-manager';
 import { LLMIntegration } from './adapters/llm-integration';
 import { ChatbotManager } from './managers/chatbot-manager';
 import { PersonaManager } from './managers/persona-manager';
+import { getThemeManager, ThemeManager } from './managers/theme-manager';
 import type { AppState, RouteState, MapView, FilterConfig, BoundingBox } from './store/types';
 
 // Global instances (for debugging/window access)
@@ -20,6 +21,7 @@ declare global {
     uiManager: UIManager;
     llmIntegration: LLMIntegration;
     personaManager: PersonaManager;
+    themeManager: ThemeManager;
   }
 }
 
@@ -34,6 +36,7 @@ class Application {
   private llmIntegration: LLMIntegration;
   private chatbotManager: ChatbotManager;
   private personaManager: PersonaManager;
+  private themeManager: ThemeManager;
   private currentSelectedIcao: string | null = null;
   private isUpdatingMapView: boolean = false; // Flag to prevent infinite loops
   private isViewportLoading: boolean = false; // Flag to skip fitBounds during viewport loading
@@ -61,12 +64,16 @@ class Application {
     // Initialize persona manager
     this.personaManager = new PersonaManager(this.apiAdapter);
 
+    // Initialize theme manager
+    this.themeManager = getThemeManager();
+
     // Expose to window for debugging
     window.appState = this.store as any;
     window.visualizationEngine = this.visualizationEngine;
     window.uiManager = this.uiManager;
     window.llmIntegration = this.llmIntegration;
     window.personaManager = this.personaManager;
+    window.themeManager = this.themeManager;
     (window as any).chatbotManager = this.chatbotManager;
   }
 
@@ -82,6 +89,10 @@ class Application {
         document.addEventListener('DOMContentLoaded', resolve);
       });
     }
+
+    // Initialize theme manager (must be early to prevent flash of wrong theme)
+    this.themeManager.init();
+    this.initThemeToggle();
 
     // Initialize map
     this.initMap();
@@ -141,6 +152,37 @@ class Application {
     console.log('Initializing map...');
     this.visualizationEngine.initMap('map');
     console.log('Map initialized successfully');
+  }
+
+  /**
+   * Initialize theme toggle button
+   */
+  private initThemeToggle(): void {
+    const themeToggle = document.getElementById('theme-toggle');
+    if (!themeToggle) return;
+
+    // Update button icon and tooltip
+    const updateButton = () => {
+      const icon = themeToggle.querySelector('i');
+      if (icon) {
+        icon.className = `fas ${this.themeManager.getIconClass()}`;
+      }
+      themeToggle.title = this.themeManager.getTooltip();
+    };
+
+    // Set initial state
+    updateButton();
+
+    // Handle clicks
+    themeToggle.addEventListener('click', () => {
+      this.themeManager.cycleTheme();
+      updateButton();
+    });
+
+    // Subscribe to external theme changes
+    this.themeManager.subscribe(() => {
+      updateButton();
+    });
   }
 
   /**
