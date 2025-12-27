@@ -1,0 +1,56 @@
+# Caddyfile for MCP Server at mcp.flyfun.aero
+# Replicates Apache2 configuration from mcp.flyfun.aero.conf
+
+# HTTP to HTTPS redirect
+http://mcp.flyfun.aero {
+    redir https://mcp.flyfun.aero{uri} permanent
+}
+
+# HTTPS configuration
+https://mcp.flyfun.aero {
+    # Automatic HTTPS with Let's Encrypt (Caddy handles this automatically)
+    # No need to specify certificate paths - Caddy manages them
+    
+    # Security headers (replicating Apache2 config)
+    header {
+        # Strict Transport Security
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # X-Frame-Options
+        X-Frame-Options "DENY"
+        # X-Content-Type-Options
+        X-Content-Type-Options "nosniff"
+        # X-XSS-Protection
+        X-XSS-Protection "1; mode=block"
+        # Cache-Control
+        Cache-Control "public, max-age=3600"
+    }
+    
+    # Reverse proxy to MCP server
+    # Proxy /euro_aip to /mcp on the MCP server (replicating Apache2 ProxyPass)
+    # Apache config: ProxyPass /euro_aip http://127.0.0.1:8001/mcp
+    # This means: /euro_aip -> /mcp, /euro_aip/foo -> /mcp/foo
+    handle /euro_aip* {
+        # Rewrite URI: replace /euro_aip with /mcp, preserving any trailing path
+        uri replace /euro_aip /mcp
+        reverse_proxy mcp-server:8001 {
+            # Preserve host header
+            header_up Host {host}
+            # Forward original request info
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
+    # Block all other paths (replicating Apache2 LocationMatch)
+    handle {
+        respond "Not Found" 403
+    }
+    
+    # Logging (Caddy logs to stdout/stderr by default in Docker)
+    log {
+        output stdout
+        format console
+    }
+}
+

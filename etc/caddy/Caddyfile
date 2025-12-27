@@ -1,0 +1,9 @@
+# Main Caddyfile for FlyFun services
+# Imports service-specific configurations from sites-enabled directory
+#
+# This allows each service to maintain its own Caddyfile independently.
+# Files are imported in lexicographical order.
+
+# Import all service-specific Caddyfiles
+import /etc/caddy/sites-enabled/*.caddy
+
