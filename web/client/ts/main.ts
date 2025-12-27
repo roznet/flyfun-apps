@@ -711,6 +711,9 @@ class Application {
     }
   }
 
+  // Limit for viewport-based airport loading (lower than default to improve performance)
+  private static readonly VIEWPORT_AIRPORT_LIMIT = 500;
+
   /**
    * Fetch airports within the current viewport bounds
    */
@@ -727,7 +730,9 @@ class Application {
       // Set flag to prevent fitBounds during viewport loading
       this.isViewportLoading = true;
       store.getState().setLoading(true);
-      const response = await this.apiAdapter.getAirportsByBounds(bbox, state.filters);
+      // Use viewport-specific limit for better performance
+      const filters = { ...state.filters, limit: Application.VIEWPORT_AIRPORT_LIMIT };
+      const response = await this.apiAdapter.getAirportsByBounds(bbox, filters);
       store.getState().setAirports(response.data);
     } catch (error: any) {
       console.error('Error loading airports in viewport:', error);
