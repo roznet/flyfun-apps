@@ -1,33 +1,22 @@
 # Caddyfile for Web Server at maps.flyfun.aero
 # Main web application for Euro AIP Airport Explorer
 
-# HTTP to HTTPS redirect
-http://maps.flyfun.aero {
-	redir https://maps.flyfun.aero{uri} permanent
-}
-
-# HTTPS configuration
-https://maps.flyfun.aero {
-	# Automatic HTTPS with Let's Encrypt (Caddy handles this automatically)
-
-	# Security headers
+maps.flyfun.aero {
 	header {
+		# HTTPS enforcement (1 year)
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Frame-Options "SAMEORIGIN"
+		# Prevent MIME-type sniffing
 		X-Content-Type-Options "nosniff"
-		X-XSS-Protection "1; mode=block"
+		# Control referrer information
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# Restrict embedding (replaces X-Frame-Options)
+		Content-Security-Policy "frame-ancestors 'self'"
+		# Disable unnecessary browser features (allow geolocation for maps)
+		Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
 	}
 
-	# Reverse proxy to web server
-	reverse_proxy <docker-host-ip-or-hostname>:8000 {
+	reverse_proxy localhost:8000 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
-	}
-
-	# Logging
-	log {
-		output stdout
-		format console
 	}
 }

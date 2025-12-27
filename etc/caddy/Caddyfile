@@ -6,4 +6,3 @@
 
 # Import all service-specific Caddyfiles
 import /etc/caddy/sites-enabled/*.caddy
-
