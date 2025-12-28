@@ -452,39 +452,72 @@ export class VisualizationEngine {
    * Add highlight
    */
   private addHighlight(highlight: Highlight): void {
-    // Reference points (locate center, route airports) use larger blue dots
-    // Default styling for reference points vs other highlights
-    const isReferencePoint = highlight.id.startsWith('locate-center') || highlight.id.startsWith('route-airport-');
-    
-    const radius = highlight.radius || (isReferencePoint ? 14 : 15);
-    const fillColor = highlight.color || (isReferencePoint ? '#007bff' : '#ff0000');
-    const weight = isReferencePoint ? 3 : 3;
-    const fillOpacity = isReferencePoint ? 0.6 : 0.7; // Slightly transparent so airport colors show through
-    
-    const marker = L.circleMarker([highlight.lat, highlight.lng], {
-      radius,
-      fillColor,
-      color: '#ffffff',
-      weight,
-      opacity: 1,
-      fillOpacity,
-      id: highlight.id,
-      // Ensure reference points are clickable but don't interfere with airport markers
-      interactive: true
-    });
-    
+    let marker: any;
+
+    // Use pin marker for 'point' type (search locations like "Bromley")
+    if (highlight.type === 'point') {
+      const pinIcon = L.divIcon({
+        className: 'location-pin-marker',
+        html: `<div style="
+          position: relative;
+          width: 24px;
+          height: 36px;
+        ">
+          <div style="
+            width: 24px;
+            height: 24px;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            border: 3px solid white;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+          "></div>
+          <div style="
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-radius: 50%;
+            transform: rotate(-45deg);
+          "></div>
+        </div>`,
+        iconSize: [24, 36],
+        iconAnchor: [12, 36], // Point at bottom center
+        popupAnchor: [0, -36]
+      });
+
+      marker = L.marker([highlight.lat, highlight.lng], {
+        icon: pinIcon,
+        id: highlight.id,
+        interactive: true,
+        zIndexOffset: 1000 // Ensure pin is above airport markers
+      });
+    } else {
+      // Use circle marker for 'airport' type (blue dots behind airport markers)
+      const isReferencePoint = highlight.id.startsWith('locate-center') || highlight.id.startsWith('route-airport-');
+
+      const radius = highlight.radius || (isReferencePoint ? 14 : 15);
+      const fillColor = highlight.color || (isReferencePoint ? '#007bff' : '#007bff');
+      const fillOpacity = isReferencePoint ? 0.6 : 0.7;
+
+      marker = L.circleMarker([highlight.lat, highlight.lng], {
+        radius,
+        fillColor,
+        color: '#ffffff',
+        weight: 3,
+        opacity: 1,
+        fillOpacity,
+        id: highlight.id,
+        interactive: true
+      });
+    }
+
     if (highlight.popup) {
       marker.bindPopup(highlight.popup);
-    } else if (isReferencePoint) {
-      // Add default popup for reference points
-      if (highlight.id.startsWith('locate-center')) {
-        marker.bindPopup('<b>Locate Center</b><br>Search origin point');
-      } else if (highlight.id.startsWith('route-airport-')) {
-        const icao = highlight.id.replace('route-airport-', '');
-        marker.bindPopup(`<b>Route Airport: ${icao}</b><br>Input airport`);
-      }
     }
-    
+
     marker.addTo(this.highlightLayer);
     this.highlights.set(highlight.id, marker);
   }

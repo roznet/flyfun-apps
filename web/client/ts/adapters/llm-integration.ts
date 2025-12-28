@@ -331,13 +331,13 @@ export class LLMIntegration {
 
     if (highlights instanceof globalThis.Map) {
       highlights.forEach((_, id: string) => {
-        if (id.startsWith('llm-airport-')) {
+        if (id.startsWith('llm-airport-') || id === 'llm-location-center') {
           idsToRemove.push(id);
         }
       });
     } else if (highlights && typeof highlights === 'object') {
       Object.keys(highlights).forEach((id: string) => {
-        if (id.startsWith('llm-airport-')) {
+        if (id.startsWith('llm-airport-') || id === 'llm-location-center') {
           idsToRemove.push(id);
         }
       });
@@ -445,6 +445,15 @@ export class LLMIntegration {
     this.clearLLMHighlights();
 
     const store = this.store as any;
+
+    // Add location marker for the search point itself (e.g., "Bromley")
+    store.getState().highlightPoint({
+      id: 'llm-location-center',
+      type: 'point' as const,
+      lat: pointData.lat,
+      lng: pointLon,
+      popup: `<b>${pointData.label || 'Search Location'}</b><br>Search center point`
+    });
 
     // Add blue highlights for recommended airports only (not all airports)
     let highlightCount = 0;
