@@ -896,11 +896,15 @@ def find_airports_near_route(
             "route": {
                 "from": {
                     "icao": from_airport.ident,
+                    "name": from_airport.name,
+                    "municipality": from_airport.municipality,
                     "lat": getattr(from_airport, "latitude_deg", None),
                     "lon": getattr(from_airport, "longitude_deg", None),
                 },
                 "to": {
                     "icao": to_airport.ident,
+                    "name": to_airport.name,
+                    "municipality": to_airport.municipality,
                     "lat": getattr(to_airport, "latitude_deg", None),
                     "lon": getattr(to_airport, "longitude_deg", None),
                 }
