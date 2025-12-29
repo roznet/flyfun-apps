@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     kotlin("kapt")
@@ -22,7 +23,7 @@ android {
 
     defaultConfig {
         applicationId = "me.zhaoqian.flyfun"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
@@ -33,6 +34,48 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+
+        // NDK configuration for llama.cpp
+        ndk {
+            abiFilters += listOf("arm64-v8a")  // ARM64 only for OpenCL GPU acceleration
+        }
+
+        // External native build arguments
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DLLAMA_BUILD_EXAMPLES=OFF",
+                    "-DLLAMA_BUILD_TESTS=OFF",
+                    "-DLLAMA_BUILD_SERVER=OFF",
+                    "-DGGML_VULKAN=OFF",
+                    "-DGGML_OPENCL=ON",
+                    "-DCMAKE_MAKE_PROGRAM=/Users/qianzhao/Library/Android/sdk/cmake/3.22.1/bin/ninja"
+                )
+                cppFlags += listOf("-std=c++17", "-O3")
+            }
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            // Include NDK sysroot libs to pick up the manually installed libOpenCL.so
+            // Note: This is hacky. Better to put it in src/main/jniLibs or copy it there.
+            // But we can't easily access workspace outside.
+            // Actually, we can just copy it to app/src/main/jniLibs/arm64-v8a in a task?
+            // Or point jniLibs.srcDirs to it?
+            // The path is /Users/qianzhao/Library/Android/sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/29
+            // CAUTION: This might include ALL system libs which is bad.
+            // Better to copy libOpenCL.so to project jniLibs.
+        }
+    }
+
+    // CMake build configuration
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
@@ -63,9 +106,7 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.7"
-    }
+    // Compose compiler is now handled by the kotlin compose plugin in Kotlin 2.x
 
     packaging {
         resources {
@@ -96,9 +137,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
 
     // Hilt Dependency Injection
-    implementation("com.google.dagger:hilt-android:2.48.1")
-    kapt("com.google.dagger:hilt-android-compiler:2.48.1")
-    implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
+    implementation("com.google.dagger:hilt-android:2.55")
+    kapt("com.google.dagger:hilt-android-compiler:2.55")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Networking - Retrofit + OkHttp
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
@@ -120,6 +161,12 @@ dependencies {
     // Markdown rendering
     implementation("com.halilibo.compose-richtext:richtext-commonmark:0.17.0")
     implementation("com.halilibo.compose-richtext:richtext-ui-material3:0.17.0")
+
+    // MediaPipe LLM Inference (CPU fallback) - 0.10.25 for Gemma 3n
+    implementation("com.google.mediapipe:tasks-genai:0.10.25")
+
+    // LiteRT-LM for GPU inference with .litertlm models
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

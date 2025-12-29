@@ -1,9 +1,18 @@
 package me.zhaoqian.flyfun.data.repository
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import me.zhaoqian.flyfun.data.api.ChatStreamingClient
 import me.zhaoqian.flyfun.data.api.FlyFunApiService
 import me.zhaoqian.flyfun.data.models.*
+import me.zhaoqian.flyfun.offline.ModelManager
+import me.zhaoqian.flyfun.offline.OfflineChatClient
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -11,13 +20,61 @@ import javax.inject.Singleton
 /**
  * Main repository for FlyFun data access.
  * Wraps API calls with error handling and caching.
+ * Supports offline mode with local LLM inference.
  */
 @Singleton
 class FlyFunRepository @Inject constructor(
     private val apiService: FlyFunApiService,
     private val chatStreamingClient: ChatStreamingClient,
+    private val offlineChatClient: OfflineChatClient,
+    private val modelManager: ModelManager,
+    @ApplicationContext private val context: Context,
     @Named("baseUrl") private val baseUrl: String
 ) {
+    
+    // ========== Offline Mode ==========
+    
+    /** Force offline mode for testing (overrides network detection) */
+    private val _forceOfflineMode = MutableStateFlow(false)
+    val forceOfflineMode: StateFlow<Boolean> = _forceOfflineMode.asStateFlow()
+    
+    /** Current effective offline state (forced or network unavailable) */
+    private val _isOffline = MutableStateFlow(false)
+    val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
+    
+    /**
+     * Toggle forced offline mode for testing.
+     * When enabled, uses local model even if network is available.
+     */
+    fun setForceOfflineMode(enabled: Boolean) {
+        _forceOfflineMode.value = enabled
+        updateOfflineState()
+    }
+    
+    /**
+     * Check if offline mode is available (model downloaded + device supported)
+     */
+    fun isOfflineModeAvailable(): Boolean {
+        return modelManager.isOfflineModeAvailable()
+    }
+    
+    /**
+     * Check current network connectivity
+     */
+    fun isNetworkAvailable(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+    
+    /**
+     * Update the offline state based on network and force toggle
+     */
+    private fun updateOfflineState() {
+        val shouldUseOffline = _forceOfflineMode.value || !isNetworkAvailable()
+        _isOffline.value = shouldUseOffline && isOfflineModeAvailable()
+    }
     
     // ========== Airports ==========
     
@@ -114,7 +171,23 @@ class FlyFunRepository @Inject constructor(
         apiService.chat(request)
     }
     
+    /**
+     * Stream chat with automatic offline fallback.
+     * 
+     * Uses local model if:
+     * - forceOfflineMode is enabled (for testing)
+     * - Network is unavailable AND offline mode is available
+     */
     fun streamChat(request: ChatRequest): Flow<ChatStreamEvent> {
-        return chatStreamingClient.streamChat(baseUrl, request)
+        updateOfflineState()
+        
+        return if (_isOffline.value) {
+            // Use offline local inference
+            offlineChatClient.streamChat(request)
+        } else {
+            // Use online API
+            chatStreamingClient.streamChat(baseUrl, request)
+        }
     }
 }
+

@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -34,6 +35,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import me.zhaoqian.flyfun.ui.theme.*
 import me.zhaoqian.flyfun.data.models.SuggestedQuery
+import me.zhaoqian.flyfun.offline.ModelManager
 import me.zhaoqian.flyfun.viewmodel.ChatViewModel
 import me.zhaoqian.flyfun.viewmodel.Role
 import me.zhaoqian.flyfun.viewmodel.UiChatMessage
@@ -52,8 +54,15 @@ fun ChatScreen(
     val personas by viewModel.personas.collectAsState()
     val selectedPersonaId by viewModel.selectedPersonaId.collectAsState()
     
+    // Offline mode states
+    val isOffline by viewModel.isOffline.collectAsState()
+    val forceOfflineMode by viewModel.forceOfflineMode.collectAsState()
+    val modelState by viewModel.modelState.collectAsState()
+    
     var inputText by remember { mutableStateOf("") }
     var showPersonaMenu by remember { mutableStateOf(false) }
+    var showOfflineMenu by remember { mutableStateOf(false) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     
@@ -141,6 +150,113 @@ fun ChatScreen(
                             }
                         }
                     }
+                    
+                    // Offline mode toggle
+                    Box {
+                        IconButton(onClick = { showOfflineMenu = true }) {
+                            Icon(
+                                imageVector = if (isOffline) Icons.Default.CloudOff else Icons.Default.Cloud,
+                                contentDescription = "Offline mode",
+                                tint = if (forceOfflineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showOfflineMenu,
+                            onDismissRequest = { showOfflineMenu = false }
+                        ) {
+                            // Header
+                            Text(
+                                text = "Offline Mode",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                            
+                            // Status
+                            val statusText = when (modelState) {
+                                is ModelManager.ModelState.Ready -> "Model ready"
+                                is ModelManager.ModelState.Loaded -> "Model loaded"
+                                is ModelManager.ModelState.NotDownloaded -> "Model not downloaded"
+                                is ModelManager.ModelState.Downloading -> {
+                                    val state = modelState as ModelManager.ModelState.Downloading
+                                    "Downloading... ${(state.progress * 100).toInt()}%"
+                                }
+                                is ModelManager.ModelState.Loading -> "Loading model..."
+                                is ModelManager.ModelState.Error -> "Error"
+                                else -> "Checking..."
+                            }
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            // Force offline toggle (for testing)
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Force Offline")
+                                        Switch(
+                                            checked = forceOfflineMode,
+                                            onCheckedChange = { viewModel.setForceOfflineMode(it) }
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.toggleForceOfflineMode() }
+                            )
+                            
+                            // Download button if not ready
+                            if (modelState is ModelManager.ModelState.NotDownloaded) {
+                                DropdownMenuItem(
+                                    text = { Text("Download Model (2.6 GB)") },
+                                    onClick = {
+                                        showOfflineMenu = false
+                                        showDownloadDialog = true
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Download, contentDescription = null)
+                                    }
+                                )
+                                
+                                // Local test model for development (only shown if not downloaded)
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                Text(
+                                    text = "Development",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                )
+                                DropdownMenuItem(
+                                    text = { 
+                                        Column {
+                                            Text("Use Test Model")
+                                            Text(
+                                                text = "Load from dev path",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        // Use the local test path from companion object
+                                        viewModel.setExternalModelPath(ModelManager.LOCAL_TEST_MODEL_PATH)
+                                        showOfflineMenu = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Folder, contentDescription = null)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
                     // Clear chat button
                     IconButton(onClick = { viewModel.clearChat() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "New conversation")
@@ -157,6 +273,32 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            // Offline mode indicator banner
+            AnimatedVisibility(visible = isOffline) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF6C5DD3).copy(alpha = 0.9f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (forceOfflineMode) "Offline Mode (Testing)" else "Offline Mode (No Network)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+            
             // Messages list
             LazyColumn(
                 state = listState,
@@ -232,6 +374,98 @@ fun ChatScreen(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
             )
         }
+    }
+    
+    // Model download dialog
+    if (showDownloadDialog) {
+        AlertDialog(
+            onDismissRequest = { showDownloadDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("Download Offline Model")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("The offline AI model allows you to use FlyFun without an internet connection.")
+                    
+                    Text(
+                        text = "Model Details:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("• Size: ~2.6 GB")
+                    Text("• Recommended: 4GB+ RAM")
+                    Text("• Android 8.0+")
+                    
+                    val capability = remember { viewModel.getDeviceCapability() }
+                    if (!capability.isSupported) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = capability.warningMessage ?: "Device not supported",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Show download progress if downloading
+                    if (modelState is ModelManager.ModelState.Downloading) {
+                        val downloadState = modelState as ModelManager.ModelState.Downloading
+                        Column {
+                            Text(
+                                text = "Downloading... ${(downloadState.progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            LinearProgressIndicator(
+                                progress = { downloadState.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                val isDownloading = modelState is ModelManager.ModelState.Downloading
+                Button(
+                    onClick = {
+                        // TODO: Replace with actual model URL when hosting is decided
+                        coroutineScope.launch {
+                            viewModel.downloadModel("https://your-server.com/models/flyfun-gemma-3n-q4_k_m.gguf")
+                        }
+                    },
+                    enabled = !isDownloading
+                ) {
+                    Text(if (isDownloading) "Downloading..." else "Download")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDownloadDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -448,15 +682,24 @@ private fun ChatInputArea(
 
 /**
  * Parse markdown text into AnnotatedString with styling
- * Supports: **bold**, *italic*, `inline code`, headers (#), and bullet points
+ * Supports: **bold**, *italic*, `inline code`, headers (#), bullet points, and tables
  */
 private fun parseMarkdown(text: String): AnnotatedString {
+    // Pre-process: convert markdown tables to readable list format
+    val processedText = convertMarkdownTables(text)
+    
     return buildAnnotatedString {
         var i = 0
-        val lines = text.lines()
+        val lines = processedText.lines()
         
         lines.forEachIndexed { lineIndex, line ->
             var processedLine = line
+            
+            // Skip table separator lines (|---|---|)
+            if (processedLine.matches(Regex("^\\|?[-:|\\s]+\\|?$"))) {
+                // Skip separator lines
+                return@forEachIndexed
+            }
             
             // Handle headers (# Header)
             when {
@@ -496,6 +739,59 @@ private fun parseMarkdown(text: String): AnnotatedString {
             }
         }
     }
+}
+
+/**
+ * Convert markdown tables to a more readable list format
+ * Since Text composables can't render tables, we format them as labeled entries
+ */
+private fun convertMarkdownTables(text: String): String {
+    val lines = text.lines().toMutableList()
+    val result = StringBuilder()
+    var i = 0
+    var headers: List<String>? = null
+    
+    while (i < lines.size) {
+        val line = lines[i]
+        
+        // Check if this is a table row (contains | and is not just separators)
+        if (line.contains("|") && !line.matches(Regex("^\\|?[-:|\\s]+\\|?$"))) {
+            val cells = line.split("|")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            
+            // Check if next line is separator (this is header row)
+            if (i + 1 < lines.size && lines[i + 1].matches(Regex("^\\|?[-:|\\s]+\\|?$"))) {
+                headers = cells
+                i += 2 // Skip header and separator
+                continue
+            }
+            
+            // This is a data row - format it nicely
+            if (headers != null && cells.size >= headers.size) {
+                // Format as: "• ICAO: EDDR | Name: Saarbrücken | Distance: 0nm"
+                val formattedRow = cells.mapIndexed { index, cell ->
+                    if (index < headers.size) {
+                        "${headers[index]}: $cell"
+                    } else {
+                        cell
+                    }
+                }.joinToString(" | ")
+                result.appendLine("• $formattedRow")
+            } else if (cells.isNotEmpty()) {
+                // No headers - just format cells
+                result.appendLine("• ${cells.joinToString(" | ")}")
+            }
+        } else if (!line.matches(Regex("^\\|?[-:|\\s]+\\|?$"))) {
+            // Not a table row and not a separator - keep as is
+            result.appendLine(line)
+        }
+        // Skip separator lines silently
+        
+        i++
+    }
+    
+    return result.toString().trimEnd()
 }
 
 /**

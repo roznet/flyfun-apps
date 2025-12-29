@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import me.zhaoqian.flyfun.data.models.*
 import me.zhaoqian.flyfun.data.repository.FlyFunRepository
 import me.zhaoqian.flyfun.data.repository.RouteStateHolder
+import me.zhaoqian.flyfun.offline.ModelManager
 import java.util.UUID
 import javax.inject.Inject
 
@@ -17,7 +18,8 @@ import javax.inject.Inject
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: FlyFunRepository,
-    private val routeStateHolder: RouteStateHolder
+    private val routeStateHolder: RouteStateHolder,
+    private val modelManager: ModelManager
 ) : ViewModel() {
     
     // Chat messages
@@ -53,6 +55,46 @@ class ChatViewModel @Inject constructor(
     
     private val _selectedPersonaId = MutableStateFlow("ifr_touring_sr22")
     val selectedPersonaId: StateFlow<String?> = _selectedPersonaId.asStateFlow()
+    
+    // ========== Offline Mode ==========
+    
+    /** Expose offline state from repository */
+    val isOffline: StateFlow<Boolean> = repository.isOffline
+    
+    /** Expose force offline toggle from repository */
+    val forceOfflineMode: StateFlow<Boolean> = repository.forceOfflineMode
+    
+    /** Expose model state for UI */
+    val modelState: StateFlow<ModelManager.ModelState> = modelManager.modelState
+    
+    /** Check if offline mode is available */
+    fun isOfflineModeAvailable(): Boolean = repository.isOfflineModeAvailable()
+    
+    /** Toggle force offline mode for testing */
+    fun toggleForceOfflineMode() {
+        repository.setForceOfflineMode(!repository.forceOfflineMode.value)
+    }
+    
+    /** Set force offline mode */
+    fun setForceOfflineMode(enabled: Boolean) {
+        repository.setForceOfflineMode(enabled)
+    }
+    
+    /** Get device capability info */
+    fun getDeviceCapability(): ModelManager.DeviceCapability {
+        return modelManager.checkDeviceCapability()
+    }
+    
+    /** Download the offline model */
+    fun downloadModel(url: String) = modelManager.downloadModel(url)
+    
+    /** Set external model path for testing (e.g., adb pushed model) */
+    fun setExternalModelPath(path: String) {
+        modelManager.setExternalModelPath(path)
+    }
+    
+    /** Check if model is ready for use */
+    fun isModelReady(): Boolean = modelManager.isModelAvailable()
     
     init {
         loadPersonas()
@@ -130,7 +172,28 @@ class ChatViewModel @Inject constructor(
                             _currentThinking.value = event.content
                         }
                         is ChatStreamEvent.ToolCallEvent -> {
-                            // Could show tool usage in UI
+                            // Show tool usage in the chat message with clear formatting
+                            val toolCall = event.toolCall
+                            val toolInfo = buildString {
+                                appendLine("---")
+                                appendLine("**🔧 Tool: ${toolCall.name}**")
+                                if (!toolCall.args.isNullOrEmpty()) {
+                                    appendLine("*Arguments:* ${toolCall.args.entries.joinToString { "${it.key}=${it.value}" }}")
+                                }
+                                if (!toolCall.result.isNullOrBlank()) {
+                                    appendLine()
+                                    appendLine("*Result Preview:*")
+                                    appendLine("```")
+                                    appendLine(toolCall.result)
+                                    appendLine("```")
+                                }
+                                appendLine("---")
+                                appendLine()
+                                appendLine("**📝 Answer:**")
+                                appendLine()
+                            }
+                            accumulatedContent.append(toolInfo)
+                            updateAssistantMessage(assistantMessageId, accumulatedContent.toString(), true)
                         }
                         is ChatStreamEvent.UiPayloadEvent -> {
                             // Process visualization payload for map display

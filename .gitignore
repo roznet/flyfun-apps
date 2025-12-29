@@ -10,3 +10,8 @@
 local.properties
 .vscode
 app/build
+
+# Log files
+*.log
+device_logs.txt
+build*.log
