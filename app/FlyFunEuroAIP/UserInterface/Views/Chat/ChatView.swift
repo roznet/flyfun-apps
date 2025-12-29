@@ -84,6 +84,19 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                // Offline mode toggle
+                Button {
+                    state?.chat.setOfflineMode(!(state?.chat.isOfflineMode ?? false))
+                } label: {
+                    Label(
+                        state?.chat.isOfflineMode == true ? "Offline" : "Online",
+                        systemImage: state?.chat.isOfflineMode == true ? "airplane.circle.fill" : "cloud.fill"
+                    )
+                    .foregroundStyle(state?.chat.isOfflineMode == true ? .orange : .blue)
+                }
+            }
+            
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     state?.chat.clear()

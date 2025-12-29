@@ -72,8 +72,6 @@ final class AppState {
         }
     }
     
-    // MARK: - Chatbot Configuration
-    
     /// Configure the chatbot service (call after initialization)
     func configureChatbot(baseURL: String) {
         do {
@@ -82,6 +80,28 @@ final class AppState {
             Logger.app.info("Chatbot configured with URL: \(baseURL)")
         } catch {
             Logger.app.error("Failed to configure chatbot: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Configure offline chatbot service
+    func configureOfflineChatbot(airportDataSource: LocalAirportDataSource) async {
+        let inferenceEngine = InferenceEngine()
+        let modelManager = ModelManager()
+        let toolDispatcher = LocalToolDispatcher()
+        
+        do {
+            try await toolDispatcher.initialize(airportDataSource: airportDataSource)
+            
+            let offlineService = OfflineChatbotService(
+                inferenceEngine: inferenceEngine,
+                toolDispatcher: toolDispatcher,
+                modelManager: modelManager
+            )
+            
+            chat.configureOffline(service: offlineService)
+            Logger.app.info("Offline chatbot configured")
+        } catch {
+            Logger.app.error("Failed to configure offline chatbot: \(error.localizedDescription)")
         }
     }
     

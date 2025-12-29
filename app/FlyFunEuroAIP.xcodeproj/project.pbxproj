@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		42FE37D82EBEF175005C2EB9 /* RZFlight in Frameworks */ = {isa = PBXBuildFile; productRef = 42FE37D72EBEF175005C2EB9 /* RZFlight */; };
+		8DD47D76A7E581698A3CBE6C /* Pods_FlyFunEuroAIP.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D1FBDAC0830C846AC309FBA5 /* Pods_FlyFunEuroAIP.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,10 +29,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2B2E61FD906FFB577167F23E /* Pods-FlyFunEuroAIP.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FlyFunEuroAIP.debug.xcconfig"; path = "Target Support Files/Pods-FlyFunEuroAIP/Pods-FlyFunEuroAIP.debug.xcconfig"; sourceTree = "<group>"; };
+		3D844CF8BBE5B4CB29990B9D /* Pods-FlyFunEuroAIP.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FlyFunEuroAIP.release.xcconfig"; path = "Target Support Files/Pods-FlyFunEuroAIP/Pods-FlyFunEuroAIP.release.xcconfig"; sourceTree = "<group>"; };
 		420ECDFC2EAE0D0A009FE6CE /* FlyFunEuroAIP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlyFunEuroAIP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE092EAE0D0B009FE6CE /* FlyFunEuroAIPTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		420ECE132EAE0D0B009FE6CE /* FlyFunEuroAIPUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlyFunEuroAIPUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		424573BB2EDB2B8D004E4BF9 /* rzflight */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = rzflight; path = /Users/brice/Developer/public/rzflight; sourceTree = "<absolute>"; };
+		D1FBDAC0830C846AC309FBA5 /* Pods_FlyFunEuroAIP.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_FlyFunEuroAIP.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -71,6 +75,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				42FE37D82EBEF175005C2EB9 /* RZFlight in Frameworks */,
+				8DD47D76A7E581698A3CBE6C /* Pods_FlyFunEuroAIP.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,15 +96,25 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		3F902C2249A11181F94E51D4 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				2B2E61FD906FFB577167F23E /* Pods-FlyFunEuroAIP.debug.xcconfig */,
+				3D844CF8BBE5B4CB29990B9D /* Pods-FlyFunEuroAIP.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		420ECDF32EAE0D0A009FE6CE = {
 			isa = PBXGroup;
 			children = (
 				420ECDFE2EAE0D0A009FE6CE /* FlyFunEuroAIP */,
 				420ECE0C2EAE0D0B009FE6CE /* FlyFunEuroAIPTests */,
 				420ECE162EAE0D0B009FE6CE /* FlyFunEuroAIPUITests */,
-				42FE37D62EBEF175005C2EB9 /* Frameworks */,
 				420ECDFD2EAE0D0A009FE6CE /* Products */,
 				424573BB2EDB2B8D004E4BF9 /* rzflight */,
+				3F902C2249A11181F94E51D4 /* Pods */,
+				631808906FA81DB24BCAE93E /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -113,9 +128,10 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		42FE37D62EBEF175005C2EB9 /* Frameworks */ = {
+		631808906FA81DB24BCAE93E /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				D1FBDAC0830C846AC309FBA5 /* Pods_FlyFunEuroAIP.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -127,6 +143,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 420ECE1D2EAE0D0B009FE6CE /* Build configuration list for PBXNativeTarget "FlyFunEuroAIP" */;
 			buildPhases = (
+				DBE0075D0C4EDA10295C240D /* [CP] Check Pods Manifest.lock */,
 				420ECDF82EAE0D0A009FE6CE /* Sources */,
 				420ECDF92EAE0D0A009FE6CE /* Frameworks */,
 				420ECDFA2EAE0D0A009FE6CE /* Resources */,
@@ -163,8 +180,6 @@
 				420ECE0C2EAE0D0B009FE6CE /* FlyFunEuroAIPTests */,
 			);
 			name = FlyFunEuroAIPTests;
-			packageProductDependencies = (
-			);
 			productName = FlyFunEuroAIPTests;
 			productReference = 420ECE092EAE0D0B009FE6CE /* FlyFunEuroAIPTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -186,8 +201,6 @@
 				420ECE162EAE0D0B009FE6CE /* FlyFunEuroAIPUITests */,
 			);
 			name = FlyFunEuroAIPUITests;
-			packageProductDependencies = (
-			);
 			productName = FlyFunEuroAIPUITests;
 			productReference = 420ECE132EAE0D0B009FE6CE /* FlyFunEuroAIPUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -262,6 +275,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DBE0075D0C4EDA10295C240D /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-FlyFunEuroAIP-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		420ECDF82EAE0D0A009FE6CE /* Sources */ = {
@@ -419,13 +457,14 @@
 		};
 		420ECE1E2EAE0D0B009FE6CE /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2B2E61FD906FFB577167F23E /* Pods-FlyFunEuroAIP.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = M7QSSF3624;
+				DEVELOPMENT_TEAM = U88C9D6N8V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -475,13 +514,14 @@
 		};
 		420ECE1F2EAE0D0B009FE6CE /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 3D844CF8BBE5B4CB29990B9D /* Pods-FlyFunEuroAIP.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = M7QSSF3624;
+				DEVELOPMENT_TEAM = U88C9D6N8V;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -677,8 +717,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/roznet/rzflight";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.0;
+				branch = main;
+				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

@@ -22,6 +22,12 @@ final class ChatDomain {
     var currentToolCall: String?
     var error: String?
     
+    /// Offline mode toggle
+    var isOfflineMode: Bool = false
+    
+    /// ID of the message currently being streamed (to update correct message)
+    private var currentStreamingMessageId: UUID?
+    
     /// Tools used during current streaming session
     private var toolsUsed: [String] = []
     
@@ -31,7 +37,11 @@ final class ChatDomain {
     var onVisualization: ((ChatVisualizationPayload) -> Void)?
     
     // MARK: - Dependencies
-    private var chatbotService: ChatbotService?
+    private var onlineChatbotService: ChatbotService?
+    private var offlineChatbotService: OfflineChatbotService?
+    private var chatbotService: ChatbotService? {
+        isOfflineMode ? offlineChatbotService : onlineChatbotService
+    }
     
     // MARK: - Init
     
@@ -39,7 +49,18 @@ final class ChatDomain {
     
     /// Initialize with a chatbot service
     func configure(service: ChatbotService) {
-        self.chatbotService = service
+        self.onlineChatbotService = service
+    }
+    
+    /// Configure offline chatbot service
+    func configureOffline(service: OfflineChatbotService) {
+        self.offlineChatbotService = service
+    }
+    
+    /// Toggle offline mode
+    func setOfflineMode(_ offline: Bool) {
+        isOfflineMode = offline
+        Logger.app.info("Chat mode: \(offline ? "offline" : "online")")
     }
     
     // MARK: - Actions
@@ -64,6 +85,7 @@ final class ChatDomain {
         isStreaming = true
         currentThinking = nil
         currentToolCall = nil
+        currentStreamingMessageId = nil  // Reset for new stream
         toolsUsed = []  // Reset tools for new message
         
         Logger.app.info("Sending chat message: \(userMessage)")
@@ -119,7 +141,8 @@ final class ChatDomain {
             }
             
         case .message(let content):
-            accumulatedContent += content
+            // Replace content (not append) since offline service sends full accumulated content
+            accumulatedContent = content
             updateLastAssistantMessage(accumulatedContent)
             
         case .uiPayload(let payload):
@@ -185,17 +208,24 @@ final class ChatDomain {
         messages.append(message)
     }
     
-    /// Update the last assistant message (for streaming)
+    /// Update the current streaming assistant message (creates new if none)
     func updateLastAssistantMessage(_ content: String) {
-        guard let lastIndex = messages.lastIndex(where: { $0.role == .assistant }) else {
-            messages.append(ChatMessage(role: .assistant, content: content, isStreaming: true))
+        // If we have a tracked streaming message, update it
+        if let messageId = currentStreamingMessageId,
+           let index = messages.firstIndex(where: { $0.id == messageId }) {
+            messages[index] = ChatMessage(
+                id: messageId,
+                role: .assistant,
+                content: content,
+                isStreaming: true
+            )
             return
         }
-        messages[lastIndex] = ChatMessage(
-            role: .assistant,
-            content: content,
-            isStreaming: true
-        )
+        
+        // Otherwise, create a new message and track its ID
+        let newMessage = ChatMessage(role: .assistant, content: content, isStreaming: true)
+        currentStreamingMessageId = newMessage.id
+        messages.append(newMessage)
     }
     
     /// Finish streaming for the last message

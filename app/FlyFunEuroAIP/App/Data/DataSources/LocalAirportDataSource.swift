@@ -95,7 +95,8 @@ final class LocalAirportDataSource: AirportRepositoryProtocol, @unchecked Sendab
     
     func airportsNearLocation(center: CLLocationCoordinate2D, radiusNm: Int, filters: FilterConfig) async throws -> [RZFlight.Airport] {
         // Use KnownAirports KDTree-based spatial query
-        let nearbyAirports = knownAirports.nearest(coord: center, count: 100)
+        // Use 500 to ensure we get enough to filter by notification
+        let nearbyAirports = knownAirports.nearest(coord: center, count: 500)
         
         // Filter by actual distance (KDTree returns approximate nearest, verify with haversine)
         let radiusMeters = Double(radiusNm) * 1852.0

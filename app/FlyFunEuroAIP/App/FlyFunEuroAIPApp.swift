@@ -126,6 +126,9 @@ struct FlyFunEuroAIPApp: App {
             // Configure chatbot with API URL
             appState.configureChatbot(baseURL: AirportRepository.apiBaseURL)
             
+            // Configure offline chatbot for on-device inference
+            await appState.configureOfflineChatbot(airportDataSource: localDataSource)
+            
             self.appState = appState
             
             Logger.app.info("App initialization complete")

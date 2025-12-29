@@ -25,14 +25,21 @@ struct ChatBubble: View {
             
             // Message content
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(bubbleBackground)
-                    .foregroundStyle(isUser ? .white : .primary)
-                    .clipShape(BubbleShape(isUser: isUser))
+                // Render markdown for assistant messages, plain text for user
+                Group {
+                    if isUser {
+                        Text(message.content)
+                    } else {
+                        Text(markdownAttributed(message.content))
+                    }
+                }
+                .font(.body)
+                .textSelection(.enabled)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(bubbleBackground)
+                .foregroundStyle(isUser ? .white : .primary)
+                .clipShape(BubbleShape(isUser: isUser))
                 
                 // Tools used footer (for assistant messages)
                 if !isUser && !message.toolsUsed.isEmpty {
@@ -75,6 +82,21 @@ struct ChatBubble: View {
             #else
             Color(nsColor: .controlBackgroundColor)
             #endif
+        }
+    }
+    
+    /// Parse markdown text to AttributedString for rendering
+    private func markdownAttributed(_ text: String) -> AttributedString {
+        do {
+            return try AttributedString(
+                markdown: text,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            )
+        } catch {
+            // Fallback to plain text if markdown parsing fails
+            return AttributedString(text)
         }
     }
 }
