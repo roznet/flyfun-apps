@@ -532,6 +532,57 @@ When `show_rules` is present in `ui_payload`:
 | `browse_rules` | None | Triggers rules panel via `show_rules` field |
 | `compare_rules_between_countries` | None | Triggers rules panel via `show_rules` field |
 
+**Adding New Filters (Important!):**
+
+All airport filtering uses `FilterEngine` (`shared/filtering/filter_engine.py`) as the single source of truth. Both LangGraph tools and REST API endpoints use the same engine.
+
+**To add a new filter:**
+
+1. **Create Filter class** in `shared/filtering/filters/`
+   ```python
+   class MyNewFilter(Filter):
+       name = "my_filter"
+       description = "Filter by something"
+
+       def apply(self, airport, value, context) -> bool:
+           # Return True if airport passes filter
+   ```
+
+2. **Register in FilterEngine** (`shared/filtering/filter_engine.py`)
+   ```python
+   FilterRegistry.register(MyNewFilter())
+   ```
+
+3. **Add to filter profile** (`shared/airport_tools.py:_build_filter_profile()`)
+   ```python
+   # For string/number values:
+   for key in ["country", ..., "my_filter"]:
+   # For boolean values:
+   for key in ["has_procedures", ..., "my_filter"]:
+   ```
+
+4. **Add REST API query parameter** (`web/server/api/airports.py`)
+   ```python
+   my_filter: Optional[str] = Query(None, description="...")
+   # Then add to filters dict:
+   if my_filter:
+       filters["my_filter"] = my_filter
+   ```
+
+5. **Add frontend support** (if UI control needed)
+   - `web/client/ts/store/types.ts` - Add to `FilterConfig`
+   - `web/client/ts/adapters/api-adapter.ts` - Add to `transformFiltersToParams()`
+   - `web/client/ts/adapters/llm-integration.ts` - Add to `applyFilterProfile()`
+   - `web/client/ts/managers/ui-manager.ts` - Add UI control handler and `syncFiltersToUI()`
+
+**Supported Filters:**
+- `country`, `has_procedures`, `has_aip_data`, `has_hard_runway`, `point_of_entry`
+- `has_avgas`, `has_jet_a`, `hotel`, `restaurant`
+- `min_runway_length_ft`, `max_runway_length_ft`, `max_landing_fee`
+- `trip_distance`, `exclude_large_airports`
+
+**Special Case:** AIP field filtering (`aip_field`, `aip_value`, `aip_operator`) uses `_matches_aip_field()` helper, not FilterEngine.
+
 See `designs/UI_FILTER_STATE_DESIGN.md` for complete UI, filter, state management, and LLM integration details.
 
 ---

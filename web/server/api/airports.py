@@ -12,6 +12,7 @@ from .ga_friendliness import get_service as get_ga_service
 from . import notifications
 from shared.airport_tools import find_airports_near_location
 from shared.tool_context import ToolContext
+from shared.filtering import FilterEngine
 
 # Type alias for route airports (can be ICAO codes or NavPoint objects)
 Route: TypeAlias = List[Union[str, NavPoint]]
@@ -299,70 +300,47 @@ async def get_airports_near_route(
     
     # Find airports near the route
     nearby_airports = model.find_airports_near_route(route_airports, effective_segment_distance_nm)
-   
-    # Apply additional filters
-    filtered_airports = []
-    # Prepare enroute distance context if needed
-    first_route_item = route_airports[0]
-    if not isinstance(first_route_item, str):
-        raise HTTPException(status_code=400, detail="First route item must be a string ICAO code")
-    from_airport = model.airports.where(ident=first_route_item).first() if enroute_distance_max_nm is not None else None
-    for item in nearby_airports:
-        airport = item['airport']
-        
-        # Apply enroute (trip) distance max filter from first route airport
-        if from_airport is not None:
-            try:
-                _, gc_distance_nm = from_airport.navpoint.haversine_distance(airport.navpoint) if from_airport.navpoint and airport.navpoint else (0, 0)
-                if gc_distance_nm > float(enroute_distance_max_nm or 0):
-                    continue
-            except Exception:
-                # If distance can't be computed, conservatively include
-                pass
-        
-        # Apply country filter
-        if country and airport.iso_country != country:
-            continue
-            
-        # Apply procedures filter
-        if has_procedures is not None:
-            has_procs = bool(airport.procedures)
-            if has_procs != has_procedures:
-                continue
-                
-        # Apply AIP data filter
-        if has_aip_data is not None:
-            has_aip = bool(airport.aip_entries)
-            if has_aip != has_aip_data:
-                continue
-                
-        # Apply hard runway filter
-        if has_hard_runway is not None:
-            if airport.has_hard_runway != has_hard_runway:
-                continue
-                
-        # Apply border crossing filter
-        if point_of_entry is not None:
-            if airport.point_of_entry != point_of_entry:
-                continue
-        
-        # Apply AIP field filtering
-        if aip_field and not _matches_aip_field(airport, aip_field, aip_value, aip_operator):
-            continue
 
-        # Airport passed all filters
-        filtered_airports.append(item)
+    # Build filters dict for FilterEngine
+    filters: Dict[str, Any] = {}
+    if country:
+        filters["country"] = country
+    if has_procedures is not None:
+        filters["has_procedures"] = has_procedures
+    if has_aip_data is not None:
+        filters["has_aip_data"] = has_aip_data
+    if has_hard_runway is not None:
+        filters["has_hard_runway"] = has_hard_runway
+    if point_of_entry is not None:
+        filters["point_of_entry"] = point_of_entry
+    if hotel:
+        filters["hotel"] = hotel
+    if restaurant:
+        filters["restaurant"] = restaurant
+    # Trip distance filter (enroute distance from first airport)
+    if enroute_distance_max_nm is not None:
+        first_route_item = route_airports[0]
+        if isinstance(first_route_item, str):
+            filters["trip_distance"] = {"from": first_route_item, "max": enroute_distance_max_nm}
 
-    # Apply hospitality filters (hotel/restaurant) using GA service
-    # This is done after initial filtering to minimize GA service calls
-    if hotel or restaurant:
-        ga_service = get_ga_service()
-        if ga_service and ga_service.enabled:
-            hospitality_icaos = ga_service.get_icaos_by_hospitality(hotel=hotel, restaurant=restaurant)
-            filtered_airports = [
-                item for item in filtered_airports
-                if item['airport'].ident in hospitality_icaos
-            ]
+    # Create ToolContext for FilterEngine (provides access to GA service for hospitality filters)
+    ctx = ToolContext(model=model, ga_friendliness_service=get_ga_service())
+    filter_engine = FilterEngine(context=ctx)
+
+    # Extract airports, apply filters, then reconstruct items
+    airport_to_item = {item['airport'].ident: item for item in nearby_airports}
+    airports_only = [item['airport'] for item in nearby_airports]
+    filtered_airport_objects = filter_engine.apply(airports_only, filters)
+
+    # Reconstruct filtered items (preserving segment_distance_nm, etc.)
+    filtered_airports = [airport_to_item[a.ident] for a in filtered_airport_objects]
+
+    # Apply AIP field filtering (not in FilterEngine - special case)
+    if aip_field:
+        filtered_airports = [
+            item for item in filtered_airports
+            if _matches_aip_field(item['airport'], aip_field, aip_value, aip_operator)
+        ]
 
     # Get list of ICAOs for batch fetching
     icaos = [item['airport'].ident for item in filtered_airports]

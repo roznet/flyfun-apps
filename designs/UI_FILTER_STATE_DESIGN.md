@@ -137,16 +137,24 @@ All state modifications go through store actions:
 
 #### Filtering Logic
 
-Client-side filtering is performed in `filterAirports()` function in `store.ts`. Currently implements basic filtering with a TODO to integrate with the shared `FilterEngine` from the Python backend (`shared/filtering/filter_engine.py`).
+**Backend Filtering (Authoritative):**
 
-**Current Implementation:**
+All airport filtering is performed by `FilterEngine` (`shared/filtering/filter_engine.py`) on the backend. Both REST API endpoints and LangGraph tools use the same engine, ensuring consistent behavior.
+
+See `CHATBOT_WEBUI_DESIGN.md` → "Adding New Filters" for how to add new filters.
+
+**Client-Side Filtering (Display Only):**
+
+The `filterAirports()` function in `store.ts` provides basic client-side filtering for immediate UI feedback. This is NOT authoritative - the real filtering happens on the backend.
+
+Client-side filters (for immediate display):
 - Country filter
 - Boolean filters (has_procedures, has_aip_data, has_hard_runway, point_of_entry)
-- Distance parameters (search_radius_nm, enroute_distance_max_nm) for route/locate searches
-- Additional filters (has_avgas, has_jet_a, runway length, landing fee) are applied on the backend via API
 
-**Future Enhancement:**
-- Integration with shared FilterEngine for consistent filtering logic across frontend and backend
+Backend-only filters (via API):
+- `has_avgas`, `has_jet_a`, `hotel`, `restaurant`
+- `min_runway_length_ft`, `max_runway_length_ft`, `max_landing_fee`
+- `trip_distance`, `exclude_large_airports`
 
 ### 2. Visualization Engine (`ts/engines/visualization-engine.ts`)
 
