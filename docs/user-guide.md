@@ -75,6 +75,18 @@ The sections below describe **intended or hoped-for usage**, not promises. Resul
 ### 0. List of prompt ideas to try:
 
 - Find airports along the route from EGTF to LFMD that have customs facilities
+- Find airports near Etretat with AVGAS fuel
+- What are the details for airport LFQA?
+- Which airport have less than 24h notice near Etretat
+- What are the aviation rules for France?
+- Compare customs rules between France and UK
+- Show me airports in Germany
+- Route from Geneva to Barcelona
+- Show me airports near Lyon with AVGAS and instrument approaches
+- What should i know about use of Transponder in Germany
+- How is the IFR routing philosophy: route availability, and how hard the system is on validation in France
+- Anything to know about Restricted zone if i go to France?
+- Tell me about IFR/VFR transition differences between Germany, UK and Belgium
 
 
 ### 1. Finding Airports Near a Location
