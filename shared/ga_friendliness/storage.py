@@ -250,9 +250,8 @@ class GAMetaStorage(StorageInterface):
                 # Insert new tags
                 for extraction in tags:
                     for aspect_label in extraction.aspects:
-                        conn = self._get_connection()
-                conn.execute("""
-                            INSERT INTO ga_review_ner_tags 
+                        conn.execute("""
+                            INSERT INTO ga_review_ner_tags
                             (icao, review_id, aspect, label, confidence, timestamp, created_utc)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, (
@@ -696,8 +695,7 @@ class GAMetaStorage(StorageInterface):
 
                 # Insert new rules
                 for rule in rules:
-                    conn = self._get_connection()
-                conn.execute("""
+                    conn.execute("""
                         INSERT INTO ga_notification_requirements (
                             icao, rule_type, weekday_start, weekday_end,
                             notification_hours, notification_type, specific_time,

@@ -348,7 +348,12 @@ class NextQueryPredictor:
             if entities:
                 # Extract template variable name
                 # "icao_codes" -> "icao", "countries" -> "country", "locations" -> "location"
-                var_name = entity_type.rstrip("s").replace("_codes", "").replace("_mentioned", "")
+                # First remove _codes/_mentioned suffixes, then singularize
+                var_name = entity_type.replace("_codes", "").replace("_mentioned", "")
+                if var_name.endswith("ies"):
+                    var_name = var_name[:-3] + "y"  # countries -> country
+                elif var_name.endswith("s"):
+                    var_name = var_name[:-1]  # locations -> location
                 entity_value = entities[0]
                 
                 # Format template with entity value
