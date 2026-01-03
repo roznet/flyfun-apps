@@ -1,9 +1,6 @@
 {
     "version": "0.2.0",
     "configurations": [
-      
-
-      
       {
         "name": "Web Server (.env)",
         "type": "debugpy",
