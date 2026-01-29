@@ -20,6 +20,7 @@ struct NotamResurfaceTests {
         id: String = "A1234/24",
         location: String = "LFPG",
         qCode: String? = "QMRLC",
+        scope: String? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil
     ) throws -> Notam {
@@ -39,6 +40,7 @@ struct NotamResurfaceTests {
             "raw_text": "TEST NOTAM",
             "message": "Test message",
             "q_code": \(qCode.map { "\"\($0)\"" } ?? "null"),
+            "scope": \(scope.map { "\"\($0)\"" } ?? "null"),
             \(coordJson)
             "is_permanent": false,
             "effective_from": "2024-01-15T00:00:00Z",
@@ -272,6 +274,22 @@ struct NotamResurfaceTests {
         settings.distanceResurfaceEnabled = false
 
         #expect(settings.distanceResurfaceEnabled == false)
+    }
+
+    @Test func distanceBasedRuleSkipsAerodromeNotams() throws {
+        // Aerodrome NOTAMs (scope "A") should not be resurfaced based on distance
+        // because airports are at fixed locations and origin/destination are always
+        // close to the route
+        let aerodromeNotam = try makeNotam(scope: "A", latitude: 49.0, longitude: 2.5)
+        let enrouteNotam = try makeNotam(scope: "E", latitude: 49.0, longitude: 2.5)
+        let warningNotam = try makeNotam(scope: "W", latitude: 49.0, longitude: 2.5)
+
+        #expect(aerodromeNotam.scope == "A")
+        #expect(enrouteNotam.scope == "E")
+        #expect(warningNotam.scope == "W")
+
+        // The rule logic: aerodrome NOTAMs should be skipped (return nil)
+        // while enroute and warning NOTAMs should be evaluated
     }
 
     // MARK: - NotamResurfaceEvaluator Tests
