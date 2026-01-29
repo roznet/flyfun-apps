@@ -240,9 +240,6 @@ final class NotamDomain {
     /// Enriched NOTAMs with status (for display)
     private(set) var enrichedNotams: [EnrichedNotam] = []
 
-    /// Current route from briefing (for spatial filtering)
-    private(set) var currentRoute: Route?
-
     /// Briefing ID for current set of NOTAMs
     private(set) var briefingId: String?
 
@@ -290,10 +287,7 @@ final class NotamDomain {
     /// Smart filters (helicopter, obstacle, scope)
     var smartFilters = SmartFilters()
 
-    /// Airport coordinates for route filtering (populated from briefing or external source)
-    var airportCoordinates: [String: CLLocationCoordinate2D] = [:]
-
-    /// Flight context for priority evaluation (set by AppState when flight is selected)
+    /// Flight context for route filtering and priority evaluation (set by AppState when flight is selected)
     private(set) var currentFlightContext: FlightContext = .empty
 
     // MARK: - Priority Filter
@@ -320,18 +314,22 @@ final class NotamDomain {
     var filteredNotams: [Notam] {
         var notams = allNotams
 
-        // 1. Apply route corridor filter
-        if routeFilter.isEnabled && !routeFilter.icaoCodes.isEmpty {
-            if let route = currentRoute {
-                // Use route from briefing
-                notams = notams.alongRoute(route, withinNm: routeFilter.corridorWidthNm)
-            } else if !airportCoordinates.isEmpty {
-                // Use manually entered route with coordinates
-                notams = notams.alongRoute(
-                    icaoCodes: routeFilter.routeString,
-                    withinNm: routeFilter.corridorWidthNm,
-                    airportCoordinates: airportCoordinates
-                )
+        // 1. Apply route corridor filter using FlightContext coordinates
+        if routeFilter.isEnabled, currentFlightContext.hasValidRoute {
+            let corridorWidth = routeFilter.corridorWidthNm
+            let context = currentFlightContext
+            let routeAirports = Set([context.departureICAO, context.destinationICAO].compactMap { $0?.uppercased() } + context.alternateICAOs.map { $0.uppercased() })
+
+            notams = notams.filter { notam in
+                // Always include NOTAMs for route airports
+                if routeAirports.contains(notam.location.uppercased()) {
+                    return true
+                }
+                // Check coordinate-based distance
+                guard let coord = notam.coordinate else {
+                    return false // No coordinate and not a route airport
+                }
+                return context.isWithinCorridor(coord, corridorWidthNm: corridorWidth)
             }
         }
 
@@ -384,29 +382,33 @@ final class NotamDomain {
             notams = notams.excludingIgnored()
         }
 
-        // 2. Apply route corridor filter (filter underlying Notam objects)
-        if routeFilter.isEnabled && !routeFilter.icaoCodes.isEmpty {
-            let routeFilteredIds: Set<String>
-            if let route = currentRoute {
-                routeFilteredIds = Set(allNotams.alongRoute(route, withinNm: routeFilter.corridorWidthNm).map { $0.id })
-            } else if !airportCoordinates.isEmpty {
-                routeFilteredIds = Set(allNotams.alongRoute(
-                    icaoCodes: routeFilter.routeString,
-                    withinNm: routeFilter.corridorWidthNm,
-                    airportCoordinates: airportCoordinates
-                ).map { $0.id })
-            } else {
-                routeFilteredIds = Set(allNotams.map { $0.id })
+        // 2. Apply route corridor filter using FlightContext coordinates
+        if routeFilter.isEnabled, currentFlightContext.hasValidRoute {
+            let corridorWidth = routeFilter.corridorWidthNm
+            let context = currentFlightContext
+            let routeAirports = Set([context.departureICAO, context.destinationICAO].compactMap { $0?.uppercased() } + context.alternateICAOs.map { $0.uppercased() })
+
+            notams = notams.filter { enriched in
+                let notam = enriched.notam
+                // Always include NOTAMs for route airports
+                if routeAirports.contains(notam.location.uppercased()) {
+                    return true
+                }
+                // Check coordinate-based distance
+                guard let coord = notam.coordinate else {
+                    return false // No coordinate and not a route airport
+                }
+                return context.isWithinCorridor(coord, corridorWidthNm: corridorWidth)
             }
-            notams = notams.filter { routeFilteredIds.contains($0.notamId) }
         }
 
-        // 3. Apply time filter (filter by validity at flight time)
-        if timeFilter.isEnabled, let route = currentRoute, let depTime = route.departureTime {
+        // 3. Apply time filter using FlightContext times
+        if timeFilter.isEnabled, let depTime = currentFlightContext.departureTime {
             let preBuffer = TimeInterval(timeFilter.preFlightBufferMinutes * 60)
             let postBuffer = TimeInterval(timeFilter.postFlightBufferMinutes * 60)
             let windowStart = depTime.addingTimeInterval(-preBuffer)
-            let windowEnd = (route.arrivalTime ?? depTime).addingTimeInterval(postBuffer)
+            let arrivalTime = currentFlightContext.arrivalTime ?? depTime
+            let windowEnd = arrivalTime.addingTimeInterval(postBuffer)
 
             notams = notams.filter { enriched in
                 enriched.isActive(during: windowStart, to: windowEnd)
@@ -487,15 +489,17 @@ final class NotamDomain {
     ///
     /// Returns NOTAMs organized by: Departure, En Route (sorted by distance), Destination,
     /// Alternates, Distant (>50nm), No Coordinates
+    ///
+    /// Uses FlightContext for route information (coordinates from KnownAirports).
     var enrichedNotamsGroupedByRouteSegment: [(segment: NotamRouteClassification.RouteSegment, notams: [EnrichedNotam])] {
-        guard let route = currentRoute else {
-            // No route - put everything in noCoordinate segment
+        guard currentFlightContext.departureICAO != nil || currentFlightContext.destinationICAO != nil else {
+            // No flight context - put everything in noCoordinate segment
             return [(.noCoordinate, filteredEnrichedNotams)]
         }
 
-        // Classify underlying NOTAMs
+        // Classify underlying NOTAMs using FlightContext
         let notamArray = filteredEnrichedNotams.map { $0.notam }
-        let classified = notamArray.groupedByRouteSegment(route: route, distantThresholdNm: 50.0)
+        let classified = currentFlightContext.groupNotamsByRouteSegment(notamArray, distantThresholdNm: 50.0)
 
         // Map back to EnrichedNotam, preserving order
         let enrichedById = Dictionary(uniqueKeysWithValues: filteredEnrichedNotams.map { ($0.notamId, $0) })
@@ -564,14 +568,19 @@ final class NotamDomain {
         self.globalReadManager = manager
     }
 
-    /// Update the flight context for priority evaluation.
+    /// Update the flight context for priority evaluation and route filtering.
     ///
     /// Call this when the flight is selected or updated. The context is used
     /// to compute route distance, altitude relevance, and priority for each NOTAM.
+    /// Also updates the route filter display string from the flight route.
     ///
     /// - Parameter context: The flight context, or nil to clear
     func setFlightContext(_ context: FlightContext?) {
         self.currentFlightContext = context ?? .empty
+
+        // Update route filter display string from flight context
+        routeFilter.routeString = currentFlightContext.routeDisplayString
+
         // Re-enrich NOTAMs with new context
         refreshEnrichedNotams()
     }
@@ -581,29 +590,15 @@ final class NotamDomain {
     /// Set NOTAMs from a loaded briefing (standalone mode without Core Data flight)
     /// Note: In this mode, status persistence is not available.
     /// Use setBriefing(_:cdBriefing:previousKeys:) for full functionality.
+    ///
+    /// Route information for filtering comes from FlightContext (set via setFlightContext).
     func setBriefing(_ briefing: Briefing) {
         self.briefingId = briefing.id
         self.allNotams = briefing.notams
-        self.currentRoute = briefing.route
         self.currentCDBriefing = nil
         self.selectedNotam = nil
         self.selectedEnrichedNotam = nil
         self.previousIdentityKeys = []
-
-        // Pre-populate route filter from briefing route
-        if let route = briefing.route {
-            var routeAirports = [route.departure, route.destination]
-            routeAirports.append(contentsOf: route.alternates)
-            routeFilter.routeString = routeAirports.joined(separator: " ")
-
-            // Extract coordinates from route for filtering
-            if let depCoord = route.departureCoordinate {
-                airportCoordinates[route.departure.uppercased()] = depCoord
-            }
-            if let destCoord = route.destinationCoordinate {
-                airportCoordinates[route.destination.uppercased()] = destCoord
-            }
-        }
 
         // Build enriched NOTAMs (standalone mode - all unread)
         Task {
@@ -616,29 +611,15 @@ final class NotamDomain {
     }
 
     /// Set NOTAMs from a Core Data briefing with status tracking
+    ///
+    /// Route information for filtering comes from FlightContext (set via setFlightContext).
     func setBriefing(_ briefing: Briefing, cdBriefing: CDBriefing, previousKeys: Set<String>) {
         self.briefingId = briefing.id
         self.allNotams = briefing.notams
-        self.currentRoute = briefing.route
         self.currentCDBriefing = cdBriefing
         self.selectedNotam = nil
         self.selectedEnrichedNotam = nil
         self.previousIdentityKeys = previousKeys
-
-        // Pre-populate route filter from briefing route
-        if let route = briefing.route {
-            var routeAirports = [route.departure, route.destination]
-            routeAirports.append(contentsOf: route.alternates)
-            routeFilter.routeString = routeAirports.joined(separator: " ")
-
-            // Extract coordinates from route for filtering
-            if let depCoord = route.departureCoordinate {
-                airportCoordinates[route.departure.uppercased()] = depCoord
-            }
-            if let destCoord = route.destinationCoordinate {
-                airportCoordinates[route.destination.uppercased()] = destCoord
-            }
-        }
 
         // Build enriched NOTAMs from Core Data statuses
         Task {
@@ -732,12 +713,10 @@ final class NotamDomain {
     func clearBriefing() {
         allNotams = []
         enrichedNotams = []
-        currentRoute = nil
         briefingId = nil
         currentCDBriefing = nil
         selectedNotam = nil
         selectedEnrichedNotam = nil
-        airportCoordinates = [:]
         previousIdentityKeys = []
     }
 
@@ -752,12 +731,8 @@ final class NotamDomain {
         smartFilters = SmartFilters()
         searchQuery = ""
 
-        // Re-populate route from briefing if available
-        if let route = currentRoute {
-            var routeAirports = [route.departure, route.destination]
-            routeAirports.append(contentsOf: route.alternates)
-            routeFilter.routeString = routeAirports.joined(separator: " ")
-        }
+        // Re-populate route from flight context
+        routeFilter.routeString = currentFlightContext.routeDisplayString
     }
 
     /// Get enriched NOTAM for a given notam
@@ -941,48 +916,52 @@ final class NotamDomain {
         }
 
         // 2. Obstacle filter - only show obstacles near departure/destination
-        if smartFilters.filterObstacles, let route = currentRoute {
-            let depCoord = route.departureCoordinate
-            let destCoord = route.destinationCoordinate
+        // Uses FlightContext for airport coordinates
+        if smartFilters.filterObstacles {
+            let depCoord = currentFlightContext.departureCoordinate
+            let destCoord = currentFlightContext.destinationCoordinate
 
-            result = result.filter { notam in
-                guard let subject = notam.qCodeSubject,
-                      Self.obstacleSubjects.contains(subject) else {
-                    // Not an obstacle - keep it
-                    return true
-                }
-
-                // Obstacle NOTAM - check if near dep/dest
-                guard let notamCoord = notam.coordinate else {
-                    // No coordinates - include by default for safety
-                    return true
-                }
-
-                let notamLoc = CLLocation(
-                    latitude: notamCoord.latitude,
-                    longitude: notamCoord.longitude
-                )
-
-                // Check distance to departure
-                if let coord = depCoord {
-                    let depLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    let distNm = notamLoc.distance(from: depLoc) / 1852.0
-                    if distNm <= smartFilters.obstacleDistanceNm {
+            // Only filter if we have at least one airport coordinate
+            if depCoord != nil || destCoord != nil {
+                result = result.filter { notam in
+                    guard let subject = notam.qCodeSubject,
+                          Self.obstacleSubjects.contains(subject) else {
+                        // Not an obstacle - keep it
                         return true
                     }
-                }
 
-                // Check distance to destination
-                if let coord = destCoord {
-                    let destLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    let distNm = notamLoc.distance(from: destLoc) / 1852.0
-                    if distNm <= smartFilters.obstacleDistanceNm {
+                    // Obstacle NOTAM - check if near dep/dest
+                    guard let notamCoord = notam.coordinate else {
+                        // No coordinates - include by default for safety
                         return true
                     }
-                }
 
-                // Obstacle too far from airports
-                return false
+                    let notamLoc = CLLocation(
+                        latitude: notamCoord.latitude,
+                        longitude: notamCoord.longitude
+                    )
+
+                    // Check distance to departure
+                    if let coord = depCoord {
+                        let depLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                        let distNm = notamLoc.distance(from: depLoc) / 1852.0
+                        if distNm <= smartFilters.obstacleDistanceNm {
+                            return true
+                        }
+                    }
+
+                    // Check distance to destination
+                    if let coord = destCoord {
+                        let destLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                        let distNm = notamLoc.distance(from: destLoc) / 1852.0
+                        if distNm <= smartFilters.obstacleDistanceNm {
+                            return true
+                        }
+                    }
+
+                    // Obstacle too far from airports
+                    return false
+                }
             }
         }
 
@@ -1014,42 +993,45 @@ final class NotamDomain {
             }
         }
 
-        // 2. Obstacle filter
-        if smartFilters.filterObstacles, let route = currentRoute {
-            let depCoord = route.departureCoordinate
-            let destCoord = route.destinationCoordinate
+        // 2. Obstacle filter - uses FlightContext for airport coordinates
+        if smartFilters.filterObstacles {
+            let depCoord = currentFlightContext.departureCoordinate
+            let destCoord = currentFlightContext.destinationCoordinate
 
-            result = result.filter { enriched in
-                let notam = enriched.notam
-                guard let subject = notam.qCodeSubject,
-                      Self.obstacleSubjects.contains(subject) else {
-                    return true
-                }
-
-                guard let notamCoord = notam.coordinate else {
-                    return true
-                }
-
-                let notamLoc = CLLocation(
-                    latitude: notamCoord.latitude,
-                    longitude: notamCoord.longitude
-                )
-
-                if let coord = depCoord {
-                    let depLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    if notamLoc.distance(from: depLoc) / 1852.0 <= smartFilters.obstacleDistanceNm {
+            // Only filter if we have at least one airport coordinate
+            if depCoord != nil || destCoord != nil {
+                result = result.filter { enriched in
+                    let notam = enriched.notam
+                    guard let subject = notam.qCodeSubject,
+                          Self.obstacleSubjects.contains(subject) else {
                         return true
                     }
-                }
 
-                if let coord = destCoord {
-                    let destLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    if notamLoc.distance(from: destLoc) / 1852.0 <= smartFilters.obstacleDistanceNm {
+                    guard let notamCoord = notam.coordinate else {
                         return true
                     }
-                }
 
-                return false
+                    let notamLoc = CLLocation(
+                        latitude: notamCoord.latitude,
+                        longitude: notamCoord.longitude
+                    )
+
+                    if let coord = depCoord {
+                        let depLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                        if notamLoc.distance(from: depLoc) / 1852.0 <= smartFilters.obstacleDistanceNm {
+                            return true
+                        }
+                    }
+
+                    if let coord = destCoord {
+                        let destLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                        if notamLoc.distance(from: destLoc) / 1852.0 <= smartFilters.obstacleDistanceNm {
+                            return true
+                        }
+                    }
+
+                    return false
+                }
             }
         }
 

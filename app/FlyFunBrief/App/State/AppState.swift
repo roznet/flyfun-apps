@@ -318,13 +318,17 @@ final class AppState {
             }
         }
 
-        // Get times from briefing route if available, otherwise from flight
-        let route = notams.currentRoute
-        let departureTime = route?.departureTime ?? flight.departureTime
-        let arrivalTime = route?.arrivalTime
+        // Get times from flight
+        let departureTime = flight.departureTime
+        let arrivalTime: Date? = if let depTime = departureTime, flight.durationHours > 0 {
+            depTime.addingTimeInterval(flight.durationHours * 3600)
+        } else {
+            nil
+        }
 
-        // Get alternates from route
-        let alternates = route?.alternates ?? []
+        // Note: Alternates are not currently stored in CDFlight
+        // Future enhancement: add alternates field to CDFlight
+        let alternates: [String] = []
 
         return FlightContext(
             routeCoordinates: routeCoordinates,
