@@ -11,44 +11,22 @@ import CoreData
 import RZFlight
 
 extension CDGlobalNotamRead {
-    // MARK: - Convenience Initializer
+    // MARK: - Private Helpers
 
-    /// Create or update a global read record for a NOTAM
-    @discardableResult
-    static func markAsRead(
-        in context: NSManagedObjectContext,
-        notam: Notam,
-        routeHash: String? = nil
-    ) -> CDGlobalNotamRead {
-        let identityKey = NotamIdentity.key(for: notam)
+    /// Shared DateFormatter for display (expensive to create, so cached)
+    private static let lastReadDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
-        // Check if record already exists
-        if let existing = find(identityKey: identityKey, in: context) {
-            existing.lastReadAt = Date()
-            existing.lastRouteHash = routeHash
-            existing.readCount += 1
-            return existing
-        }
-
-        // Create new record
-        let record = CDGlobalNotamRead(context: context)
-        record.id = UUID()
-        record.notamId = notam.id
-        record.identityKey = identityKey
-        record.lastReadAt = Date()
-        record.lastRouteHash = routeHash
-        record.readCount = 1
-
-        return record
-    }
-
-    /// Create from identity key (when original NOTAM is not available)
-    @discardableResult
-    static func markAsRead(
+    /// Find or create a global read record
+    private static func findOrCreate(
         in context: NSManagedObjectContext,
         identityKey: String,
         notamId: String,
-        routeHash: String? = nil
+        routeHash: String?
     ) -> CDGlobalNotamRead {
         // Check if record already exists
         if let existing = find(identityKey: identityKey, in: context) {
@@ -70,6 +48,30 @@ extension CDGlobalNotamRead {
         return record
     }
 
+    // MARK: - Convenience Initializer
+
+    /// Create or update a global read record for a NOTAM
+    @discardableResult
+    static func markAsRead(
+        in context: NSManagedObjectContext,
+        notam: Notam,
+        routeHash: String? = nil
+    ) -> CDGlobalNotamRead {
+        let identityKey = NotamIdentity.key(for: notam)
+        return findOrCreate(in: context, identityKey: identityKey, notamId: notam.id, routeHash: routeHash)
+    }
+
+    /// Create from identity key (when original NOTAM is not available)
+    @discardableResult
+    static func markAsRead(
+        in context: NSManagedObjectContext,
+        identityKey: String,
+        notamId: String,
+        routeHash: String? = nil
+    ) -> CDGlobalNotamRead {
+        return findOrCreate(in: context, identityKey: identityKey, notamId: notamId, routeHash: routeHash)
+    }
+
     // MARK: - Computed Properties
 
     /// Days since last read
@@ -83,10 +85,7 @@ extension CDGlobalNotamRead {
     /// Formatted last read date
     var formattedLastReadAt: String {
         guard let lastRead = lastReadAt else { return "Never" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: lastRead)
+        return Self.lastReadDateFormatter.string(from: lastRead)
     }
 
     // MARK: - Fetch Requests
@@ -107,7 +106,10 @@ extension CDGlobalNotamRead {
         identityKey: String,
         in context: NSManagedObjectContext
     ) -> Bool {
-        find(identityKey: identityKey, in: context) != nil
+        let request = NSFetchRequest<CDGlobalNotamRead>(entityName: "CDGlobalNotamRead")
+        request.predicate = NSPredicate(format: "identityKey == %@", identityKey)
+        // Use count instead of fetch for efficiency
+        return (try? context.count(for: request)) ?? 0 > 0
     }
 
     /// Fetch all global read records
@@ -120,9 +122,11 @@ extension CDGlobalNotamRead {
     }
 
     /// Fetch global reads within a time threshold (not stale)
-    static func recentReadsFetchRequest(withinDays days: Int) -> NSFetchRequest<CDGlobalNotamRead> {
+    static func recentReadsFetchRequest(withinDays days: Int) -> NSFetchRequest<CDGlobalNotamRead>? {
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            return nil
+        }
         let request = NSFetchRequest<CDGlobalNotamRead>(entityName: "CDGlobalNotamRead")
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         request.predicate = NSPredicate(format: "lastReadAt >= %@", cutoffDate as NSDate)
         request.sortDescriptors = [
             NSSortDescriptor(keyPath: \CDGlobalNotamRead.lastReadAt, ascending: false)
@@ -155,7 +159,10 @@ extension CDGlobalNotamRead {
 
     /// Remove stale global reads older than threshold
     static func cleanupStale(olderThanDays days: Int, in context: NSManagedObjectContext) throws {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            // If we can't calculate the date, skip cleanup to avoid data loss
+            return
+        }
 
         let request = NSFetchRequest<CDGlobalNotamRead>(entityName: "CDGlobalNotamRead")
         request.predicate = NSPredicate(format: "lastReadAt < %@", cutoffDate as NSDate)

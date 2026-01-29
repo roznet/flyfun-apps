@@ -121,8 +121,8 @@ final class AppState {
         briefing.onBriefingParsed = { [weak self] parsedBriefing in
             guard let self = self else { return nil }
 
-            // If a flight is selected, import directly
-            if let flight = self.flights.selectedFlight {
+            // If actively viewing a flight, import directly to that flight
+            if self.navigation.isViewingFlight, let flight = self.flights.selectedFlight {
                 return await self.flights.importBriefing(parsedBriefing, for: flight)
             }
 

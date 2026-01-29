@@ -82,6 +82,7 @@ struct iPadLayoutView: View {
                 } label: {
                     Label("Back to Flights", systemImage: "chevron.left")
                 }
+                .buttonStyle(.plain)
             }
 
             // Flight info section (editable summary)

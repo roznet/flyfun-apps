@@ -811,11 +811,10 @@ final class NotamDomain {
         // Generate route hash from current context
         let routeHash = RouteHasher.hash(from: currentFlightContext)
 
-        _ = try manager.markAsRead(notam, routeHash: routeHash.isEmpty ? nil : routeHash)
+        let record = try manager.markAsRead(notam, routeHash: routeHash.isEmpty ? nil : routeHash)
 
-        // Update local cache
-        let identityKey = NotamIdentity.key(for: notam)
-        if let record = manager.getReadRecord(identityKey: identityKey) {
+        // Update local cache directly with the returned record
+        if let identityKey = record.identityKey {
             globalReads[identityKey] = record
         }
 
