@@ -188,9 +188,10 @@ struct NotamPriorityTests {
 
         let context = makeContext(cruiseAltitude: 35000)
         let rule = HighPriorityCloseAndRelevantAltitude()
-        let result = rule.evaluate(notam: notam, distanceNm: 50.0, context: context)
+        // Use distance > threshold (50nm) to be outside the high priority range
+        let result = rule.evaluate(notam: notam, distanceNm: 51.0, context: context)
 
-        #expect(result == nil) // Rule doesn't apply
+        #expect(result == nil) // Rule doesn't apply when beyond threshold
     }
 
     @Test func noHighPriorityWhenAltitudeDoesNotOverlap() throws {

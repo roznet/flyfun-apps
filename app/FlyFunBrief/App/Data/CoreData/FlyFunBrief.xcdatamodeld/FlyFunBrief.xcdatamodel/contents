@@ -21,6 +21,17 @@
         <attribute name="routeICAOs" optional="YES" attributeType="String"/>
         <relationship name="briefings" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDBriefing" inverseName="flight" inverseEntity="CDBriefing"/>
     </entity>
+    <entity name="CDGlobalNotamRead" representedClassName="CDGlobalNotamRead" syncable="YES" codeGenerationType="class">
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="identityKey" attributeType="String" defaultValueString=""/>
+        <attribute name="lastReadAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="lastRouteHash" optional="YES" attributeType="String"/>
+        <attribute name="notamId" attributeType="String" defaultValueString=""/>
+        <attribute name="readCount" attributeType="Integer 32" defaultValueString="1" usesScalarValueType="YES"/>
+        <fetchIndex name="byIdentityKeyIndex">
+            <fetchIndexElement property="identityKey" type="Binary" order="ascending"/>
+        </fetchIndex>
+    </entity>
     <entity name="CDIgnoredNotam" representedClassName="CDIgnoredNotam" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
         <attribute name="expiresAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>

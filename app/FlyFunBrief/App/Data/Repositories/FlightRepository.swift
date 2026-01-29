@@ -198,4 +198,52 @@ final class FlightRepository {
 
         try viewContext.save()
     }
+
+    // MARK: - Flight-Level Status Propagation
+
+    /// Propagate a status to all briefings in a flight (for important/followUp).
+    ///
+    /// This ensures that important and followUp statuses persist across briefings
+    /// within the same flight, treating them as flight-level annotations.
+    ///
+    /// - Parameters:
+    ///   - notam: The NOTAM to update
+    ///   - status: The status to propagate (typically .important or .followUp)
+    ///   - flight: The flight containing the briefings
+    ///   - excludingBriefing: Optional briefing to skip (usually the current one, already updated)
+    func propagateStatusAcrossBriefings(
+        _ notam: Notam,
+        status: NotamStatus,
+        flight: CDFlight,
+        excludingBriefing: CDBriefing? = nil
+    ) throws {
+        let identityKey = NotamIdentity.key(for: notam)
+
+        for briefing in flight.sortedBriefings {
+            // Skip the excluded briefing (already updated)
+            if let exclude = excludingBriefing, briefing == exclude {
+                continue
+            }
+
+            // Find existing status or create new one
+            if let cdStatus = CDNotamStatus.find(identityKey: identityKey, briefing: briefing, in: viewContext) {
+                // Update existing status
+                cdStatus.statusEnum = status
+            } else {
+                // Create new status record - use the notam.id for this briefing
+                // Note: The NOTAM might have a different ID in different briefings,
+                // but we match by identityKey for consistency
+                let newStatus = CDNotamStatus(context: viewContext)
+                newStatus.id = UUID()
+                newStatus.notamId = notam.id
+                newStatus.identityKey = identityKey
+                newStatus.status = status.rawValue
+                newStatus.updatedAt = Date()
+                newStatus.briefing = briefing
+            }
+        }
+
+        try viewContext.save()
+        Logger.persistence.info("Propagated \(status.rawValue) status across \(flight.sortedBriefings.count) briefings")
+    }
 }

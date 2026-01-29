@@ -335,6 +335,128 @@ extension EnrichedNotam {
         }
     }
 
+    /// Create enriched NOTAMs with 3-tier status resolution.
+    ///
+    /// This method implements the 3-tier status system:
+    /// 1. Briefing status (CDNotamStatus) - if not unread, use it
+    /// 2. Global read (CDGlobalNotamRead) - if exists and doesn't resurface, use read
+    /// 3. Unread (default)
+    ///
+    /// - Parameters:
+    ///   - notams: Raw NOTAMs from RZFlight
+    ///   - statuses: User statuses keyed by NOTAM ID (briefing-level)
+    ///   - globalReads: Global read records keyed by identity key
+    ///   - previousIdentityKeys: Identity keys from previous briefings (for "new" detection)
+    ///   - ignoredKeys: Globally ignored identity keys
+    ///   - flightContext: Flight/route context for relevance computation
+    ///   - resurfaceEvaluator: Evaluator for resurface rules
+    ///   - resurfaceSettings: Configuration for resurface rules
+    /// - Returns: Array of enriched NOTAMs with resolved statuses
+    static func enrichWithGlobalReads(
+        notams: [Notam],
+        statuses: [String: CDNotamStatus],
+        globalReads: [String: CDGlobalNotamRead],
+        previousIdentityKeys: Set<String>,
+        ignoredKeys: Set<String>,
+        flightContext: FlightContext,
+        resurfaceEvaluator: NotamResurfaceEvaluator,
+        resurfaceSettings: ResurfaceSettings
+    ) -> [EnrichedNotam] {
+        let priorityEvaluator = NotamPriorityEvaluator.shared
+
+        return notams.map { notam in
+            let identityKey = NotamIdentity.key(for: notam)
+            let cdStatus = statuses[notam.id]
+
+            // Compute route distance
+            let routeDistance = computeRouteDistance(for: notam, context: flightContext)
+
+            // Compute altitude relevance
+            let altitudeRelevant = computeAltitudeRelevance(for: notam, context: flightContext)
+
+            // Compute time/activity relevance
+            let activeForFlight = computeActiveForFlight(for: notam, context: flightContext)
+
+            // Evaluate priority using rules
+            let priority = priorityEvaluator.evaluate(
+                notam: notam,
+                distanceNm: routeDistance,
+                context: flightContext
+            )
+
+            // 3-tier status resolution
+            let resolvedStatus = resolveEffectiveStatus(
+                briefingStatus: cdStatus?.statusEnum,
+                identityKey: identityKey,
+                notam: notam,
+                globalReads: globalReads,
+                context: flightContext,
+                resurfaceEvaluator: resurfaceEvaluator,
+                resurfaceSettings: resurfaceSettings
+            )
+
+            return EnrichedNotam(
+                notam: notam,
+                status: resolvedStatus,
+                textNote: cdStatus?.textNote,
+                statusChangedAt: cdStatus?.updatedAt,
+                isNew: !previousIdentityKeys.contains(identityKey),
+                isGloballyIgnored: ignoredKeys.contains(identityKey),
+                routeDistanceNm: routeDistance,
+                isAltitudeRelevant: altitudeRelevant,
+                isActiveForFlight: activeForFlight,
+                priority: priority
+            )
+        }
+    }
+
+    /// Resolve the effective status for a NOTAM using 3-tier logic.
+    ///
+    /// - Parameters:
+    ///   - briefingStatus: Status from CDNotamStatus (nil if no status record)
+    ///   - identityKey: The NOTAM's identity key
+    ///   - notam: The NOTAM being evaluated
+    ///   - globalReads: Global read records keyed by identity key
+    ///   - context: Current flight context
+    ///   - resurfaceEvaluator: Evaluator for resurface rules
+    ///   - resurfaceSettings: Configuration for resurface rules
+    /// - Returns: The resolved status to display
+    private static func resolveEffectiveStatus(
+        briefingStatus: NotamStatus?,
+        identityKey: String,
+        notam: Notam,
+        globalReads: [String: CDGlobalNotamRead],
+        context: FlightContext,
+        resurfaceEvaluator: NotamResurfaceEvaluator,
+        resurfaceSettings: ResurfaceSettings
+    ) -> NotamStatus {
+        // Tier 1: If briefing status is explicitly set (not unread), use it
+        // Important, followUp, read, ignore all take precedence
+        if let status = briefingStatus, status != .unread {
+            return status
+        }
+
+        // Tier 2: Check global read status
+        guard let globalRead = globalReads[identityKey] else {
+            // No global read record - unread
+            return .unread
+        }
+
+        // Check if the NOTAM should resurface
+        if resurfaceEvaluator.shouldResurface(
+            globalRead: globalRead,
+            notam: notam,
+            context: context,
+            settings: resurfaceSettings
+        ) {
+            // Resurface - treat as unread
+            return .unread
+        }
+
+        // Has global read and doesn't resurface - effectively read
+        return .read
+    }
+
     // MARK: - Context Computation Helpers
 
     /// Compute perpendicular distance from NOTAM to route centerline

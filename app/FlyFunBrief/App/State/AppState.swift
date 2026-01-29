@@ -51,6 +51,9 @@ final class AppState {
     /// Global NOTAM ignore list manager
     let ignoreListManager: IgnoreListManager
 
+    /// Global NOTAM read tracking manager
+    let globalReadManager: GlobalReadManager
+
     /// Core Data persistence controller with CloudKit sync
     let persistenceController: PersistenceController
 
@@ -72,6 +75,7 @@ final class AppState {
         self.persistenceController = PersistenceController.shared
         self.flightRepository = FlightRepository(persistenceController: persistenceController)
         self.ignoreListManager = IgnoreListManager(persistenceController: persistenceController)
+        self.globalReadManager = GlobalReadManager(persistenceController: persistenceController)
 
         // Initialize services
         self.briefingService = BriefingService()
@@ -94,12 +98,15 @@ final class AppState {
         // Initialize domains
         self.flights = FlightDomain(repository: flightRepository)
         self.briefing = BriefingDomain(service: briefingService)
-        self.notams = NotamDomain(flightRepository: flightRepository, ignoreListManager: ignoreListManager)
+        self.notams = NotamDomain(flightRepository: flightRepository, ignoreListManager: ignoreListManager, globalReadManager: globalReadManager)
         self.navigation = NavigationDomain()
         self.settings = SettingsDomain()
 
         // Wire up cross-domain communication
         setupCrossDomainWiring()
+
+        // Sync resurface settings from SettingsDomain to NotamDomain
+        syncResurfaceSettings()
 
         // Configure service URLs from secrets
         Task {
@@ -266,6 +273,13 @@ final class AppState {
         Logger.app.info("Cancelled pending briefing import")
     }
 
+    // MARK: - Settings Sync
+
+    /// Sync resurface settings from SettingsDomain to NotamDomain
+    func syncResurfaceSettings() {
+        notams.resurfaceSettings = settings.resurfaceSettings
+    }
+
     // MARK: - Flight Context
 
     /// Build FlightContext from current flight and briefing for priority evaluation.
@@ -343,8 +357,9 @@ final class AppState {
         // Restore settings
         settings.restore()
 
-        // Cleanup expired ignores periodically
+        // Cleanup expired ignores and stale global reads periodically
         try? ignoreListManager.cleanupExpired()
+        try? globalReadManager.cleanupStale()
 
         Logger.app.info("AppState initialized successfully")
     }

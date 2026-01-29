@@ -538,17 +538,30 @@ final class NotamDomain {
 
     private let flightRepository: FlightRepository
     private var ignoreListManager: IgnoreListManager?
+    private var globalReadManager: GlobalReadManager?
+
+    /// Resurface settings for 3-tier status resolution
+    var resurfaceSettings: ResurfaceSettings = .default
+
+    /// Cached global read records keyed by identity key
+    private var globalReads: [String: CDGlobalNotamRead] = [:]
 
     // MARK: - Init
 
-    init(flightRepository: FlightRepository, ignoreListManager: IgnoreListManager? = nil) {
+    init(flightRepository: FlightRepository, ignoreListManager: IgnoreListManager? = nil, globalReadManager: GlobalReadManager? = nil) {
         self.flightRepository = flightRepository
         self.ignoreListManager = ignoreListManager
+        self.globalReadManager = globalReadManager
     }
 
     /// Update the ignore list manager reference
     func setIgnoreListManager(_ manager: IgnoreListManager) {
         self.ignoreListManager = manager
+    }
+
+    /// Update the global read manager reference
+    func setGlobalReadManager(_ manager: GlobalReadManager) {
+        self.globalReadManager = manager
     }
 
     /// Update the flight context for priority evaluation.
@@ -595,6 +608,7 @@ final class NotamDomain {
         // Build enriched NOTAMs (standalone mode - all unread)
         Task {
             await loadIgnoredKeys()
+            await loadGlobalReads()
             buildEnrichedNotamsStandalone()
         }
 
@@ -629,6 +643,7 @@ final class NotamDomain {
         // Build enriched NOTAMs from Core Data statuses
         Task {
             await loadIgnoredKeys()
+            await loadGlobalReads()
             buildEnrichedNotamsFromCoreData()
         }
 
@@ -650,6 +665,21 @@ final class NotamDomain {
         }
     }
 
+    /// Load global read records
+    private func loadGlobalReads() async {
+        guard let manager = globalReadManager else {
+            globalReads = [:]
+            return
+        }
+
+        do {
+            globalReads = try manager.getReadRecords()
+        } catch {
+            Logger.app.error("Failed to load global reads: \(error.localizedDescription)")
+            globalReads = [:]
+        }
+    }
+
     /// Build enriched NOTAMs for standalone mode (no Core Data)
     /// All NOTAMs start as unread in this mode
     private func buildEnrichedNotamsStandalone() {
@@ -662,7 +692,12 @@ final class NotamDomain {
         )
     }
 
-    /// Build enriched NOTAMs from Core Data statuses
+    /// Build enriched NOTAMs from Core Data statuses with 3-tier status resolution.
+    ///
+    /// Status resolution priority:
+    /// 1. Briefing status (CDNotamStatus) - if not unread, use it
+    /// 2. Global read (CDGlobalNotamRead) - if exists and doesn't resurface, use read
+    /// 3. Unread (default)
     private func buildEnrichedNotamsFromCoreData() {
         guard let cdBriefing = currentCDBriefing else {
             buildEnrichedNotamsStandalone()
@@ -670,13 +705,17 @@ final class NotamDomain {
         }
 
         let statuses = cdBriefing.statusesByNotamId
+        let resurfaceEvaluator = NotamResurfaceEvaluator.shared
 
-        enrichedNotams = EnrichedNotam.enrich(
+        enrichedNotams = EnrichedNotam.enrichWithGlobalReads(
             notams: allNotams,
             statuses: statuses,
+            globalReads: globalReads,
             previousIdentityKeys: previousIdentityKeys,
             ignoredKeys: ignoredIdentityKeys,
-            flightContext: currentFlightContext
+            flightContext: currentFlightContext,
+            resurfaceEvaluator: resurfaceEvaluator,
+            resurfaceSettings: resurfaceSettings
         )
     }
 
@@ -727,6 +766,10 @@ final class NotamDomain {
     }
 
     /// Update status for a NOTAM (persists to Core Data)
+    ///
+    /// Implements 3-tier status propagation:
+    /// - `read`: Also marks globally read for cross-briefing status
+    /// - `important/followUp`: Propagates to all briefings in this flight
     func setStatus(_ status: NotamStatus, for notam: Notam) {
         guard let cdBriefing = currentCDBriefing else {
             Logger.app.warning("Cannot set status without Core Data briefing")
@@ -734,11 +777,66 @@ final class NotamDomain {
         }
 
         do {
+            // Update briefing-level status
             try flightRepository.updateNotamStatus(notam, briefing: cdBriefing, status: status)
+
+            // Handle status-specific propagation
+            switch status {
+            case .read:
+                // Also mark globally read
+                try markGloballyRead(notam)
+
+            case .important, .followUp:
+                // Propagate to all briefings in this flight
+                try propagateStatusAcrossBriefings(notam, status: status)
+
+            case .unread, .ignore:
+                // No additional propagation needed
+                break
+            }
+
             refreshEnrichedNotams()
         } catch {
             Logger.app.error("Failed to update NOTAM status: \(error.localizedDescription)")
         }
+    }
+
+    /// Mark a NOTAM as globally read
+    private func markGloballyRead(_ notam: Notam) throws {
+        guard let manager = globalReadManager else {
+            Logger.app.debug("GlobalReadManager not available - skipping global read")
+            return
+        }
+
+        // Generate route hash from current context
+        let routeHash = RouteHasher.hash(from: currentFlightContext)
+
+        _ = try manager.markAsRead(notam, routeHash: routeHash.isEmpty ? nil : routeHash)
+
+        // Update local cache
+        let identityKey = NotamIdentity.key(for: notam)
+        if let record = manager.getReadRecord(identityKey: identityKey) {
+            globalReads[identityKey] = record
+        }
+
+        Logger.app.debug("Marked NOTAM \(notam.id) as globally read")
+    }
+
+    /// Propagate important/followUp status to all briefings in this flight
+    private func propagateStatusAcrossBriefings(_ notam: Notam, status: NotamStatus) throws {
+        guard let cdBriefing = currentCDBriefing,
+              let flight = cdBriefing.flight else {
+            return
+        }
+
+        try flightRepository.propagateStatusAcrossBriefings(
+            notam,
+            status: status,
+            flight: flight,
+            excludingBriefing: cdBriefing
+        )
+
+        Logger.app.debug("Propagated \(status.displayName) status for NOTAM \(notam.id) across flight briefings")
     }
 
     /// Add a text note to a NOTAM (persists to Core Data)
