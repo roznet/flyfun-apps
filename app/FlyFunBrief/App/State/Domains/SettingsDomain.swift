@@ -49,6 +49,46 @@ final class SettingsDomain {
         }
     }
 
+    // MARK: - Resurface Settings
+
+    /// Days until a globally-read NOTAM resurfaces as unread
+    var readResurfaceTimeDays: Int {
+        didSet {
+            UserDefaults.standard.set(readResurfaceTimeDays, forKey: Keys.readResurfaceTimeDays)
+        }
+    }
+
+    /// Distance threshold in nm for route proximity resurface
+    var readResurfaceDistanceNm: Double {
+        didSet {
+            UserDefaults.standard.set(readResurfaceDistanceNm, forKey: Keys.readResurfaceDistanceNm)
+        }
+    }
+
+    /// Whether time-based resurfacing is enabled
+    var timeResurfaceEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(timeResurfaceEnabled, forKey: Keys.timeResurfaceEnabled)
+        }
+    }
+
+    /// Whether distance-based resurfacing is enabled
+    var distanceResurfaceEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(distanceResurfaceEnabled, forKey: Keys.distanceResurfaceEnabled)
+        }
+    }
+
+    /// Build ResurfaceSettings from current values
+    var resurfaceSettings: ResurfaceSettings {
+        ResurfaceSettings(
+            timeDays: readResurfaceTimeDays,
+            distanceNm: readResurfaceDistanceNm,
+            timeResurfaceEnabled: timeResurfaceEnabled,
+            distanceResurfaceEnabled: distanceResurfaceEnabled
+        )
+    }
+
     // MARK: - Keys
 
     private enum Keys {
@@ -57,6 +97,10 @@ final class SettingsDomain {
         static let autoMarkAsRead = "autoMarkAsRead"
         static let showRawText = "showRawText"
         static let showNotamMap = "showNotamMap"
+        static let readResurfaceTimeDays = "readResurfaceTimeDays"
+        static let readResurfaceDistanceNm = "readResurfaceDistanceNm"
+        static let timeResurfaceEnabled = "timeResurfaceEnabled"
+        static let distanceResurfaceEnabled = "distanceResurfaceEnabled"
     }
 
     // MARK: - Defaults
@@ -80,6 +124,12 @@ final class SettingsDomain {
         self.autoMarkAsRead = UserDefaults.standard.object(forKey: Keys.autoMarkAsRead) as? Bool ?? true
         self.showRawText = UserDefaults.standard.object(forKey: Keys.showRawText) as? Bool ?? true
         self.showNotamMap = UserDefaults.standard.object(forKey: Keys.showNotamMap) as? Bool ?? true
+
+        // Resurface settings
+        self.readResurfaceTimeDays = UserDefaults.standard.object(forKey: Keys.readResurfaceTimeDays) as? Int ?? 7
+        self.readResurfaceDistanceNm = UserDefaults.standard.object(forKey: Keys.readResurfaceDistanceNm) as? Double ?? 25.0
+        self.timeResurfaceEnabled = UserDefaults.standard.object(forKey: Keys.timeResurfaceEnabled) as? Bool ?? true
+        self.distanceResurfaceEnabled = UserDefaults.standard.object(forKey: Keys.distanceResurfaceEnabled) as? Bool ?? true
     }
 
     // MARK: - Actions
@@ -102,6 +152,10 @@ final class SettingsDomain {
         autoMarkAsRead = true
         showRawText = true
         showNotamMap = true
+        readResurfaceTimeDays = 7
+        readResurfaceDistanceNm = 25.0
+        timeResurfaceEnabled = true
+        distanceResurfaceEnabled = true
         Logger.app.info("Settings reset to defaults")
     }
 }
