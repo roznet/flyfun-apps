@@ -201,8 +201,13 @@ final class FlightDomain {
 
     // MARK: - Selection
 
-    /// Select a flight
+    /// Select a flight for preview (does NOT enter flight view)
     func selectFlight(_ flight: CDFlight) {
+        selectedFlight = flight
+    }
+
+    /// Select a flight AND enter flight view mode
+    func openFlight(_ flight: CDFlight) {
         selectedFlight = flight
         onFlightSelected?(flight)
     }

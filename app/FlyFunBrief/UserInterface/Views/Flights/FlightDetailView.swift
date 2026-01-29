@@ -65,6 +65,7 @@ struct FlightDetailView: View {
             ImportBriefingView()
         }
         .onAppear {
+            // Select for preview - this no longer has side effects
             appState?.flights.selectFlight(flight)
         }
     }

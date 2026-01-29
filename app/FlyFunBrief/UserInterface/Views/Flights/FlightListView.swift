@@ -63,9 +63,13 @@ struct FlightListView: View {
     @ViewBuilder
     private func flightList(_ flights: [CDFlight]) -> some View {
         List(flights, id: \.id) { flight in
-            NavigationLink(value: flight) {
+            Button {
+                // Directly open the flight (enters flight view mode)
+                appState?.flights.openFlight(flight)
+            } label: {
                 FlightRowView(flight: flight)
             }
+            .buttonStyle(.plain)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
                     Task {
@@ -84,9 +88,6 @@ struct FlightListView: View {
                 }
                 .tint(.orange)
             }
-        }
-        .navigationDestination(for: CDFlight.self) { flight in
-            FlightDetailView(flight: flight)
         }
         .refreshable {
             await appState?.flights.refresh()

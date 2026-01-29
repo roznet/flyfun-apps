@@ -77,8 +77,11 @@ struct iPadLayoutView: View {
             // Back button
             Section {
                 Button {
+                    // Exit flight view - order doesn't matter now since
+                    // selectFlight no longer auto-enters flight view
                     appState?.navigation.exitFlightView()
                     appState?.briefing.clearBriefing()
+                    appState?.flights.clearSelection()
                 } label: {
                     Label("Back to Flights", systemImage: "chevron.left")
                 }
