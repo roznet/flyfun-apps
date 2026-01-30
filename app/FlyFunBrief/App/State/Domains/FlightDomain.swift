@@ -51,13 +51,14 @@ final class FlightDomain {
 
     // MARK: - Loading
 
-    /// Load all active flights
+    /// Load all active flights (sorted: nil dates first, then most recent to oldest)
     func loadFlights() async {
         isLoading = true
         lastError = nil
 
         do {
-            flights = try repository.fetchActiveFlights()
+            let fetched = try repository.fetchActiveFlights()
+            flights = CDFlight.sortedByDepartureDate(fetched)
             Logger.app.info("Loaded \(self.flights.count) active flights")
         } catch {
             Logger.app.error("Failed to load flights: \(error.localizedDescription)")
@@ -67,10 +68,11 @@ final class FlightDomain {
         isLoading = false
     }
 
-    /// Load archived flights
+    /// Load archived flights (sorted: nil dates first, then most recent to oldest)
     func loadArchivedFlights() async {
         do {
-            archivedFlights = try repository.fetchArchivedFlights()
+            let fetched = try repository.fetchArchivedFlights()
+            archivedFlights = CDFlight.sortedByDepartureDate(fetched)
             Logger.app.info("Loaded \(self.archivedFlights.count) archived flights")
         } catch {
             Logger.app.error("Failed to load archived flights: \(error.localizedDescription)")

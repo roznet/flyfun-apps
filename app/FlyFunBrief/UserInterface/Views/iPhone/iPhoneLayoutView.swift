@@ -316,10 +316,56 @@ struct FlightPickerView: View {
         appState?.pendingBriefing != nil
     }
 
+    /// Route from pending briefing
+    private var pendingRoute: RZFlight.Route? {
+        appState?.pendingBriefing?.route
+    }
+
     /// Route summary from pending briefing
     private var pendingRouteSummary: String? {
-        guard let route = appState?.pendingBriefing?.route else { return nil }
+        guard let route = pendingRoute else { return nil }
         return "\(route.departure) → \(route.destination)"
+    }
+
+    /// Whether the briefing has origin/destination info for filtering
+    private var hasRouteFilter: Bool {
+        guard let route = pendingRoute else { return false }
+        return !route.departure.isEmpty && !route.destination.isEmpty
+    }
+
+    /// Flights filtered by pending briefing route (if available)
+    private var filteredFlights: [CDFlight] {
+        guard let allFlights = appState?.flights.flights else { return [] }
+
+        // If no pending briefing or no route filter, return all
+        if !hasPendingBriefing || !hasRouteFilter {
+            return allFlights
+        }
+
+        // Filter to matching origin/destination
+        guard let route = pendingRoute else { return allFlights }
+        let briefingOrigin = route.departure.uppercased()
+        let briefingDest = route.destination.uppercased()
+
+        return allFlights.filter { flight in
+            flight.origin?.uppercased() == briefingOrigin &&
+            flight.destination?.uppercased() == briefingDest
+        }
+    }
+
+    /// Flights that don't match the filter (for "other flights" section)
+    private var otherFlights: [CDFlight] {
+        guard let allFlights = appState?.flights.flights else { return [] }
+        guard hasPendingBriefing && hasRouteFilter else { return [] }
+
+        guard let route = pendingRoute else { return [] }
+        let briefingOrigin = route.departure.uppercased()
+        let briefingDest = route.destination.uppercased()
+
+        return allFlights.filter { flight in
+            flight.origin?.uppercased() != briefingOrigin ||
+            flight.destination?.uppercased() != briefingDest
+        }
     }
 
     var body: some View {
@@ -344,10 +390,10 @@ struct FlightPickerView: View {
                     }
                 }
 
-                // Existing flights
-                if let flights = appState?.flights.flights, !flights.isEmpty {
-                    Section(hasPendingBriefing ? "Existing Flights" : "") {
-                        ForEach(flights, id: \.id) { flight in
+                // Matching flights (or all flights if no filter)
+                if !filteredFlights.isEmpty {
+                    Section(matchingSectionHeader) {
+                        ForEach(filteredFlights, id: \.id) { flight in
                             Button {
                                 selectFlight(flight)
                             } label: {
@@ -355,9 +401,28 @@ struct FlightPickerView: View {
                             }
                         }
                     }
+                } else if hasPendingBriefing && hasRouteFilter {
+                    // No matching flights for this route
+                    Section("Matching Flights") {
+                        Text("No flights match this route")
+                            .foregroundStyle(.secondary)
+                    }
                 } else if !hasPendingBriefing {
                     Text("No flights available")
                         .foregroundStyle(.secondary)
+                }
+
+                // Other flights (when filtering is active)
+                if !otherFlights.isEmpty {
+                    Section("Other Flights") {
+                        ForEach(otherFlights, id: \.id) { flight in
+                            Button {
+                                selectFlight(flight)
+                            } label: {
+                                FlightRowView(flight: flight)
+                            }
+                        }
+                    }
                 }
 
                 // Create new flight section
@@ -399,6 +464,17 @@ struct FlightPickerView: View {
                 }
             }
         }
+    }
+
+    /// Header for the matching flights section
+    private var matchingSectionHeader: String {
+        if !hasPendingBriefing {
+            return ""
+        }
+        if hasRouteFilter {
+            return "Matching Flights"
+        }
+        return "Existing Flights"
     }
 
     private func selectFlight(_ flight: CDFlight) {

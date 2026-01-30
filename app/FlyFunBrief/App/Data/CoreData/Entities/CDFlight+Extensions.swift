@@ -85,25 +85,50 @@ extension CDFlight {
 
     // MARK: - Fetch Requests
 
-    /// Fetch request for all non-archived flights, sorted by departure time
+    /// Fetch request for all non-archived flights
+    /// Note: Results need to be sorted in memory with `sortedByDepartureDate()` for proper nil-first ordering
     static func activeFlightsFetchRequest() -> NSFetchRequest<CDFlight> {
         let request = NSFetchRequest<CDFlight>(entityName: "CDFlight")
         request.predicate = NSPredicate(format: "isArchived == NO")
+        // Basic sort by createdAt as fallback; proper sort applied in memory
         request.sortDescriptors = [
-            NSSortDescriptor(keyPath: \CDFlight.departureTime, ascending: true),
             NSSortDescriptor(keyPath: \CDFlight.createdAt, ascending: false)
         ]
         return request
     }
 
     /// Fetch request for archived flights
+    /// Note: Results need to be sorted in memory with `sortedByDepartureDate()` for proper nil-first ordering
     static func archivedFlightsFetchRequest() -> NSFetchRequest<CDFlight> {
         let request = NSFetchRequest<CDFlight>(entityName: "CDFlight")
         request.predicate = NSPredicate(format: "isArchived == YES")
+        // Basic sort by createdAt as fallback; proper sort applied in memory
         request.sortDescriptors = [
-            NSSortDescriptor(keyPath: \CDFlight.departureTime, ascending: false)
+            NSSortDescriptor(keyPath: \CDFlight.createdAt, ascending: false)
         ]
         return request
+    }
+
+    // MARK: - Sorting
+
+    /// Sort flights by departure date: nil dates first, then most recent to oldest
+    static func sortedByDepartureDate(_ flights: [CDFlight]) -> [CDFlight] {
+        flights.sorted { lhs, rhs in
+            switch (lhs.departureTime, rhs.departureTime) {
+            case (nil, nil):
+                // Both nil: sort by createdAt descending
+                return (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
+            case (nil, _):
+                // Left is nil: comes first
+                return true
+            case (_, nil):
+                // Right is nil: right comes first
+                return false
+            case let (lhsDate?, rhsDate?):
+                // Both have dates: most recent first
+                return lhsDate > rhsDate
+            }
+        }
     }
 
     /// Find a flight by ID
