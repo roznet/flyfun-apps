@@ -9,21 +9,32 @@ import SwiftUI
 import RZFlight
 
 /// Panel for configuring NOTAM filters
+///
+/// Organized with most-used filters at top:
+/// - Status tabs and grouping options prominently displayed
+/// - Advanced filters (route, time, categories) in collapsible sections
 struct FilterPanelView: View {
     @Environment(\.appState) private var appState
     @Environment(\.dismiss) private var dismiss
 
+    /// Track expanded state for advanced filter sections
+    @State private var isRouteExpanded = false
+    @State private var isTimeExpanded = false
+    @State private var isSmartFiltersExpanded = false
+    @State private var isCategoryExpanded = false
+    @State private var isPriorityExpanded = false
+
     var body: some View {
         NavigationStack {
             Form {
-                routeSection
-                timeSection
-                smartFiltersSection
-                categorySection
+                // MARK: - Quick Access (Top)
+                // Status and grouping are the most used - always visible at top
                 statusSection
-                prioritySection
-                visibilitySection
                 groupingSection
+                visibilitySection
+
+                // MARK: - Advanced Filters (Collapsible)
+                advancedFiltersSection
             }
             .navigationTitle("Filters")
             .navigationBarTitleDisplayMode(.inline)
@@ -37,83 +48,110 @@ struct FilterPanelView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Reset") {
                         appState?.notams.resetFilters()
+                        // Reset expanded states
+                        isRouteExpanded = false
+                        isTimeExpanded = false
+                        isSmartFiltersExpanded = false
+                        isCategoryExpanded = false
+                        isPriorityExpanded = false
                     }
                 }
+            }
+            .onAppear {
+                // Auto-expand sections that have active filters
+                updateExpandedStates()
             }
         }
     }
 
-    // MARK: - Route Section
-
-    private var routeSection: some View {
-        Section {
-            Toggle("Filter by Route", isOn: routeEnabledBinding)
-
-            if appState?.notams.routeFilter.isEnabled == true {
-                TextField("ICAO codes (e.g., LFPG EGLL)", text: routeStringBinding)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Corridor Width: \(Int(appState?.notams.routeFilter.corridorWidthNm ?? 25)) nm")
-                        .font(.subheadline)
-
-                    Picker("Distance", selection: corridorWidthBinding) {
-                        Text("10 nm").tag(10.0)
-                        Text("25 nm").tag(25.0)
-                        Text("50 nm").tag(50.0)
-                        Text("100 nm").tag(100.0)
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                if let codes = appState?.notams.routeFilter.icaoCodes, !codes.isEmpty {
-                    HStack {
-                        Text("Route:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(codes.joined(separator: " → "))
-                            .font(.caption.monospaced())
-                    }
-                }
-            }
-        } header: {
-            Label("Route Corridor", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-        } footer: {
-            Text("Show only NOTAMs within the corridor distance of your route.")
+    /// Auto-expand sections that have active filters
+    private func updateExpandedStates() {
+        if appState?.notams.routeFilter.isEnabled == true {
+            isRouteExpanded = true
+        }
+        if appState?.notams.timeFilter.isEnabled == true {
+            isTimeExpanded = true
+        }
+        if appState?.notams.smartFilters.hasActiveFilters == true {
+            isSmartFiltersExpanded = true
+        }
+        if appState?.notams.categoryFilter.allEnabled == false {
+            isCategoryExpanded = true
+        }
+        if appState?.notams.priorityFilter != .all {
+            isPriorityExpanded = true
         }
     }
 
-    // MARK: - Time Section
+    // MARK: - Route Content (for DisclosureGroup)
 
-    private var timeSection: some View {
-        Section {
-            Toggle("Active at Flight Time", isOn: timeEnabledBinding)
+    @ViewBuilder
+    private var routeContent: some View {
+        Toggle("Filter by Route", isOn: routeEnabledBinding)
 
-            if appState?.notams.timeFilter.isEnabled == true {
-                if let route = appState?.briefing.currentBriefing?.route,
-                   let depTime = route.departureTime {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(formatDateTime(depTime), systemImage: "airplane.departure")
-                            .font(.subheadline)
-                        if let arrTime = route.arrivalTime {
-                            Label(formatDateTime(arrTime), systemImage: "airplane.arrival")
-                                .font(.subheadline)
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                } else {
-                    Text("No flight time available")
+        if appState?.notams.routeFilter.isEnabled == true {
+            TextField("ICAO codes (e.g., LFPG EGLL)", text: routeStringBinding)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .font(.body.monospaced())
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Corridor Width: \(Int(appState?.notams.routeFilter.corridorWidthNm ?? 25)) nm")
+                    .font(.subheadline)
+
+                Picker("Distance", selection: corridorWidthBinding) {
+                    Text("10 nm").tag(10.0)
+                    Text("25 nm").tag(25.0)
+                    Text("50 nm").tag(50.0)
+                    Text("100 nm").tag(100.0)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            if let codes = appState?.notams.routeFilter.icaoCodes, !codes.isEmpty {
+                HStack {
+                    Text("Route:")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(codes.joined(separator: " → "))
+                        .font(.caption.monospaced())
                 }
             }
-        } header: {
-            Label("Time Filter", systemImage: "clock")
-        } footer: {
-            Text("Show only NOTAMs that are active during the flight time window.")
         }
+
+        Text("Show only NOTAMs within the corridor distance of your route.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Time Content (for DisclosureGroup)
+
+    @ViewBuilder
+    private var timeContent: some View {
+        Toggle("Active at Flight Time", isOn: timeEnabledBinding)
+
+        if appState?.notams.timeFilter.isEnabled == true {
+            if let route = appState?.briefing.currentBriefing?.route,
+               let depTime = route.departureTime {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(formatDateTime(depTime), systemImage: "airplane.departure")
+                        .font(.subheadline)
+                    if let arrTime = route.arrivalTime {
+                        Label(formatDateTime(arrTime), systemImage: "airplane.arrival")
+                            .font(.subheadline)
+                    }
+                }
+                .foregroundStyle(.secondary)
+            } else {
+                Text("No flight time available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Text("Show only NOTAMs active during flight time window.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     private func formatDateTime(_ date: Date) -> String {
@@ -123,99 +161,95 @@ struct FilterPanelView: View {
         return formatter.string(from: date)
     }
 
-    // MARK: - Smart Filters Section
+    // MARK: - Smart Filters Content (for DisclosureGroup)
 
-    private var smartFiltersSection: some View {
-        Section {
-            // Helicopter filter
-            Toggle("Hide Helicopter NOTAMs", isOn: hideHelicopterBinding)
+    @ViewBuilder
+    private var smartFiltersContent: some View {
+        // Helicopter filter
+        Toggle("Hide Helicopter NOTAMs", isOn: hideHelicopterBinding)
 
-            // Obstacle filter
-            Toggle("Smart Obstacle Filter", isOn: filterObstaclesBinding)
+        // Obstacle filter
+        Toggle("Smart Obstacle Filter", isOn: filterObstaclesBinding)
 
-            if appState?.notams.smartFilters.filterObstacles == true {
-                HStack {
-                    Text("Show within")
-                    Picker("Distance", selection: obstacleDistanceBinding) {
-                        Text("1 nm").tag(1.0)
-                        Text("2 nm").tag(2.0)
-                        Text("5 nm").tag(5.0)
-                        Text("10 nm").tag(10.0)
-                    }
-                    .pickerStyle(.menu)
-                    Text("of airports")
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
-
-            // Scope filter
-            Picker("Scope", selection: scopeFilterBinding) {
-                ForEach(ScopeFilter.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
-            }
-        } header: {
-            Label("Smart Filters", systemImage: "sparkles")
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                if appState?.notams.smartFilters.hideHelicopter == true {
-                    Text("Helicopter NOTAMs (heliports, FATO, windsocks) are hidden")
-                }
-                if appState?.notams.smartFilters.filterObstacles == true {
-                    Text("Obstacles shown only near departure/destination")
-                }
-            }
-            .font(.caption)
-        }
-    }
-
-    // MARK: - Category Section
-
-    private var categorySection: some View {
-        Section {
-            // AGA Categories (Aerodrome Ground Aids)
-            DisclosureGroup("AGA - Ground") {
-                CategoryToggleRow(label: "Movement Area", systemImage: NotamCategory.agaMovement.icon, isOn: categoryBinding(\.showMovement))
-                CategoryToggleRow(label: "Lighting", systemImage: NotamCategory.agaLighting.icon, isOn: categoryBinding(\.showLighting))
-                CategoryToggleRow(label: "Facilities", systemImage: NotamCategory.agaFacilities.icon, isOn: categoryBinding(\.showFacilities))
-            }
-
-            // CNS Categories (Communications, Navigation, Surveillance)
-            DisclosureGroup("CNS - Navigation") {
-                CategoryToggleRow(label: "Navigation", systemImage: NotamCategory.navigation.icon, isOn: categoryBinding(\.showNavigation))
-                CategoryToggleRow(label: "ILS/MLS", systemImage: NotamCategory.cnsILS.icon, isOn: categoryBinding(\.showILS))
-                CategoryToggleRow(label: "GNSS", systemImage: NotamCategory.cnsGNSS.icon, isOn: categoryBinding(\.showGNSS))
-                CategoryToggleRow(label: "Communications", systemImage: NotamCategory.cnsCommunications.icon, isOn: categoryBinding(\.showCommunications))
-            }
-
-            // ATM Categories (Air Traffic Management)
-            DisclosureGroup("ATM - Traffic") {
-                CategoryToggleRow(label: "Airspace", systemImage: NotamCategory.atmAirspace.icon, isOn: categoryBinding(\.showAirspace))
-                CategoryToggleRow(label: "Procedures", systemImage: NotamCategory.atmProcedures.icon, isOn: categoryBinding(\.showProcedures))
-                CategoryToggleRow(label: "Services", systemImage: NotamCategory.atmServices.icon, isOn: categoryBinding(\.showServices))
-                CategoryToggleRow(label: "Restrictions", systemImage: NotamCategory.airspaceRestrictions.icon, isOn: categoryBinding(\.showRestrictions))
-            }
-
-            // Other
-            CategoryToggleRow(label: "Other Info", systemImage: NotamCategory.otherInfo.icon, isOn: categoryBinding(\.showOther))
-        } header: {
+        if appState?.notams.smartFilters.filterObstacles == true {
             HStack {
-                Label("ICAO Categories", systemImage: "tag")
-                Spacer()
-                if appState?.notams.categoryFilter.allEnabled == false {
-                    Button("All") {
-                        appState?.notams.categoryFilter.enableAll()
-                    }
-                    .font(.caption)
+                Text("Show within")
+                Picker("Distance", selection: obstacleDistanceBinding) {
+                    Text("1 nm").tag(1.0)
+                    Text("2 nm").tag(2.0)
+                    Text("5 nm").tag(5.0)
+                    Text("10 nm").tag(10.0)
                 }
+                .pickerStyle(.menu)
+                Text("of airports")
             }
-        } footer: {
-            Text("Categories based on ICAO Q-code subject classification")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
         }
+
+        // Scope filter
+        Picker("Scope", selection: scopeFilterBinding) {
+            ForEach(ScopeFilter.allCases) { scope in
+                Text(scope.rawValue).tag(scope)
+            }
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+            if appState?.notams.smartFilters.hideHelicopter == true {
+                Text("Helicopter NOTAMs (heliports, FATO, windsocks) hidden")
+            }
+            if appState?.notams.smartFilters.filterObstacles == true {
+                Text("Obstacles shown only near departure/destination")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
-    // MARK: - Status Section
+    // MARK: - Category Content (for DisclosureGroup)
+
+    @ViewBuilder
+    private var categoryContent: some View {
+        // Enable All button
+        if appState?.notams.categoryFilter.allEnabled == false {
+            Button("Enable All Categories") {
+                appState?.notams.categoryFilter.enableAll()
+            }
+            .font(.subheadline)
+        }
+
+        // AGA Categories (Aerodrome Ground Aids)
+        DisclosureGroup("AGA - Ground") {
+            CategoryToggleRow(label: "Movement Area", systemImage: NotamCategory.agaMovement.icon, isOn: categoryBinding(\.showMovement))
+            CategoryToggleRow(label: "Lighting", systemImage: NotamCategory.agaLighting.icon, isOn: categoryBinding(\.showLighting))
+            CategoryToggleRow(label: "Facilities", systemImage: NotamCategory.agaFacilities.icon, isOn: categoryBinding(\.showFacilities))
+        }
+
+        // CNS Categories (Communications, Navigation, Surveillance)
+        DisclosureGroup("CNS - Navigation") {
+            CategoryToggleRow(label: "Navigation", systemImage: NotamCategory.navigation.icon, isOn: categoryBinding(\.showNavigation))
+            CategoryToggleRow(label: "ILS/MLS", systemImage: NotamCategory.cnsILS.icon, isOn: categoryBinding(\.showILS))
+            CategoryToggleRow(label: "GNSS", systemImage: NotamCategory.cnsGNSS.icon, isOn: categoryBinding(\.showGNSS))
+            CategoryToggleRow(label: "Communications", systemImage: NotamCategory.cnsCommunications.icon, isOn: categoryBinding(\.showCommunications))
+        }
+
+        // ATM Categories (Air Traffic Management)
+        DisclosureGroup("ATM - Traffic") {
+            CategoryToggleRow(label: "Airspace", systemImage: NotamCategory.atmAirspace.icon, isOn: categoryBinding(\.showAirspace))
+            CategoryToggleRow(label: "Procedures", systemImage: NotamCategory.atmProcedures.icon, isOn: categoryBinding(\.showProcedures))
+            CategoryToggleRow(label: "Services", systemImage: NotamCategory.atmServices.icon, isOn: categoryBinding(\.showServices))
+            CategoryToggleRow(label: "Restrictions", systemImage: NotamCategory.airspaceRestrictions.icon, isOn: categoryBinding(\.showRestrictions))
+        }
+
+        // Other
+        CategoryToggleRow(label: "Other Info", systemImage: NotamCategory.otherInfo.icon, isOn: categoryBinding(\.showOther))
+
+        Text("Based on ICAO Q-code subject classification")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Status Section (Prominent at Top)
 
     private var statusSection: some View {
         Section {
@@ -225,41 +259,50 @@ struct FilterPanelView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            // Quick stats row
+            if let notams = appState?.notams {
+                HStack(spacing: 16) {
+                    StatBadge(label: "Unread", count: notams.unreadCount, color: .blue)
+                    StatBadge(label: "Important", count: notams.importantCount, color: .orange)
+                    StatBadge(label: "New", count: notams.newNotamCount, color: .green)
+                }
+                .padding(.vertical, 4)
+            }
         } header: {
-            Label("Status Filter", systemImage: "checklist")
+            Label("Status", systemImage: "checklist")
         }
     }
 
-    // MARK: - Priority Section
+    // MARK: - Priority Content (for DisclosureGroup)
 
-    private var prioritySection: some View {
-        Section {
-            Picker("Priority", selection: priorityFilterBinding) {
-                ForEach(PriorityFilter.allCases) { priority in
-                    HStack {
-                        priorityIcon(for: priority)
-                        Text(priority.rawValue)
-                    }
-                    .tag(priority)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if appState?.notams.highPriorityCount ?? 0 > 0 {
+    @ViewBuilder
+    private var priorityContent: some View {
+        Picker("Priority", selection: priorityFilterBinding) {
+            ForEach(PriorityFilter.allCases) { priority in
                 HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                    Text("\(appState?.notams.highPriorityCount ?? 0) high priority NOTAMs")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    priorityIcon(for: priority)
+                    Text(priority.rawValue)
                 }
+                .tag(priority)
             }
-        } header: {
-            Label("Computed Priority", systemImage: "bolt.fill")
-        } footer: {
-            Text("Priority is computed based on distance from route, altitude overlap, and NOTAM type.")
         }
+        .pickerStyle(.segmented)
+
+        if appState?.notams.highPriorityCount ?? 0 > 0 {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Text("\(appState?.notams.highPriorityCount ?? 0) high priority NOTAMs")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Text("Computed from route distance, altitude, and NOTAM type.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -291,7 +334,7 @@ struct FilterPanelView: View {
         }
     }
 
-    // MARK: - Grouping Section
+    // MARK: - Grouping Section (Prominent at Top)
 
     private var groupingSection: some View {
         Section {
@@ -301,13 +344,88 @@ struct FilterPanelView: View {
                         .tag(grouping)
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
+            .pickerStyle(.segmented)
         } header: {
             Label("Grouping", systemImage: "rectangle.3.group")
         } footer: {
             if appState?.notams.grouping == .routeOrder {
-                Text("NOTAMs sorted by position along your route: Departure → En Route → Destination → Alternates → Distant → No Coordinates")
+                Text("Sorted by position along route: Departure → En Route → Destination")
+            }
+        }
+    }
+
+    // MARK: - Advanced Filters Section (Collapsible)
+
+    private var advancedFiltersSection: some View {
+        Section {
+            // Priority filter
+            DisclosureGroup(isExpanded: $isPriorityExpanded) {
+                priorityContent
+            } label: {
+                advancedFilterLabel(
+                    title: "Priority",
+                    icon: "bolt.fill",
+                    isActive: appState?.notams.priorityFilter != .all
+                )
+            }
+
+            // Route corridor filter
+            DisclosureGroup(isExpanded: $isRouteExpanded) {
+                routeContent
+            } label: {
+                advancedFilterLabel(
+                    title: "Route Corridor",
+                    icon: "point.topleft.down.to.point.bottomright.curvepath",
+                    isActive: appState?.notams.routeFilter.isEnabled == true
+                )
+            }
+
+            // Time filter
+            DisclosureGroup(isExpanded: $isTimeExpanded) {
+                timeContent
+            } label: {
+                advancedFilterLabel(
+                    title: "Time Filter",
+                    icon: "clock",
+                    isActive: appState?.notams.timeFilter.isEnabled == true
+                )
+            }
+
+            // Smart filters
+            DisclosureGroup(isExpanded: $isSmartFiltersExpanded) {
+                smartFiltersContent
+            } label: {
+                advancedFilterLabel(
+                    title: "Smart Filters",
+                    icon: "sparkles",
+                    isActive: appState?.notams.smartFilters.hasActiveFilters == true
+                )
+            }
+
+            // ICAO Categories (lighting, facilities, etc.)
+            DisclosureGroup(isExpanded: $isCategoryExpanded) {
+                categoryContent
+            } label: {
+                advancedFilterLabel(
+                    title: "ICAO Categories",
+                    icon: "tag",
+                    isActive: appState?.notams.categoryFilter.allEnabled == false
+                )
+            }
+        } header: {
+            Label("Advanced Filters", systemImage: "slider.horizontal.3")
+        }
+    }
+
+    /// Label for advanced filter disclosure groups with active indicator
+    private func advancedFilterLabel(title: String, icon: String, isActive: Bool) -> some View {
+        HStack {
+            Label(title, systemImage: icon)
+            Spacer()
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
             }
         }
     }
@@ -499,6 +617,27 @@ struct FilterChip: View {
         .background(isActive ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
         .foregroundStyle(isActive ? .primary : .secondary)
         .clipShape(Capsule())
+    }
+}
+
+// MARK: - Stat Badge
+
+/// Small badge displaying a count with label for the status section
+struct StatBadge: View {
+    let label: String
+    let count: Int
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(count)")
+                .font(.headline)
+                .foregroundStyle(count > 0 ? color : .secondary)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
