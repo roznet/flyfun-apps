@@ -115,34 +115,88 @@ struct FlightNotamView: View {
 
     var body: some View {
         NavigationStack {
-            NotamListView()
-                .navigationTitle(navigationTitle)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            appState?.navigation.exitFlightView()
-                            appState?.briefing.clearBriefing()
-                            appState?.flights.clearSelection()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                Text("Flights")
-                            }
-                        }
-                    }
+            ZStack(alignment: .bottomTrailing) {
+                NotamListView()
 
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            briefingMenu
-                            Divider()
-                            filterMenu
-                        } label: {
-                            Label("Options", systemImage: "ellipsis.circle")
+                // Floating filter button for quick access
+                floatingFilterButton
+            }
+            .navigationTitle(navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        appState?.navigation.exitFlightView()
+                        appState?.briefing.clearBriefing()
+                        appState?.flights.clearSelection()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Flights")
                         }
                     }
                 }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        briefingMenu
+                        Divider()
+                        filterMenu
+                    } label: {
+                        Label("Options", systemImage: "ellipsis.circle")
+                    }
+                }
+            }
         }
+    }
+
+    // MARK: - Floating Filter Button
+
+    private var floatingFilterButton: some View {
+        Button {
+            appState?.navigation.showFilterOptions()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                // Badge showing active filter count
+                if let activeCount = activeFilterCount, activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(Color.orange)
+                        .clipShape(Circle())
+                        .offset(x: 18, y: -18)
+                }
+            }
+        }
+        .padding(.trailing, 16)
+        .padding(.bottom, 16)
+    }
+
+    /// Count of active filters for badge display
+    private var activeFilterCount: Int? {
+        guard let notams = appState?.notams else { return nil }
+
+        var count = 0
+        if notams.routeFilter.isEnabled { count += 1 }
+        if notams.timeFilter.isEnabled { count += 1 }
+        if notams.statusFilter != .all { count += 1 }
+        if notams.priorityFilter != .all { count += 1 }
+        if !notams.categoryFilter.allEnabled { count += 1 }
+        if notams.smartFilters.hasActiveFilters { count += 1 }
+        if !notams.visibilityFilter.showRead { count += 1 }
+        if notams.visibilityFilter.showIgnored { count += 1 }
+
+        return count
     }
 
     private var navigationTitle: String {
