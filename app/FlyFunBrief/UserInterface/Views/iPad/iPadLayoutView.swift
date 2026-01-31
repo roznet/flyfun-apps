@@ -14,10 +14,12 @@ struct iPadLayoutView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isBriefingsExpanded = false
 
-    // Category disclosure group states
-    @State private var isAGAExpanded = false
-    @State private var isCNSExpanded = false
-    @State private var isATMExpanded = false
+    // Advanced filter disclosure group states (shared with FilterSectionsContent)
+    @State private var isRouteExpanded = false
+    @State private var isTimeExpanded = false
+    @State private var isSmartFiltersExpanded = false
+    @State private var isCategoryExpanded = false
+    @State private var isPriorityExpanded = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -101,34 +103,15 @@ struct iPadLayoutView: View {
             }
 
             // Filter sections (only if we have a briefing loaded)
+            // Uses shared filter content from SharedFilterContent.swift
             if appState?.briefing.currentBriefing != nil {
-                Section("View Style") {
-                    rowStylePicker
-                }
-
-                Section("Grouping") {
-                    groupingPicker
-                }
-
-                Section("Status Filter") {
-                    statusFilterPicker
-                }
-
-                Section("Categories") {
-                    collapsibleCategoryToggles
-                }
-
-                Section("Route Corridor") {
-                    routeFilterControls
-                }
-
-                Section("Time Filter") {
-                    timeFilterControls
-                }
-
-                Section("Visibility") {
-                    visibilityToggles
-                }
+                FilterSectionsContent(
+                    isRouteExpanded: $isRouteExpanded,
+                    isTimeExpanded: $isTimeExpanded,
+                    isSmartFiltersExpanded: $isSmartFiltersExpanded,
+                    isCategoryExpanded: $isCategoryExpanded,
+                    isPriorityExpanded: $isPriorityExpanded
+                )
 
                 // Reset filters
                 if appState?.notams.hasActiveFilters == true {
@@ -285,115 +268,6 @@ struct iPadLayoutView: View {
 
     // MARK: - Filter Controls
 
-    private var rowStylePicker: some View {
-        Picker("Style", selection: rowStyleBinding) {
-            ForEach(NotamRowStyle.allCases) { style in
-                Text(style.rawValue).tag(style)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private var statusFilterPicker: some View {
-        Picker("Status", selection: statusFilterBinding) {
-            ForEach(StatusFilter.allCases) { status in
-                Text(status.rawValue).tag(status)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    @ViewBuilder
-    private var categoryToggles: some View {
-        // AGA - Ground
-        Toggle("Movement Area", isOn: categoryBinding(\.showMovement))
-        Toggle("Lighting", isOn: categoryBinding(\.showLighting))
-        Toggle("Facilities", isOn: categoryBinding(\.showFacilities))
-        // CNS - Navigation
-        Toggle("Navigation", isOn: categoryBinding(\.showNavigation))
-        Toggle("ILS/MLS", isOn: categoryBinding(\.showILS))
-        Toggle("GNSS", isOn: categoryBinding(\.showGNSS))
-        Toggle("Communications", isOn: categoryBinding(\.showCommunications))
-        // ATM - Traffic
-        Toggle("Airspace", isOn: categoryBinding(\.showAirspace))
-        Toggle("Procedures", isOn: categoryBinding(\.showProcedures))
-        Toggle("Services", isOn: categoryBinding(\.showServices))
-        Toggle("Restrictions", isOn: categoryBinding(\.showRestrictions))
-        // Other
-        Toggle("Other Info", isOn: categoryBinding(\.showOther))
-    }
-
-    @ViewBuilder
-    private var collapsibleCategoryToggles: some View {
-        // AGA - Ground
-        DisclosureGroup("AGA - Ground", isExpanded: $isAGAExpanded) {
-            Toggle("Movement Area", isOn: categoryBinding(\.showMovement))
-            Toggle("Lighting", isOn: categoryBinding(\.showLighting))
-            Toggle("Facilities", isOn: categoryBinding(\.showFacilities))
-        }
-
-        // CNS - Navigation
-        DisclosureGroup("CNS - Navigation", isExpanded: $isCNSExpanded) {
-            Toggle("Navigation", isOn: categoryBinding(\.showNavigation))
-            Toggle("ILS/MLS", isOn: categoryBinding(\.showILS))
-            Toggle("GNSS", isOn: categoryBinding(\.showGNSS))
-            Toggle("Communications", isOn: categoryBinding(\.showCommunications))
-        }
-
-        // ATM - Traffic
-        DisclosureGroup("ATM - Traffic", isExpanded: $isATMExpanded) {
-            Toggle("Airspace", isOn: categoryBinding(\.showAirspace))
-            Toggle("Procedures", isOn: categoryBinding(\.showProcedures))
-            Toggle("Services", isOn: categoryBinding(\.showServices))
-            Toggle("Restrictions", isOn: categoryBinding(\.showRestrictions))
-        }
-
-        // Other (not collapsible, single toggle)
-        Toggle("Other Info", isOn: categoryBinding(\.showOther))
-    }
-
-    @ViewBuilder
-    private var routeFilterControls: some View {
-        Toggle("Filter by Route", isOn: routeEnabledBinding)
-
-        if appState?.notams.routeFilter.isEnabled == true {
-            Picker("Corridor Width", selection: corridorWidthBinding) {
-                Text("10 nm").tag(10.0)
-                Text("25 nm").tag(25.0)
-                Text("50 nm").tag(50.0)
-                Text("100 nm").tag(100.0)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var timeFilterControls: some View {
-        Toggle("Active at Flight Time", isOn: timeFilterEnabledBinding)
-
-        if appState?.notams.timeFilter.isEnabled == true,
-           let route = appState?.briefing.currentBriefing?.route,
-           let depTime = route.departureTime {
-            Text("Departure: \(formatDateTime(depTime))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var visibilityToggles: some View {
-        Toggle("Show Read", isOn: showReadBinding)
-        Toggle("Show Ignored", isOn: showIgnoredBinding)
-    }
-
-    private var groupingPicker: some View {
-        Picker("Group By", selection: groupingBinding) {
-            ForEach(NotamGrouping.allCases) { grouping in
-                Text(grouping.rawValue).tag(grouping)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
     // MARK: - Sidebar Title
 
     private var sidebarTitle: String {
@@ -478,69 +352,6 @@ struct iPadLayoutView: View {
         Binding(
             get: { appState?.navigation.presentedSheet },
             set: { appState?.navigation.presentedSheet = $0 }
-        )
-    }
-
-    private var statusFilterBinding: Binding<StatusFilter> {
-        Binding(
-            get: { appState?.notams.statusFilter ?? .all },
-            set: { appState?.notams.statusFilter = $0 }
-        )
-    }
-
-    private var rowStyleBinding: Binding<NotamRowStyle> {
-        Binding(
-            get: { appState?.notams.rowStyle ?? .standard },
-            set: { appState?.notams.rowStyle = $0 }
-        )
-    }
-
-    private func categoryBinding(_ keyPath: WritableKeyPath<CategoryFilter, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { appState?.notams.categoryFilter[keyPath: keyPath] ?? true },
-            set: { appState?.notams.categoryFilter[keyPath: keyPath] = $0 }
-        )
-    }
-
-    private var routeEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { appState?.notams.routeFilter.isEnabled ?? false },
-            set: { appState?.notams.routeFilter.isEnabled = $0 }
-        )
-    }
-
-    private var corridorWidthBinding: Binding<Double> {
-        Binding(
-            get: { appState?.notams.routeFilter.corridorWidthNm ?? 25 },
-            set: { appState?.notams.routeFilter.corridorWidthNm = $0 }
-        )
-    }
-
-    private var timeFilterEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { appState?.notams.timeFilter.isEnabled ?? false },
-            set: { appState?.notams.timeFilter.isEnabled = $0 }
-        )
-    }
-
-    private var showReadBinding: Binding<Bool> {
-        Binding(
-            get: { appState?.notams.visibilityFilter.showRead ?? true },
-            set: { appState?.notams.visibilityFilter.showRead = $0 }
-        )
-    }
-
-    private var showIgnoredBinding: Binding<Bool> {
-        Binding(
-            get: { appState?.notams.visibilityFilter.showIgnored ?? false },
-            set: { appState?.notams.visibilityFilter.showIgnored = $0 }
-        )
-    }
-
-    private var groupingBinding: Binding<NotamGrouping> {
-        Binding(
-            get: { appState?.notams.grouping ?? .airport },
-            set: { appState?.notams.grouping = $0 }
         )
     }
 
