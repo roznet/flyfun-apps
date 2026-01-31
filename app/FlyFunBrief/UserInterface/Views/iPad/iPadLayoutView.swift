@@ -14,6 +14,11 @@ struct iPadLayoutView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isBriefingsExpanded = false
 
+    // Category disclosure group states
+    @State private var isAGAExpanded = false
+    @State private var isCNSExpanded = false
+    @State private var isATMExpanded = false
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             // Sidebar: Navigation tabs or Flight context (filters + briefing selector)
@@ -93,11 +98,6 @@ struct iPadLayoutView: View {
                 Section("Flight") {
                     flightInfoSection(flight: flight)
                 }
-
-                // Briefings section
-                Section("Briefings") {
-                    briefingsSection(flight: flight)
-                }
             }
 
             // Filter sections (only if we have a briefing loaded)
@@ -106,12 +106,16 @@ struct iPadLayoutView: View {
                     rowStylePicker
                 }
 
+                Section("Grouping") {
+                    groupingPicker
+                }
+
                 Section("Status Filter") {
                     statusFilterPicker
                 }
 
                 Section("Categories") {
-                    categoryToggles
+                    collapsibleCategoryToggles
                 }
 
                 Section("Route Corridor") {
@@ -126,10 +130,6 @@ struct iPadLayoutView: View {
                     visibilityToggles
                 }
 
-                Section("Grouping") {
-                    groupingPicker
-                }
-
                 // Reset filters
                 if appState?.notams.hasActiveFilters == true {
                     Section {
@@ -139,6 +139,13 @@ struct iPadLayoutView: View {
                             Label("Reset All Filters", systemImage: "xmark.circle")
                         }
                     }
+                }
+            }
+
+            // Briefings section (at bottom for less frequent access)
+            if let flight = appState?.flights.selectedFlight {
+                Section("Briefings") {
+                    briefingsSection(flight: flight)
                 }
             }
         }
@@ -313,6 +320,35 @@ struct iPadLayoutView: View {
         Toggle("Services", isOn: categoryBinding(\.showServices))
         Toggle("Restrictions", isOn: categoryBinding(\.showRestrictions))
         // Other
+        Toggle("Other Info", isOn: categoryBinding(\.showOther))
+    }
+
+    @ViewBuilder
+    private var collapsibleCategoryToggles: some View {
+        // AGA - Ground
+        DisclosureGroup("AGA - Ground", isExpanded: $isAGAExpanded) {
+            Toggle("Movement Area", isOn: categoryBinding(\.showMovement))
+            Toggle("Lighting", isOn: categoryBinding(\.showLighting))
+            Toggle("Facilities", isOn: categoryBinding(\.showFacilities))
+        }
+
+        // CNS - Navigation
+        DisclosureGroup("CNS - Navigation", isExpanded: $isCNSExpanded) {
+            Toggle("Navigation", isOn: categoryBinding(\.showNavigation))
+            Toggle("ILS/MLS", isOn: categoryBinding(\.showILS))
+            Toggle("GNSS", isOn: categoryBinding(\.showGNSS))
+            Toggle("Communications", isOn: categoryBinding(\.showCommunications))
+        }
+
+        // ATM - Traffic
+        DisclosureGroup("ATM - Traffic", isExpanded: $isATMExpanded) {
+            Toggle("Airspace", isOn: categoryBinding(\.showAirspace))
+            Toggle("Procedures", isOn: categoryBinding(\.showProcedures))
+            Toggle("Services", isOn: categoryBinding(\.showServices))
+            Toggle("Restrictions", isOn: categoryBinding(\.showRestrictions))
+        }
+
+        // Other (not collapsible, single toggle)
         Toggle("Other Info", isOn: categoryBinding(\.showOther))
     }
 
