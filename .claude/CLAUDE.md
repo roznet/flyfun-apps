@@ -8,7 +8,7 @@
 - always try to think of a few ways to implement and compare pros and cons before deciding
 - always consider maintainability, testability, readability and possible future extensions
 
-## Before implementing or planning new functionality 
+## Before implementing or planning new functionality, and before exploring the code by reading files, follow these steps to leverage existing resources and get overall big picture first.
 
   Check for existing utilities and patterns:
   1. Call `list_libraries` to discover what's available across the codebase
@@ -20,3 +20,5 @@
 
 - don't run npm run build as for development we use npv run dev
 - use venv activate if venv exist so we use correct library
+
+

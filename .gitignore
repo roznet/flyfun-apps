@@ -84,3 +84,5 @@ out
 # Sqlite artifacts
 *.db-shm
 *.db-wal
+
+CLAUDE.local.md
