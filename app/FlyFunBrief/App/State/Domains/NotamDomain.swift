@@ -196,23 +196,28 @@ struct VisibilityFilter: Equatable {
     var showRead: Bool = true
 }
 
-/// Priority filter options
-enum PriorityFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case high = "High"
-    case normal = "Normal"
-    case low = "Low"
+/// Cumulative priority filter - selecting level N shows P1..PN
+struct PriorityFilter: Equatable {
+    /// Maximum visible priority level, nil = show all
+    var maxVisibleLevel: Int?
 
-    var id: String { rawValue }
+    /// Max level from the active profile
+    var profileMaxLevel: Int
+
+    /// Whether filtering is active
+    var isActive: Bool { maxVisibleLevel != nil }
 
     /// Check if a priority matches this filter
     func matches(_ priority: NotamPriority) -> Bool {
-        switch self {
-        case .all: return true
-        case .high: return priority == .high
-        case .normal: return priority == .normal
-        case .low: return priority == .low
-        }
+        guard let max = maxVisibleLevel else { return true }
+        return priority.level <= max
+    }
+
+    /// Display label for filter chip
+    var chipLabel: String? {
+        guard let max = maxVisibleLevel else { return nil }
+        if max == 1 { return "P1" }
+        return "P1-P\(max)"
     }
 }
 
@@ -290,10 +295,18 @@ final class NotamDomain {
     /// Flight context for route filtering and priority evaluation (set by AppState when flight is selected)
     private(set) var currentFlightContext: FlightContext = .empty
 
-    // MARK: - Priority Filter
+    // MARK: - Priority Profile & Filter
 
-    /// Priority filter - which priorities to show
-    var priorityFilter: PriorityFilter = .all
+    /// Current priority profile
+    private(set) var currentProfile: PriorityProfile = PriorityProfiles.default
+
+    /// Priority filter - cumulative, selecting level N shows P1..PN
+    var priorityFilter: PriorityFilter = PriorityFilter(maxVisibleLevel: nil, profileMaxLevel: PriorityProfiles.default.maxLevel)
+
+    /// Count of NOTAMs at each priority level (for display in filter UI)
+    var priorityCountsByLevel: [Int: Int] {
+        enrichedNotams.countsByLevel(maxLevel: currentProfile.maxLevel)
+    }
 
     // MARK: - Computed Properties
 
@@ -302,7 +315,7 @@ final class NotamDomain {
         routeFilter.isEnabled ||
         !categoryFilter.allEnabled ||
         statusFilter != .all ||
-        priorityFilter != .all ||
+        priorityFilter.isActive ||
         !visibilityFilter.showRead ||
         visibilityFilter.showIgnored ||
         timeFilter.isEnabled ||
@@ -458,7 +471,7 @@ final class NotamDomain {
         }
 
         // 9. Apply priority filter
-        if priorityFilter != .all {
+        if priorityFilter.isActive {
             notams = notams.filter { priorityFilter.matches($0.priority) }
         }
 
@@ -533,9 +546,9 @@ final class NotamDomain {
         enrichedNotams.newCount
     }
 
-    /// Count of high priority NOTAMs
-    var highPriorityCount: Int {
-        enrichedNotams.highPriorityCount
+    /// Count of critical priority NOTAMs (P1)
+    var criticalPriorityCount: Int {
+        enrichedNotams.criticalPriorityCount
     }
 
     // MARK: - Dependencies
@@ -582,6 +595,18 @@ final class NotamDomain {
         routeFilter.routeString = currentFlightContext.routeDisplayString
 
         // Re-enrich NOTAMs with new context
+        refreshEnrichedNotams()
+    }
+
+    /// Set the active priority profile and re-evaluate all NOTAMs.
+    func setProfile(_ profile: PriorityProfile) {
+        self.currentProfile = profile
+        // Reset priority filter to match new profile's level count
+        self.priorityFilter = PriorityFilter(
+            maxVisibleLevel: nil,
+            profileMaxLevel: profile.maxLevel
+        )
+        // Re-enrich with new profile
         refreshEnrichedNotams()
     }
 
@@ -669,7 +694,8 @@ final class NotamDomain {
             statuses: [:],  // No Core Data statuses
             previousIdentityKeys: previousIdentityKeys,
             ignoredKeys: ignoredIdentityKeys,
-            flightContext: currentFlightContext
+            flightContext: currentFlightContext,
+            profile: currentProfile
         )
     }
 
@@ -696,7 +722,8 @@ final class NotamDomain {
             ignoredKeys: ignoredIdentityKeys,
             flightContext: currentFlightContext,
             resurfaceEvaluator: resurfaceEvaluator,
-            resurfaceSettings: resurfaceSettings
+            resurfaceSettings: resurfaceSettings,
+            profile: currentProfile
         )
     }
 
@@ -725,7 +752,7 @@ final class NotamDomain {
         routeFilter = RouteFilter()
         categoryFilter = CategoryFilter()
         statusFilter = .all
-        priorityFilter = .all
+        priorityFilter = PriorityFilter(maxVisibleLevel: nil, profileMaxLevel: currentProfile.maxLevel)
         visibilityFilter = VisibilityFilter()
         timeFilter = TimeFilter()
         smartFilters = SmartFilters()

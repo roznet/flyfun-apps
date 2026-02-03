@@ -49,6 +49,24 @@ final class SettingsDomain {
         }
     }
 
+    // MARK: - Priority Profile
+
+    /// ID of the active priority profile (persisted)
+    var priorityProfileId: String {
+        didSet {
+            UserDefaults.standard.set(priorityProfileId, forKey: Keys.priorityProfileId)
+            onProfileChanged?(priorityProfile)
+        }
+    }
+
+    /// The active priority profile
+    var priorityProfile: PriorityProfile {
+        PriorityProfiles.profile(for: priorityProfileId)
+    }
+
+    /// Callback when profile changes (wired by AppState)
+    var onProfileChanged: ((PriorityProfile) -> Void)?
+
     // MARK: - Resurface Settings
 
     /// Days until a globally-read NOTAM resurfaces as unread
@@ -92,6 +110,7 @@ final class SettingsDomain {
     // MARK: - Keys
 
     private enum Keys {
+        static let priorityProfileId = "priorityProfileId"
         static let apiBaseURL = "apiBaseURL"
         static let defaultGrouping = "defaultGrouping"
         static let autoMarkAsRead = "autoMarkAsRead"
@@ -111,6 +130,9 @@ final class SettingsDomain {
 
     init() {
         // Load from UserDefaults with defaults
+        self.priorityProfileId = UserDefaults.standard.string(forKey: Keys.priorityProfileId)
+            ?? PriorityProfiles.default.id
+
         self.apiBaseURL = UserDefaults.standard.string(forKey: Keys.apiBaseURL)
             ?? Self.defaultAPIBaseURL
 
@@ -147,6 +169,7 @@ final class SettingsDomain {
 
     /// Reset to defaults
     func resetToDefaults() {
+        priorityProfileId = PriorityProfiles.default.id
         apiBaseURL = Self.defaultAPIBaseURL
         defaultGrouping = .airport
         autoMarkAsRead = true

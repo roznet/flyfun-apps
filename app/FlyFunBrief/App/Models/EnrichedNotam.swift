@@ -83,7 +83,7 @@ struct EnrichedNotam: Identifiable {
         routeDistanceNm: Double? = nil,
         isAltitudeRelevant: Bool = false,
         isActiveForFlight: Bool = true,
-        priority: NotamPriority = .normal
+        priority: NotamPriority = .default(maxLevel: PriorityProfiles.default.maxLevel)
     ) {
         self.notam = notam
         self.identityKey = NotamIdentity.key(for: notam)
@@ -244,19 +244,31 @@ extension Array where Element == EnrichedNotam {
         }
     }
 
-    /// Filter by computed priority
-    func withPriority(_ priority: NotamPriority) -> [EnrichedNotam] {
-        filter { $0.priority == priority }
+    /// Filter by computed priority level
+    func withPriorityLevel(_ level: Int) -> [EnrichedNotam] {
+        filter { $0.priority.level == level }
     }
 
-    /// Filter to high priority only
-    func highPriorityOnly() -> [EnrichedNotam] {
-        filter { $0.priority == .high }
+    /// Filter to critical priority only (P1)
+    func criticalOnly() -> [EnrichedNotam] {
+        filter { $0.priority.isCritical }
     }
 
-    /// Count of high priority NOTAMs
-    var highPriorityCount: Int {
-        filter { $0.priority == .high }.count
+    /// Count of critical priority NOTAMs (P1)
+    var criticalPriorityCount: Int {
+        filter { $0.priority.isCritical }.count
+    }
+
+    /// Count NOTAMs at each priority level
+    func countsByLevel(maxLevel: Int) -> [Int: Int] {
+        var counts: [Int: Int] = [:]
+        for level in 1...maxLevel {
+            counts[level] = 0
+        }
+        for notam in self {
+            counts[notam.priority.level, default: 0] += 1
+        }
+        return counts
     }
 
     /// Count of new NOTAMs
@@ -295,10 +307,11 @@ extension EnrichedNotam {
         statuses: [String: CDNotamStatus],
         previousIdentityKeys: Set<String>,
         ignoredKeys: Set<String>,
-        flightContext: FlightContext? = nil
+        flightContext: FlightContext? = nil,
+        profile: PriorityProfile = PriorityProfiles.default
     ) -> [EnrichedNotam] {
         let context = flightContext ?? .empty
-        let evaluator = NotamPriorityEvaluator.shared
+        let evaluator = NotamPriorityEvaluator(profile: profile)
 
         return notams.map { notam in
             let identityKey = NotamIdentity.key(for: notam)
@@ -360,9 +373,10 @@ extension EnrichedNotam {
         ignoredKeys: Set<String>,
         flightContext: FlightContext,
         resurfaceEvaluator: NotamResurfaceEvaluator,
-        resurfaceSettings: ResurfaceSettings
+        resurfaceSettings: ResurfaceSettings,
+        profile: PriorityProfile = PriorityProfiles.default
     ) -> [EnrichedNotam] {
-        let priorityEvaluator = NotamPriorityEvaluator.shared
+        let priorityEvaluator = NotamPriorityEvaluator(profile: profile)
 
         return notams.map { notam in
             let identityKey = NotamIdentity.key(for: notam)

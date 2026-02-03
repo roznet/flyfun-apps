@@ -78,7 +78,7 @@ struct FilterPanelView: View {
         if appState?.notams.categoryFilter.allEnabled == false {
             isCategoryExpanded = true
         }
-        if appState?.notams.priorityFilter != .all {
+        if appState?.notams.priorityFilter.isActive == true {
             isPriorityExpanded = true
         }
     }
@@ -125,12 +125,13 @@ struct CompactFilterBar: View {
                     }
                 }
 
-                if appState?.notams.priorityFilter != .all {
+                if let chipLabel = appState?.notams.priorityFilter.chipLabel {
+                    let profileName = appState?.notams.currentProfile.displayName ?? ""
                     FilterChip(
-                        label: "Priority: \(appState?.notams.priorityFilter.rawValue ?? "")",
+                        label: "\(profileName) \(chipLabel)",
                         isActive: true
                     ) {
-                        appState?.notams.priorityFilter = .all
+                        appState?.notams.priorityFilter.maxVisibleLevel = nil
                     }
                 }
 

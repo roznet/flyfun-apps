@@ -738,24 +738,6 @@ struct PriorityBadge: View {
     }
 }
 
-extension NotamPriority {
-    var label: String {
-        switch self {
-        case .high: return "High"
-        case .normal: return "Normal"
-        case .low: return "Low"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .high: return .orange
-        case .normal: return .primary
-        case .low: return .secondary
-        }
-    }
-}
-
 // MARK: - Preview
 
 #Preview {

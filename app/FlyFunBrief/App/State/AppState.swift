@@ -105,8 +105,9 @@ final class AppState {
         // Wire up cross-domain communication
         setupCrossDomainWiring()
 
-        // Sync resurface settings from SettingsDomain to NotamDomain
+        // Sync settings to NotamDomain
         syncResurfaceSettings()
+        syncPriorityProfile()
 
         // Configure service URLs from secrets
         Task {
@@ -278,6 +279,16 @@ final class AppState {
     /// Sync resurface settings from SettingsDomain to NotamDomain
     func syncResurfaceSettings() {
         notams.resurfaceSettings = settings.resurfaceSettings
+    }
+
+    /// Sync priority profile from SettingsDomain to NotamDomain
+    func syncPriorityProfile() {
+        notams.setProfile(settings.priorityProfile)
+
+        // Wire up future changes
+        settings.onProfileChanged = { [weak self] profile in
+            self?.notams.setProfile(profile)
+        }
     }
 
     // MARK: - Flight Context
