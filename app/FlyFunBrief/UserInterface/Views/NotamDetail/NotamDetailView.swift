@@ -724,9 +724,11 @@ struct PriorityBadge: View {
     let priority: NotamPriority
 
     var body: some View {
-        if let iconName = priority.iconName {
+        if !priority.isDefault {
             HStack(spacing: 4) {
-                Image(systemName: iconName)
+                if let iconName = priority.iconName {
+                    Image(systemName: iconName)
+                }
                 Text(priority.label)
             }
             .font(.caption2.weight(.medium))
@@ -734,24 +736,6 @@ struct PriorityBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(priority.color.opacity(0.15), in: Capsule())
-        }
-    }
-}
-
-extension NotamPriority {
-    var label: String {
-        switch self {
-        case .high: return "High"
-        case .normal: return "Normal"
-        case .low: return "Low"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .high: return .orange
-        case .normal: return .primary
-        case .low: return .secondary
         }
     }
 }

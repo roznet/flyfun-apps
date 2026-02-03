@@ -13,6 +13,39 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // Priority Profile
+            Section("Priority Profile") {
+                Picker("Profile", selection: profileBinding) {
+                    ForEach(PriorityProfiles.all) { profile in
+                        Text(profile.displayName).tag(profile.id)
+                    }
+                }
+
+                if let profile = appState?.settings.priorityProfile {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(profile.levels), id: \.self) { level in
+                            if let desc = profile.levelDescriptions[level] {
+                                HStack(alignment: .top, spacing: 8) {
+                                    let priority = NotamPriority(level: level, maxLevel: profile.maxLevel)
+                                    Text(priority.label)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(priority.color)
+                                        .frame(width: 28, alignment: .leading)
+                                    Text(desc)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Text("Determines how NOTAMs are prioritized based on flight type.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // Display Settings
             Section("Display") {
                 Toggle("Show Raw NOTAM Text", isOn: showRawTextBinding)
@@ -107,6 +140,13 @@ struct SettingsView: View {
         Binding(
             get: { appState?.settings.defaultGrouping ?? .airport },
             set: { appState?.settings.defaultGrouping = $0 }
+        )
+    }
+
+    private var profileBinding: Binding<String> {
+        Binding(
+            get: { appState?.settings.priorityProfileId ?? PriorityProfiles.default.id },
+            set: { appState?.settings.priorityProfileId = $0 }
         )
     }
 

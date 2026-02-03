@@ -97,17 +97,15 @@ struct NotamRowView: View {
     /// Priority icon based on computed priority
     @ViewBuilder
     private var priorityIcon: some View {
-        switch enrichedNotam.priority {
-        case .high:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        case .low:
-            Image(systemName: "arrow.down.circle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        case .normal:
-            EmptyView()
+        let priority = enrichedNotam.priority
+        if let iconName = priority.iconName {
+            HStack(spacing: 2) {
+                Image(systemName: iconName)
+                    .font(.caption2)
+                Text(priority.label)
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(priority.color)
         }
     }
 

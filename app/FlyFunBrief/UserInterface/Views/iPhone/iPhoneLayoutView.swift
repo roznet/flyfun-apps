@@ -190,7 +190,7 @@ struct FlightNotamView: View {
         if notams.routeFilter.isEnabled { count += 1 }
         if notams.timeFilter.isEnabled { count += 1 }
         if notams.statusFilter != .all { count += 1 }
-        if notams.priorityFilter != .all { count += 1 }
+        if notams.priorityFilter.isActive { count += 1 }
         if !notams.categoryFilter.allEnabled { count += 1 }
         if notams.smartFilters.hasActiveFilters { count += 1 }
         if !notams.visibilityFilter.showRead { count += 1 }

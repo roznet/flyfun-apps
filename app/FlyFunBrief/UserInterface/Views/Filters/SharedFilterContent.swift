@@ -154,7 +154,7 @@ struct FilterAdvancedSection: View {
                 advancedFilterLabel(
                     title: "Priority",
                     icon: "bolt.fill",
-                    isActive: appState?.notams.priorityFilter != .all
+                    isActive: appState?.notams.priorityFilter.isActive == true
                 )
             }
 
@@ -224,56 +224,87 @@ struct FilterAdvancedSection: View {
 struct FilterPriorityContent: View {
     @Environment(\.appState) private var appState
 
+    private var profile: PriorityProfile {
+        appState?.notams.currentProfile ?? PriorityProfiles.default
+    }
+
+    private var counts: [Int: Int] {
+        appState?.notams.priorityCountsByLevel ?? [:]
+    }
+
     var body: some View {
-        Picker("Priority", selection: priorityFilterBinding) {
-            ForEach(PriorityFilter.allCases) { priority in
-                HStack {
-                    priorityIcon(for: priority)
-                    Text(priority.rawValue)
-                }
-                .tag(priority)
+        // Profile picker
+        Picker("Profile", selection: profileBinding) {
+            ForEach(PriorityProfiles.all) { p in
+                Text(p.displayName).tag(p.id)
             }
         }
         .pickerStyle(.segmented)
 
-        if appState?.notams.highPriorityCount ?? 0 > 0 {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                Text("\(appState?.notams.highPriorityCount ?? 0) high priority NOTAMs")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        // Cumulative level filter buttons
+        HStack(spacing: 6) {
+            levelButton(label: "All", level: nil)
+            ForEach(Array(profile.levels), id: \.self) { level in
+                let priority = NotamPriority(level: level, maxLevel: profile.maxLevel)
+                levelButton(label: priority.label, level: level, color: priority.color, count: counts[level] ?? 0)
             }
         }
 
-        Text("Computed from route distance, altitude, and NOTAM type.")
+        // Level descriptions
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(profile.levels), id: \.self) { level in
+                if let desc = profile.levelDescriptions[level] {
+                    HStack(alignment: .top, spacing: 6) {
+                        let priority = NotamPriority(level: level, maxLevel: profile.maxLevel)
+                        Text(priority.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(priority.color)
+                            .frame(width: 24, alignment: .leading)
+                        Text(desc)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+
+        Text("Priority computed from route distance, altitude, and NOTAM type.")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
-    private func priorityIcon(for filter: PriorityFilter) -> some View {
-        switch filter {
-        case .all:
-            EmptyView()
-        case .high:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.caption2)
-        case .normal:
-            EmptyView()
-        case .low:
-            Image(systemName: "arrow.down.circle")
-                .foregroundStyle(.secondary)
-                .font(.caption2)
+    private func levelButton(label: String, level: Int?, color: Color = .primary, count: Int = 0) -> some View {
+        let isSelected = appState?.notams.priorityFilter.maxVisibleLevel == level
+        Button {
+            appState?.notams.priorityFilter.maxVisibleLevel = level
+        } label: {
+            VStack(spacing: 2) {
+                Text(label)
+                    .font(.caption.weight(.medium))
+                if level != nil && count > 0 {
+                    Text("\(count)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(isSelected ? color.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? color : .secondary.opacity(0.3), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? color : .primary)
     }
 
-    private var priorityFilterBinding: Binding<PriorityFilter> {
+    private var profileBinding: Binding<String> {
         Binding(
-            get: { appState?.notams.priorityFilter ?? .all },
-            set: { appState?.notams.priorityFilter = $0 }
+            get: { appState?.settings.priorityProfileId ?? PriorityProfiles.default.id },
+            set: { appState?.settings.priorityProfileId = $0 }
         )
     }
 }
