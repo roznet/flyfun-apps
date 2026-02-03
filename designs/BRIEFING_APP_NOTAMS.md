@@ -62,10 +62,15 @@ enum NotamStatus: Int16 {
     case followUp = 4
 }
 
-enum NotamPriority: Int, Comparable {
-    case low = 0      // Far from route, irrelevant altitude
-    case normal = 1   // Default
-    case high = 2     // Close + altitude match, critical closures
+struct NotamPriority: Comparable, Hashable, Sendable {
+    let level: Int       // 1 = most critical
+    let maxLevel: Int    // Profile's max (e.g., 5 for IFR, 3 for VFR)
+
+    var isDefault: Bool { level == maxLevel }
+    var isCritical: Bool { level == 1 }
+    var label: String { "P\(level)" }     // "P1", "P2", etc.
+    var iconName: String?                  // triangle for P1, circle for mid, nil for default
+    var color: Color                       // red → orange → yellow → secondary
 }
 ```
 
@@ -140,7 +145,7 @@ final class NotamDomain {
 
     // Other filters
     var statusFilter: StatusFilter = .all
-    var priorityFilter: PriorityFilter = .all  // Filter by computed priority
+    var priorityFilter: PriorityFilter         // Cumulative priority filter
     var visibilityFilter: VisibilityFilter  // showIgnored, showRead
     var routeFilter: RouteFilter            // isEnabled, corridorWidthNm
     var timeFilter: TimeFilter              // isEnabled, buffers
@@ -154,7 +159,11 @@ final class NotamDomain {
     var enrichedNotamsGroupedByAirport: [(String, [EnrichedNotam])]
     var enrichedNotamsGroupedByCategory: [(NotamCategory, [EnrichedNotam])]
     var enrichedNotamsGroupedByRouteSegment: [(RouteSegment, [EnrichedNotam])]
-    var highPriorityCount: Int              // Count of high priority NOTAMs
+    var criticalPriorityCount: Int           // Count of P1 NOTAMs
+    var priorityCountsByLevel: [Int: Int]    // Count per priority level
+
+    // Priority profile
+    var currentProfile: PriorityProfile      // Active profile (IFR or VFR)
 }
 ```
 
@@ -348,7 +357,7 @@ let isIgnored = ignoredKeys.contains(identityKey)
 
 ## Priority System
 
-Dynamic priority evaluation based on flight context. Priority is **independent** of user status and filtering - it's a computed property that helps users identify important NOTAMs.
+Profile-driven priority evaluation based on flight context. Priority is **independent** of user status and filtering - it's a computed property that helps users identify important NOTAMs.
 
 ### FlightContext
 
@@ -373,68 +382,119 @@ struct FlightContext {
 
 The context is set by AppState when a flight is selected and passed to `NotamDomain.setFlightContext()`.
 
-### Priority Rules
+### Priority Profiles
 
-Priority is evaluated using a chain of rules. Rules are hardcoded initially but designed for future extensibility to user-configurable rules.
+Priority evaluation is driven by selectable profiles. Each profile defines its own number of levels and evaluation rules. The active profile is persisted in UserDefaults via `SettingsDomain`.
 
 ```swift
-protocol NotamPriorityRule {
+struct PriorityProfile: Identifiable, Equatable {
+    let id: String              // "ifr", "vfr"
+    let displayName: String     // "IFR", "VFR"
+    let maxLevel: Int           // 5 for IFR, 3 for VFR
+    let rules: [any ProfilePriorityRule]
+    let levelDescriptions: [Int: String]
+    var levels: ClosedRange<Int> { 1...maxLevel }
+}
+
+protocol ProfilePriorityRule {
     var id: String { get }
     var name: String { get }
-    func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> NotamPriority?
+    func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int?
 }
 ```
 
-**Current Rules (in evaluation order):**
+Rules are evaluated in order; first non-nil result wins. Unmatched NOTAMs get the profile's `maxLevel` (lowest priority).
 
-| Rule | Condition | Priority |
-|------|-----------|----------|
-| Close + Altitude | Within 10nm AND altitude overlaps cruise ±2000ft | High |
-| Runway Closure | At dep/dest AND runway/taxiway closure | High |
-| Obstacle Far | Obstacle type AND > 2nm from airports | Low |
-| Helicopter | Helicopter-related Q-codes (FH, FP, LH, etc.) | Low |
-| Default | No rule matches | Normal |
+### IFR Profile (5 levels)
+
+| Level | Description | Rules |
+|-------|-------------|-------|
+| P1 | Critical | Runway/taxiway closure at dep/dest, ILS/approach unavailable at dep/dest |
+| P2 | Important | SID/STAR/procedure changes at dep/dest, airspace restrictions within 50nm corridor |
+| P3 | Relevant | Within 10nm + altitude relevant, navaid issues within 25nm |
+| P4 | Nearby | Facilities/services/comms at dep/dest, conditions within 50nm at flight altitude |
+| P5 | Default | Unmatched NOTAMs |
+
+### VFR Profile (3 levels)
+
+| Level | Description | Rules |
+|-------|-------------|-------|
+| P1 | Critical | Runway/taxiway closure at dep/dest, airspace restrictions within 25nm |
+| P2 | Relevant | Lighting at dep/dest, navigation issues within 25nm, conditions within 10nm |
+| P3 | Default | Unmatched NOTAMs |
+
+### Shared Rule Helpers
+
+Common evaluation logic is shared across profiles via `PriorityRuleHelpers`:
+
+```swift
+enum PriorityRuleHelpers {
+    static func isAtDepDest(_ notam: Notam, context: FlightContext) -> Bool
+    static func isClosureCondition(_ notam: Notam) -> Bool
+    static func isAltitudeRelevant(_ notam: Notam, context: FlightContext) -> Bool
+}
+```
 
 ### Priority Filter
 
-Filter NOTAMs by computed priority:
+Cumulative filter: selecting level N shows P1 through PN.
 
 ```swift
-enum PriorityFilter: String, CaseIterable {
-    case all = "All"
-    case high = "High"
-    case normal = "Normal"
-    case low = "Low"
+struct PriorityFilter: Equatable {
+    var maxVisibleLevel: Int?      // nil = show all
+    var profileMaxLevel: Int
+    var isActive: Bool { maxVisibleLevel != nil }
+
+    func matches(_ priority: NotamPriority) -> Bool {
+        guard let max = maxVisibleLevel else { return true }
+        return priority.level <= max
+    }
+
+    var chipLabel: String?         // e.g., "P1-P2" for compact filter bar
 }
 
 // Usage
-notamDomain.priorityFilter = .high  // Show only high priority
+notamDomain.priorityFilter.maxVisibleLevel = 2  // Show P1 + P2 only
+```
+
+### Profile Selection Flow
+
+```
+SettingsDomain.priorityProfileId (UserDefaults)
+    ↓
+AppState.syncPriorityProfile()
+    ↓
+NotamDomain.setProfile(profile)
+    ↓
+Re-enriches all NOTAMs with new profile's rules
+    ↓
+PriorityFilter.profileMaxLevel updated
 ```
 
 ### UI Display
 
-- **High priority**: Orange warning triangle icon
-- **Normal priority**: No icon
-- **Low priority**: Gray down arrow icon
+- **P1 (critical)**: Red warning triangle icon
+- **P2-P(N-1)**: Colored circle, interpolated from orange → yellow → secondary
+- **Default (maxLevel)**: No icon, secondary color
 
-Icons appear in the NOTAM row badges area, alongside the global ignore indicator.
+Icons appear in the NOTAM row as `priority.label` ("P1") with `priority.color`.
 
 ### Enrichment Flow
 
 ```
 AppState builds FlightContext from CDFlight + KnownAirports
     ↓
-NotamDomain.setFlightContext(context)
+NotamDomain.setFlightContext(context) + setProfile(profile)
     ↓
-EnrichedNotam.enrich() called with flightContext
+EnrichedNotam.enrich(profile:) called with active profile
     ↓
 For each NOTAM:
   1. Compute route distance using RouteGeometry
   2. Check altitude relevance against cruise ±2000ft
   3. Check if active during flight window
-  4. Evaluate priority rules chain
+  4. Evaluate profile's priority rules chain (first match wins)
     ↓
-EnrichedNotam created with all computed values
+EnrichedNotam created with NotamPriority(level:maxLevel:)
 ```
 
 ## Usage Examples
@@ -454,7 +514,8 @@ func setBriefing(_ briefing: Briefing, cdBriefing: CDBriefing, previousKeys: Set
         notams: allNotams,
         statuses: statuses,
         previousIdentityKeys: previousKeys,
-        ignoredKeys: ignoredIdentityKeys
+        ignoredKeys: ignoredIdentityKeys,
+        profile: currentProfile
     )
 }
 ```
@@ -495,7 +556,7 @@ let notams = notamDomain.filteredEnrichedNotams
 ### NotamRowView
 Displays single NOTAM in list with:
 - Status indicator (unread dot, important star)
-- Priority icon (high=warning triangle, low=down arrow)
+- Priority label and icon (P1=red triangle, P2+=colored circle, default=none)
 - Distance from route (highlighted if < 50nm)
 - Altitude range (highlighted if overlaps cruise ±2000ft)
 - "Inactive" badge if NOTAM inactive during flight window
@@ -519,9 +580,14 @@ Comprehensive filter configuration:
 - **Route Filter** - Corridor width, ICAO codes
 - **Time Filter** - Active at flight time
 - **Status Filter** - All/unread/important/followUp
-- **Priority Filter** - All/high/normal/low (based on computed priority)
+- **Priority Filter** - Profile picker (segmented IFR/VFR) + cumulative level buttons (All/P1/P2/../PN) with per-level count badges + level descriptions
 - **Visibility** - Show read, show ignored
 - **Grouping** - None/airport/category/route order
+
+### SettingsView
+Priority Profile section with:
+- Profile picker (IFR/VFR)
+- Level descriptions for the selected profile
 
 ## Gotchas
 
@@ -533,15 +599,24 @@ Comprehensive filter configuration:
 6. **Use icaoCategory, not category** - The `icaoCategory` computed property derives from Q-code, with fallback to stored category
 7. **Smart filters need route** - Obstacle filtering requires departure/destination coordinates
 8. **Helicopter filter is default ON** - Unlike other filters, helicopter NOTAMs are hidden by default
-9. **Priority vs Status** - Priority is computed from flight context; Status is user-assigned. Both are independent.
-10. **FlightContext must be set** - Call `setFlightContext()` when flight changes, otherwise priority defaults to `.normal`
-11. **Priority rules are extensible** - Designed as protocol for future user-configurable rules
+9. **Priority vs Status** - Priority is computed from flight context and profile rules; Status is user-assigned. Both are independent.
+10. **FlightContext must be set** - Call `setFlightContext()` when flight changes, otherwise priority defaults to profile's maxLevel
+11. **Profile change re-enriches** - Switching profiles triggers full re-enrichment since priority levels differ between profiles
+12. **Cumulative filtering** - Priority filter is cumulative: selecting P2 shows P1+P2, not just P2
+13. **Single-level edge case** - A profile with maxLevel=1 has P1 that is both `isCritical` and `isDefault`; `isCritical` takes precedence for color/icon
+14. **Priority never persisted** - Priority is computed at enrichment time from the active profile, never stored in Core Data
 
 ## References
 
 - Key code: `app/FlyFunBrief/App/State/Domains/NotamDomain.swift`
 - Priority: `app/FlyFunBrief/App/Models/NotamPriority.swift`
+- Profiles: `app/FlyFunBrief/App/Models/PriorityProfile.swift`
+- IFR rules: `app/FlyFunBrief/App/Models/PriorityRules/IFRPriorityRules.swift`
+- VFR rules: `app/FlyFunBrief/App/Models/PriorityRules/VFRPriorityRules.swift`
+- Rule helpers: `app/FlyFunBrief/App/Models/PriorityRules/PriorityRuleHelpers.swift`
 - Flight context: `app/FlyFunBrief/App/Models/FlightContext.swift`
 - Enriched model: `app/FlyFunBrief/App/Models/EnrichedNotam.swift`
+- Settings: `app/FlyFunBrief/App/State/Domains/SettingsDomain.swift`
 - Row view: `app/FlyFunBrief/UserInterface/Views/NotamList/NotamRowView.swift`
+- Filter UI: `app/FlyFunBrief/UserInterface/Views/Filters/SharedFilterContent.swift`
 - Related: [BRIEFING_APP_DATA.md](BRIEFING_APP_DATA.md) for persistence
