@@ -43,9 +43,8 @@ struct NotamPriority: Comparable, Hashable, Sendable {
 
     /// Display color, interpolated from red (P1) through orange/yellow to gray (default)
     var color: Color {
-        if isDefault { return .secondary }
         if isCritical { return .red }
-        if maxLevel <= 2 { return .orange }
+        if isDefault { return .secondary }
 
         // Interpolate: P2 = orange, middle = yellow, near-default = secondary
         let ratio = Double(level - 1) / Double(maxLevel - 1)

@@ -724,11 +724,9 @@ struct PriorityBadge: View {
     let priority: NotamPriority
 
     var body: some View {
-        if !priority.isDefault {
+        if let iconName = priority.iconName {
             HStack(spacing: 4) {
-                if let iconName = priority.iconName {
-                    Image(systemName: iconName)
-                }
+                Image(systemName: iconName)
                 Text(priority.label)
             }
             .font(.caption2.weight(.medium))

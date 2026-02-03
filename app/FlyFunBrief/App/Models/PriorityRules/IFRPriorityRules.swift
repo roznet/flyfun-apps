@@ -34,35 +34,6 @@ enum IFRPriorityRules {
     ]
 }
 
-// MARK: - Shared Helpers
-
-/// Check if a NOTAM is at departure or destination
-private func isAtDepDest(_ notam: Notam, context: FlightContext) -> Bool {
-    notam.location == context.departureICAO ||
-    notam.location == context.destinationICAO
-}
-
-/// Check if a condition code indicates closure
-private func isClosureCondition(_ notam: Notam) -> Bool {
-    if let conditionCode = notam.qCodeInfo?.conditionCode,
-       conditionCode.hasSuffix("C") {
-        return true
-    }
-    if notam.customTags.contains("closed") {
-        return true
-    }
-    return false
-}
-
-/// Check if NOTAM altitude overlaps cruise altitude
-private func isAltitudeRelevant(_ notam: Notam, context: FlightContext) -> Bool {
-    guard let cruiseRange = context.cruiseAltitudeRange else { return false }
-    let notamLower = notam.lowerLimit ?? 0
-    let notamUpper = notam.upperLimit ?? 99999
-    if notamLower == 0 && notamUpper >= 99900 { return false }
-    return cruiseRange.lowerBound <= notamUpper && cruiseRange.upperBound >= notamLower
-}
-
 // MARK: - P1 Rules
 
 /// P1: Runway/taxiway closure at departure or destination
@@ -71,14 +42,14 @@ struct IFRRunwayClosureAtDepDest: ProfilePriorityRule {
     let name = "Runway/taxiway closure at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard isAtDepDest(notam, context: context) else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         // Check for runway/taxiway subjects with closure condition
         guard let subject = notam.qCodeSubject else { return nil }
 
         // MR = Runway, MT = Taxiway
         guard subject == "MR" || subject == "MT" else { return nil }
-        guard isClosureCondition(notam) else { return nil }
+        guard PriorityRuleHelpers.isClosureCondition(notam) else { return nil }
 
         return 1
     }
@@ -90,7 +61,7 @@ struct IFRApproachUnavailableAtDepDest: ProfilePriorityRule {
     let name = "ILS/approach unavailable at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard isAtDepDest(notam, context: context) else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         guard let subject = notam.qCodeSubject else { return nil }
 
@@ -120,7 +91,7 @@ struct IFRProcedureChangesAtDepDest: ProfilePriorityRule {
     let name = "SID/STAR/procedure changes at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard isAtDepDest(notam, context: context) else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         guard let subject = notam.qCodeSubject else { return nil }
 
@@ -153,7 +124,7 @@ struct IFRAirspaceRestrictionsInCorridor: ProfilePriorityRule {
         guard let distance = distanceNm, distance <= corridorWidthNm else { return nil }
 
         // Check altitude relevance if we have altitude info
-        if isAltitudeRelevant(notam, context: context) {
+        if PriorityRuleHelpers.isAltitudeRelevant(notam, context: context) {
             return 2
         }
 
@@ -178,7 +149,7 @@ struct IFRCloseAndAltitudeRelevant: ProfilePriorityRule {
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
         guard let distance = distanceNm, distance <= distanceThresholdNm else { return nil }
 
-        if isAltitudeRelevant(notam, context: context) {
+        if PriorityRuleHelpers.isAltitudeRelevant(notam, context: context) {
             return 3
         }
 
@@ -220,7 +191,7 @@ struct IFRFacilitiesAtDepDest: ProfilePriorityRule {
     let name = "Facilities/services at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard isAtDepDest(notam, context: context) else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         guard let subject = notam.qCodeSubject else { return nil }
 
@@ -256,7 +227,7 @@ struct IFRConditionsNearRoute: ProfilePriorityRule {
 
         // Check altitude relevance when available
         if context.cruiseAltitudeRange != nil {
-            if isAltitudeRelevant(notam, context: context) {
+            if PriorityRuleHelpers.isAltitudeRelevant(notam, context: context) {
                 return 4
             }
             return nil

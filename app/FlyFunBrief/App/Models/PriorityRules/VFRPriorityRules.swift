@@ -35,24 +35,15 @@ struct VFRRunwayClosureAtDepDest: ProfilePriorityRule {
     let name = "Runway closure at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard notam.location == context.departureICAO ||
-              notam.location == context.destinationICAO else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         guard let subject = notam.qCodeSubject else { return nil }
 
         // MR = Runway, MT = Taxiway
         guard subject == "MR" || subject == "MT" else { return nil }
+        guard PriorityRuleHelpers.isClosureCondition(notam) else { return nil }
 
-        // Check for closure
-        if let conditionCode = notam.qCodeInfo?.conditionCode,
-           conditionCode.hasSuffix("C") {
-            return 1
-        }
-        if notam.customTags.contains("closed") {
-            return 1
-        }
-
-        return nil
+        return 1
     }
 }
 
@@ -85,8 +76,7 @@ struct VFRLightingAtDepDest: ProfilePriorityRule {
     let name = "Lighting at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
-        guard notam.location == context.departureICAO ||
-              notam.location == context.destinationICAO else { return nil }
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
 
         guard let subject = notam.qCodeSubject else { return nil }
 
