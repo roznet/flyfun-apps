@@ -38,10 +38,29 @@ struct FilterSectionsContent: View {
     }
 }
 
+// MARK: - Stats Row (standalone)
+
+/// Standalone stat badges row — can be placed independently from the status section
+struct FilterStatsRow: View {
+    @Environment(\.appState) private var appState
+
+    var body: some View {
+        if let notams = appState?.notams {
+            HStack(spacing: 16) {
+                StatBadge(label: "Unread", count: notams.unreadCount, color: .blue)
+                StatBadge(label: "Important", count: notams.importantCount, color: .orange)
+                StatBadge(label: "New", count: notams.newNotamCount, color: .green)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
 // MARK: - Status Section
 
 struct FilterStatusSection: View {
     @Environment(\.appState) private var appState
+    var showStats: Bool = true
 
     var body: some View {
         Section {
@@ -52,14 +71,8 @@ struct FilterStatusSection: View {
             }
             .pickerStyle(.segmented)
 
-            // Quick stats row
-            if let notams = appState?.notams {
-                HStack(spacing: 16) {
-                    StatBadge(label: "Unread", count: notams.unreadCount, color: .blue)
-                    StatBadge(label: "Important", count: notams.importantCount, color: .orange)
-                    StatBadge(label: "New", count: notams.newNotamCount, color: .green)
-                }
-                .padding(.vertical, 4)
+            if showStats {
+                FilterStatsRow()
             }
         } header: {
             Label("Status", systemImage: "checklist")
@@ -134,6 +147,27 @@ struct FilterVisibilitySection: View {
     }
 }
 
+// MARK: - Advanced Filter Label (standalone)
+
+/// Reusable disclosure group label with active indicator
+struct AdvancedFilterLabel: View {
+    let title: String
+    let icon: String
+    let isActive: Bool
+
+    var body: some View {
+        HStack {
+            Label(title, systemImage: icon)
+            Spacer()
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+            }
+        }
+    }
+}
+
 // MARK: - Advanced Filters Section
 
 struct FilterAdvancedSection: View {
@@ -151,7 +185,7 @@ struct FilterAdvancedSection: View {
             DisclosureGroup(isExpanded: $isPriorityExpanded) {
                 FilterPriorityContent()
             } label: {
-                advancedFilterLabel(
+                AdvancedFilterLabel(
                     title: "Priority",
                     icon: "bolt.fill",
                     isActive: appState?.notams.priorityFilter.isActive == true
@@ -162,7 +196,7 @@ struct FilterAdvancedSection: View {
             DisclosureGroup(isExpanded: $isRouteExpanded) {
                 FilterRouteContent()
             } label: {
-                advancedFilterLabel(
+                AdvancedFilterLabel(
                     title: "Route Corridor",
                     icon: "point.topleft.down.to.point.bottomright.curvepath",
                     isActive: appState?.notams.routeFilter.isEnabled == true
@@ -173,7 +207,7 @@ struct FilterAdvancedSection: View {
             DisclosureGroup(isExpanded: $isTimeExpanded) {
                 FilterTimeContent()
             } label: {
-                advancedFilterLabel(
+                AdvancedFilterLabel(
                     title: "Time Filter",
                     icon: "clock",
                     isActive: appState?.notams.timeFilter.isEnabled == true
@@ -184,7 +218,7 @@ struct FilterAdvancedSection: View {
             DisclosureGroup(isExpanded: $isSmartFiltersExpanded) {
                 FilterSmartContent()
             } label: {
-                advancedFilterLabel(
+                AdvancedFilterLabel(
                     title: "Smart Filters",
                     icon: "sparkles",
                     isActive: appState?.notams.smartFilters.hasActiveFilters == true
@@ -195,7 +229,7 @@ struct FilterAdvancedSection: View {
             DisclosureGroup(isExpanded: $isCategoryExpanded) {
                 FilterCategoryContent()
             } label: {
-                advancedFilterLabel(
+                AdvancedFilterLabel(
                     title: "ICAO Categories",
                     icon: "tag",
                     isActive: appState?.notams.categoryFilter.allEnabled == false
@@ -205,23 +239,12 @@ struct FilterAdvancedSection: View {
             Label("Advanced Filters", systemImage: "slider.horizontal.3")
         }
     }
-
-    private func advancedFilterLabel(title: String, icon: String, isActive: Bool) -> some View {
-        HStack {
-            Label(title, systemImage: icon)
-            Spacer()
-            if isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-            }
-        }
-    }
 }
 
-// MARK: - Priority Content
+// MARK: - Priority Level Buttons (standalone)
 
-struct FilterPriorityContent: View {
+/// The P1|P2|... level filter buttons — can be placed independently
+struct PriorityLevelButtons: View {
     @Environment(\.appState) private var appState
 
     private var profile: PriorityProfile {
@@ -233,15 +256,6 @@ struct FilterPriorityContent: View {
     }
 
     var body: some View {
-        // Profile picker
-        Picker("Profile", selection: profileBinding) {
-            ForEach(PriorityProfiles.all) { p in
-                Text(p.displayName).tag(p.id)
-            }
-        }
-        .pickerStyle(.segmented)
-
-        // Cumulative level filter buttons
         HStack(spacing: 6) {
             levelButton(label: "All", level: nil)
             ForEach(Array(profile.levels), id: \.self) { level in
@@ -249,29 +263,6 @@ struct FilterPriorityContent: View {
                 levelButton(label: priority.label, level: level, color: priority.color, count: counts[level] ?? 0)
             }
         }
-
-        // Level descriptions
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(profile.levels), id: \.self) { level in
-                if let desc = profile.levelDescriptions[level] {
-                    HStack(alignment: .top, spacing: 6) {
-                        let priority = NotamPriority(level: level, maxLevel: profile.maxLevel)
-                        Text(priority.label)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(priority.color)
-                            .frame(width: 24, alignment: .leading)
-                        Text(desc)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .padding(.top, 4)
-
-        Text("Priority computed from route distance, altitude, and NOTAM type.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -300,12 +291,65 @@ struct FilterPriorityContent: View {
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? color : .primary)
     }
+}
+
+// MARK: - Priority Details Content (standalone)
+
+/// Profile picker + level descriptions — can be placed in a collapsible section
+struct PriorityDetailsContent: View {
+    @Environment(\.appState) private var appState
+
+    private var profile: PriorityProfile {
+        appState?.notams.currentProfile ?? PriorityProfiles.default
+    }
+
+    var body: some View {
+        // Profile picker
+        Picker("Profile", selection: profileBinding) {
+            ForEach(PriorityProfiles.all) { p in
+                Text(p.displayName).tag(p.id)
+            }
+        }
+        .pickerStyle(.segmented)
+
+        // Level descriptions
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(profile.levels), id: \.self) { level in
+                if let desc = profile.levelDescriptions[level] {
+                    HStack(alignment: .top, spacing: 6) {
+                        let priority = NotamPriority(level: level, maxLevel: profile.maxLevel)
+                        Text(priority.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(priority.color)
+                            .frame(width: 24, alignment: .leading)
+                        Text(desc)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+
+        Text("Priority computed from route distance, altitude, and NOTAM type.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
 
     private var profileBinding: Binding<String> {
         Binding(
             get: { appState?.settings.priorityProfileId ?? PriorityProfiles.default.id },
             set: { appState?.settings.priorityProfileId = $0 }
         )
+    }
+}
+
+// MARK: - Priority Content (composed)
+
+struct FilterPriorityContent: View {
+    var body: some View {
+        PriorityDetailsContent()
+        PriorityLevelButtons()
     }
 }
 

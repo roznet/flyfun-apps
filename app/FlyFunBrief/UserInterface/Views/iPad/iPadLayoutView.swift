@@ -14,12 +14,12 @@ struct iPadLayoutView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isBriefingsExpanded = false
 
-    // Advanced filter disclosure group states (shared with FilterSectionsContent)
+    // Advanced filter disclosure group states
     @State private var isRouteExpanded = false
     @State private var isTimeExpanded = false
     @State private var isSmartFiltersExpanded = false
     @State private var isCategoryExpanded = false
-    @State private var isPriorityExpanded = false
+    @State private var isPriorityDetailsExpanded = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -81,37 +81,90 @@ struct iPadLayoutView: View {
     @ViewBuilder
     private var flightContextSidebar: some View {
         List {
-            // Back button
-            Section {
-                Button {
-                    // Exit flight view - order doesn't matter now since
-                    // selectFlight no longer auto-enters flight view
-                    appState?.navigation.exitFlightView()
-                    appState?.briefing.clearBriefing()
-                    appState?.flights.clearSelection()
-                } label: {
-                    Label("Back to Flights", systemImage: "chevron.left")
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Flight info section (editable summary)
+            // Flight info (no section header)
             if let flight = appState?.flights.selectedFlight {
-                Section("Flight") {
+                Section {
                     flightInfoSection(flight: flight)
                 }
             }
 
             // Filter sections (only if we have a briefing loaded)
-            // Uses shared filter content from SharedFilterContent.swift
             if appState?.briefing.currentBriefing != nil {
-                FilterSectionsContent(
-                    isRouteExpanded: $isRouteExpanded,
-                    isTimeExpanded: $isTimeExpanded,
-                    isSmartFiltersExpanded: $isSmartFiltersExpanded,
-                    isCategoryExpanded: $isCategoryExpanded,
-                    isPriorityExpanded: $isPriorityExpanded
-                )
+                // Stat badges (compact, no section header)
+                Section {
+                    FilterStatsRow()
+                }
+
+                // Priority (promoted — always visible)
+                Section {
+                    PriorityLevelButtons()
+                    DisclosureGroup(isExpanded: $isPriorityDetailsExpanded) {
+                        PriorityDetailsContent()
+                    } label: {
+                        AdvancedFilterLabel(
+                            title: "Priority Details",
+                            icon: "bolt.fill",
+                            isActive: appState?.notams.priorityFilter.isActive == true
+                        )
+                    }
+                } header: {
+                    Label("Priority", systemImage: "bolt.fill")
+                }
+
+                // Status (without stats — already shown above)
+                FilterStatusSection(showStats: false)
+
+                // Grouping
+                FilterGroupingSection()
+
+                // Advanced Filters (reordered: smart first, no priority)
+                Section {
+                    // Smart filters
+                    DisclosureGroup(isExpanded: $isSmartFiltersExpanded) {
+                        FilterSmartContent()
+                    } label: {
+                        AdvancedFilterLabel(
+                            title: "Smart Filters",
+                            icon: "sparkles",
+                            isActive: appState?.notams.smartFilters.hasActiveFilters == true
+                        )
+                    }
+
+                    // Route corridor filter
+                    DisclosureGroup(isExpanded: $isRouteExpanded) {
+                        FilterRouteContent()
+                    } label: {
+                        AdvancedFilterLabel(
+                            title: "Route Corridor",
+                            icon: "point.topleft.down.to.point.bottomright.curvepath",
+                            isActive: appState?.notams.routeFilter.isEnabled == true
+                        )
+                    }
+
+                    // Time filter
+                    DisclosureGroup(isExpanded: $isTimeExpanded) {
+                        FilterTimeContent()
+                    } label: {
+                        AdvancedFilterLabel(
+                            title: "Time Filter",
+                            icon: "clock",
+                            isActive: appState?.notams.timeFilter.isEnabled == true
+                        )
+                    }
+
+                    // ICAO Categories
+                    DisclosureGroup(isExpanded: $isCategoryExpanded) {
+                        FilterCategoryContent()
+                    } label: {
+                        AdvancedFilterLabel(
+                            title: "ICAO Categories",
+                            icon: "tag",
+                            isActive: appState?.notams.categoryFilter.allEnabled == false
+                        )
+                    }
+                } header: {
+                    Label("Advanced Filters", systemImage: "slider.horizontal.3")
+                }
 
                 // Reset filters
                 if appState?.notams.hasActiveFilters == true {
@@ -125,15 +178,34 @@ struct iPadLayoutView: View {
                 }
             }
 
-            // Briefings section (at bottom for less frequent access)
+            // Briefings
             if let flight = appState?.flights.selectedFlight {
                 Section("Briefings") {
                     briefingsSection(flight: flight)
                 }
             }
+
+            // Visibility (moved to bottom — infrequently used)
+            if appState?.briefing.currentBriefing != nil {
+                FilterVisibilitySection()
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle(sidebarTitle)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    appState?.navigation.exitFlightView()
+                    appState?.briefing.clearBriefing()
+                    appState?.flights.clearSelection()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Flights")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Flight Info Section
