@@ -107,8 +107,8 @@ Key exports: `FlightRepository`, `IgnoreListManager`, `PersistenceController`, `
 → Full doc: BRIEFING_APP_DATA.md
 
 ### Briefing App NOTAM System
-NOTAM domain, filtering pipeline, enriched model pattern, identity matching across briefings, global ignore list.
-Key exports: `NotamDomain`, `EnrichedNotam`, `NotamIdentity`, `NotamStatus`, filter types
+NOTAM domain, filtering pipeline, enriched model pattern, identity matching across briefings, global ignore list, profile-driven priority evaluation (IFR/VFR) with cumulative filtering.
+Key exports: `NotamDomain`, `EnrichedNotam`, `NotamIdentity`, `NotamStatus`, `NotamPriority`, `PriorityProfile`, `PriorityFilter`, filter types
 → Full doc: BRIEFING_APP_NOTAMS.md
 
 ---
