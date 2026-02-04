@@ -11,6 +11,8 @@ import RZFlight
 /// Main NOTAM list view with grouping support
 struct NotamListView: View {
     @Environment(\.appState) private var appState
+    @State private var isSearchActive = false
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         Group {
@@ -20,7 +22,64 @@ struct NotamListView: View {
                 notamList
             }
         }
-        .searchable(text: searchBinding, prompt: "Search NOTAMs")
+        .overlay(alignment: .bottom) {
+            floatingSearchBar
+        }
+    }
+
+    // MARK: - Floating Search Bar
+
+    @ViewBuilder
+    private var floatingSearchBar: some View {
+        let hasQuery = !(appState?.notams.searchQuery ?? "").isEmpty
+
+        if isSearchActive || hasQuery {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search NOTAMs", text: searchBinding)
+                    .focused($isSearchFocused)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if hasQuery {
+                    Button {
+                        appState?.notams.searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button("Done") {
+                    isSearchFocused = false
+                    if !hasQuery {
+                        isSearchActive = false
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+            }
+            .padding(10)
+            .background(.bar, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            Button {
+                withAnimation {
+                    isSearchActive = true
+                }
+                isSearchFocused = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.body.weight(.medium))
+                    .padding(12)
+                    .background(.bar, in: Circle())
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+            }
+            .padding(.bottom, 12)
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 
     // MARK: - Empty State
@@ -56,6 +115,7 @@ struct NotamListView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .contentMargins(.bottom, 60, for: .scrollContent)
         }
     }
 
