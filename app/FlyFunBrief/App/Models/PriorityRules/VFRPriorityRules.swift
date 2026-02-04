@@ -12,15 +12,20 @@ import RZFlight
 
 /// VFR priority rules collection.
 ///
-/// **P1**: Runway closure at dep/dest, airspace restrictions along route
-/// **P2**: Lighting at dep/dest, navigation issues near route, conditions near route
+/// **P1**: Runway/taxiway/threshold conditions at dep/dest,
+///         VFR procedure unavailable at dep/dest, airspace restrictions along route
+/// **P2**: VFR procedure changed at dep/dest, rwy/twy limitations near route,
+///         lighting at dep/dest, navigation issues near route, conditions near route
 /// **P3**: Default (unmatched)
 enum VFRPriorityRules {
     static let all: [any ProfilePriorityRule] = [
         // P1 rules
-        VFRRunwayClosureAtDepDest(),
+        VFRMovementAreaAtDepDest(),
+        VFRProcedureUnavailableAtDepDest(),
         VFRAirspaceRestrictionsAlongRoute(),
         // P2 rules
+        VFRProcedureChangedAtDepDest(),
+        VFRMovementAreaLimitationsNearRoute(),
         VFRLightingAtDepDest(),
         VFRNavigationNearRoute(),
         VFRConditionsNearRoute(),
@@ -29,19 +34,30 @@ enum VFRPriorityRules {
 
 // MARK: - P1 Rules
 
-/// P1: Runway closure at departure or destination
-struct VFRRunwayClosureAtDepDest: ProfilePriorityRule {
-    let id = "vfr_p1_runway_closure"
-    let name = "Runway closure at dep/dest"
+/// P1: Any runway/taxiway/threshold NOTAM at departure or destination
+struct VFRMovementAreaAtDepDest: ProfilePriorityRule {
+    let id = "vfr_p1_movement_area"
+    let name = "Runway/taxiway/threshold conditions at dep/dest"
 
     func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
         guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
-
         guard let subject = notam.qCodeSubject else { return nil }
+        guard PriorityRuleHelpers.movementAreaSubjects.contains(subject) else { return nil }
 
-        // MR = Runway, MT = Taxiway
-        guard subject == "MR" || subject == "MT" else { return nil }
-        guard PriorityRuleHelpers.isClosureCondition(notam) else { return nil }
+        return 1
+    }
+}
+
+/// P1: VFR procedure unavailable/closed/canceled at dep/dest
+struct VFRProcedureUnavailableAtDepDest: ProfilePriorityRule {
+    let id = "vfr_p1_procedure_unavailable"
+    let name = "VFR procedure unavailable at dep/dest"
+
+    func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
+        guard let subject = notam.qCodeSubject else { return nil }
+        guard PriorityRuleHelpers.vfrProcedureSubjects.contains(subject) else { return nil }
+        guard PriorityRuleHelpers.isUnavailableCondition(notam) else { return nil }
 
         return 1
     }
@@ -69,6 +85,48 @@ struct VFRAirspaceRestrictionsAlongRoute: ProfilePriorityRule {
 }
 
 // MARK: - P2 Rules
+
+/// P2: VFR procedure changed/modified at dep/dest, or noise restriction
+struct VFRProcedureChangedAtDepDest: ProfilePriorityRule {
+    let id = "vfr_p2_procedure_changed"
+    let name = "VFR procedure changed at dep/dest"
+
+    func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
+        guard PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
+        guard let subject = notam.qCodeSubject else { return nil }
+
+        // VFR procedure subjects with non-unavailable conditions (already P1 if unavailable)
+        if PriorityRuleHelpers.vfrProcedureSubjects.contains(subject) {
+            return 2
+        }
+
+        // Noise restriction at dep/dest
+        if subject == "PN" {
+            return 2
+        }
+
+        return nil
+    }
+}
+
+/// P2: Runway/taxiway/threshold limitations at airports near route
+struct VFRMovementAreaLimitationsNearRoute: ProfilePriorityRule {
+    let id = "vfr_p2_movement_area_near_route"
+    let name = "Runway/taxiway limitations near route"
+
+    private let corridorWidthNm: Double = 50.0
+
+    func evaluate(notam: Notam, distanceNm: Double?, context: FlightContext) -> Int? {
+        // Skip dep/dest — already handled at P1
+        guard !PriorityRuleHelpers.isAtDepDest(notam, context: context) else { return nil }
+        guard let subject = notam.qCodeSubject else { return nil }
+        guard PriorityRuleHelpers.movementAreaSubjects.contains(subject) else { return nil }
+        guard let distance = distanceNm, distance <= corridorWidthNm else { return nil }
+        guard PriorityRuleHelpers.isLimitationCondition(notam) else { return nil }
+
+        return 2
+    }
+}
 
 /// P2: Lighting at departure or destination
 struct VFRLightingAtDepDest: ProfilePriorityRule {

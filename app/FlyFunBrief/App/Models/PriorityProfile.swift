@@ -74,8 +74,8 @@ enum PriorityProfiles {
         maxLevel: 5,
         rules: IFRPriorityRules.all,
         levelDescriptions: [
-            1: "Runway/taxiway closures, approach system failures at dep/dest",
-            2: "SID/STAR/procedure changes at dep/dest, airspace restrictions",
+            1: "Runway/taxiway at dep/dest, ILS/procedure unavailable at dep/dest",
+            2: "ILS/procedure changed at dep/dest, airspace restrictions, rwy/twy limits near route",
             3: "Nearby NOTAMs at relevant altitude, navaid issues along route",
             4: "Facilities/services/comms at dep/dest, conditions near route",
             5: "Other NOTAMs"
@@ -89,8 +89,8 @@ enum PriorityProfiles {
         maxLevel: 3,
         rules: VFRPriorityRules.all,
         levelDescriptions: [
-            1: "Runway closures at dep/dest, airspace restrictions along route",
-            2: "Lighting at dep/dest, navigation and conditions near route",
+            1: "Runway/taxiway at dep/dest, VFR procedure unavailable, airspace restrictions",
+            2: "VFR procedure changed, rwy/twy limits near route, lighting, navigation",
             3: "Other NOTAMs"
         ]
     )
