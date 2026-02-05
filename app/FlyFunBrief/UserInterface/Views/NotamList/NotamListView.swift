@@ -14,6 +14,9 @@ struct NotamListView: View {
     @State private var isSearchActive = false
     @FocusState private var isSearchFocused: Bool
 
+    /// Track collapsed sections (expanded by default)
+    @State private var collapsedSections: Set<String> = []
+
     var body: some View {
         Group {
             if let notams = appState?.notams, notams.allNotams.isEmpty {
@@ -180,7 +183,7 @@ struct NotamListView: View {
         let sortedKeys = grouped.keys.sorted()
 
         ForEach(sortedKeys, id: \.self) { airport in
-            Section {
+            Section(isExpanded: sectionExpandedBinding(for: airport)) {
                 if let notams = grouped[airport] {
                     ForEach(notams, id: \.notamId) { enrichedNotam in
                         NotamRowView(enrichedNotam: enrichedNotam)
@@ -188,7 +191,7 @@ struct NotamListView: View {
                     }
                 }
             } header: {
-                NotamSectionHeader(title: airport, count: grouped[airport]?.count ?? 0)
+                NotamSectionHeader(title: airport, count: grouped[airport]?.count ?? 0, isExpanded: sectionExpandedBinding(for: airport))
             }
         }
     }
@@ -201,7 +204,7 @@ struct NotamListView: View {
         let sortedKeys = grouped.keys.sorted { $0.displayName < $1.displayName }
 
         ForEach(sortedKeys, id: \.self) { category in
-            Section {
+            Section(isExpanded: sectionExpandedBinding(for: category.displayName)) {
                 if let notams = grouped[category] {
                     ForEach(notams, id: \.notamId) { enrichedNotam in
                         NotamRowView(enrichedNotam: enrichedNotam)
@@ -209,7 +212,7 @@ struct NotamListView: View {
                     }
                 }
             } header: {
-                NotamSectionHeader(title: category.displayName, count: grouped[category]?.count ?? 0)
+                NotamSectionHeader(title: category.displayName, count: grouped[category]?.count ?? 0, isExpanded: sectionExpandedBinding(for: category.displayName))
             }
         }
     }
@@ -221,15 +224,31 @@ struct NotamListView: View {
         let grouped = appState?.notams.enrichedNotamsGroupedByRouteSegment ?? []
 
         ForEach(grouped, id: \.segment) { item in
-            Section {
+            Section(isExpanded: sectionExpandedBinding(for: item.segment.displayName)) {
                 ForEach(item.notams, id: \.notamId) { enrichedNotam in
                     NotamRowView(enrichedNotam: enrichedNotam)
                         .tag(enrichedNotam.notamId)
                 }
             } header: {
-                RouteSegmentHeader(segment: item.segment, count: item.notams.count)
+                RouteSegmentHeader(segment: item.segment, count: item.notams.count, isExpanded: sectionExpandedBinding(for: item.segment.displayName))
             }
         }
+    }
+
+    // MARK: - Section Expansion
+
+    /// Creates a binding for section expanded state (true = expanded, false = collapsed)
+    private func sectionExpandedBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedSections.contains(key) },
+            set: { isExpanded in
+                if isExpanded {
+                    collapsedSections.remove(key)
+                } else {
+                    collapsedSections.insert(key)
+                }
+            }
+        )
     }
 
     // MARK: - Bindings
@@ -271,40 +290,64 @@ struct NotamListView: View {
 struct NotamSectionHeader: View {
     let title: String
     let count: Int
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        HStack {
-            Text(title)
-                .font(.headline)
-            Spacer()
-            Text("\(count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(.fill.tertiary, in: Capsule())
+        Button {
+            withAnimation {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.fill.tertiary, in: Capsule())
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
         }
+        .buttonStyle(.plain)
     }
 }
 
 struct RouteSegmentHeader: View {
     let segment: NotamRouteClassification.RouteSegment
     let count: Int
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        HStack {
-            Image(systemName: segment.icon)
-                .foregroundStyle(segmentColor)
-            Text(segment.displayName)
-                .font(.headline)
-            Spacer()
-            Text("\(count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(.fill.tertiary, in: Capsule())
+        Button {
+            withAnimation {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack {
+                Image(systemName: segment.icon)
+                    .foregroundStyle(segmentColor)
+                Text(segment.displayName)
+                    .font(.headline)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.fill.tertiary, in: Capsule())
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
         }
+        .buttonStyle(.plain)
     }
 
     private var segmentColor: Color {
