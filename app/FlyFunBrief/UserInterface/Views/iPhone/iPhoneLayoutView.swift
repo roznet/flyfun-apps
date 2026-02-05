@@ -244,33 +244,12 @@ struct FlightNotamView: View {
 
     @ViewBuilder
     private var filterMenu: some View {
-        Section("View Style") {
-            ForEach(NotamRowStyle.allCases) { style in
-                Button {
-                    appState?.notams.rowStyle = style
-                } label: {
-                    if appState?.notams.rowStyle == style {
-                        Label(style.rawValue, systemImage: "checkmark")
-                    } else {
-                        Text(style.rawValue)
-                    }
-                }
-            }
-        }
-
-        Divider()
-
-        Section("Status") {
-            ForEach(StatusFilter.allCases) { status in
-                Button {
-                    appState?.notams.statusFilter = status
-                } label: {
-                    if appState?.notams.statusFilter == status {
-                        Label(status.rawValue, systemImage: "checkmark")
-                    } else {
-                        Text(status.rawValue)
-                    }
-                }
+        // Edit flight
+        if let flight = appState?.flights.selectedFlight, let flightId = flight.id {
+            Button {
+                appState?.navigation.showEditFlight(flightId: flightId)
+            } label: {
+                Label("Edit Flight", systemImage: "pencil")
             }
         }
 
@@ -279,7 +258,7 @@ struct FlightNotamView: View {
         Button {
             appState?.navigation.showFilterOptions()
         } label: {
-            Label("More Filters...", systemImage: "slider.horizontal.3")
+            Label("Filters...", systemImage: "slider.horizontal.3")
         }
     }
 }

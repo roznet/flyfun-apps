@@ -24,17 +24,35 @@ struct FilterSectionsContent: View {
     var body: some View {
         // MARK: - Quick Access (Top)
         FilterStatusSection()
+
+        // Priority (promoted — with expandable details)
+        Section {
+            PriorityLevelButtons()
+            DisclosureGroup(isExpanded: $isPriorityExpanded) {
+                PriorityDetailsContent()
+            } label: {
+                AdvancedFilterLabel(
+                    title: "Priority Details",
+                    icon: "bolt.fill",
+                    isActive: appState?.notams.priorityFilter.isActive == true
+                )
+            }
+        } header: {
+            Label("Priority", systemImage: "bolt.fill")
+        }
+
         FilterGroupingSection()
-        FilterVisibilitySection()
 
         // MARK: - Advanced Filters (Collapsible)
         FilterAdvancedSection(
             isRouteExpanded: $isRouteExpanded,
             isTimeExpanded: $isTimeExpanded,
             isSmartFiltersExpanded: $isSmartFiltersExpanded,
-            isCategoryExpanded: $isCategoryExpanded,
-            isPriorityExpanded: $isPriorityExpanded
+            isCategoryExpanded: $isCategoryExpanded
         )
+
+        // Visibility at bottom (infrequently used)
+        FilterVisibilitySection()
     }
 }
 
@@ -188,18 +206,17 @@ struct FilterAdvancedSection: View {
     @Binding var isTimeExpanded: Bool
     @Binding var isSmartFiltersExpanded: Bool
     @Binding var isCategoryExpanded: Bool
-    @Binding var isPriorityExpanded: Bool
 
     var body: some View {
         Section {
-            // Priority filter
-            DisclosureGroup(isExpanded: $isPriorityExpanded) {
-                FilterPriorityContent()
+            // Smart filters (most commonly used)
+            DisclosureGroup(isExpanded: $isSmartFiltersExpanded) {
+                FilterSmartContent()
             } label: {
                 AdvancedFilterLabel(
-                    title: "Priority",
-                    icon: "bolt.fill",
-                    isActive: appState?.notams.priorityFilter.isActive == true
+                    title: "Smart Filters",
+                    icon: "sparkles",
+                    isActive: appState?.notams.smartFilters.hasActiveFilters == true
                 )
             }
 
@@ -222,17 +239,6 @@ struct FilterAdvancedSection: View {
                     title: "Time Filter",
                     icon: "clock",
                     isActive: appState?.notams.timeFilter.isEnabled == true
-                )
-            }
-
-            // Smart filters
-            DisclosureGroup(isExpanded: $isSmartFiltersExpanded) {
-                FilterSmartContent()
-            } label: {
-                AdvancedFilterLabel(
-                    title: "Smart Filters",
-                    icon: "sparkles",
-                    isActive: appState?.notams.smartFilters.hasActiveFilters == true
                 )
             }
 
