@@ -145,8 +145,9 @@ struct NotamRowView: View {
                             .foregroundColor(enrichedNotam.isDistanceRelevant ? .blue : .gray)
                     }
 
-                    // Altitude range (highlighted if includes cruise altitude ±2000ft)
-                    if let altitudeText = enrichedNotam.altitudeRangeText {
+                    // Altitude range (skip full ranges like SFC-UNL, highlight if relevant)
+                    if let altitudeText = enrichedNotam.altitudeRangeText,
+                       enrichedNotam.hasConstrainedAltitude {
                         Text(altitudeText)
                             .font(.caption2)
                             .foregroundColor(enrichedNotam.isAltitudeRelevant ? .blue : .gray)
@@ -174,7 +175,7 @@ struct NotamRowView: View {
 
     // MARK: - Compact Title Row
 
-    /// Compact mode: title + ID on same line
+    /// Compact mode: title + distance/altitude on same line
     private var compactTitleRow: some View {
         HStack(spacing: 8) {
             Text(notamTitle)
@@ -184,9 +185,20 @@ struct NotamRowView: View {
 
             Spacer()
 
-            Text(notam.id)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tertiary)
+            // Distance from route (highlighted if < 50nm)
+            if let distanceText = enrichedNotam.routeDistanceText {
+                Text(distanceText)
+                    .font(.caption2)
+                    .foregroundColor(enrichedNotam.isDistanceRelevant ? .blue : .gray)
+            }
+
+            // Altitude range (skip if full range like SFC-UNL)
+            if let altitudeText = enrichedNotam.altitudeRangeText,
+               enrichedNotam.hasConstrainedAltitude {
+                Text(altitudeText)
+                    .font(.caption2)
+                    .foregroundColor(enrichedNotam.isAltitudeRelevant ? .blue : .gray)
+            }
 
             // Inactive indicator
             if !enrichedNotam.isActiveForFlight {

@@ -90,9 +90,10 @@ struct iPadLayoutView: View {
 
             // Filter sections (only if we have a briefing loaded)
             if appState?.briefing.currentBriefing != nil {
-                // Stat badges (compact, no section header)
+                // Stats + Status filter (grouped together, no header)
                 Section {
                     FilterStatsRow()
+                    StatusFilterPicker()
                 }
 
                 // Priority (promoted — always visible)
@@ -110,9 +111,6 @@ struct iPadLayoutView: View {
                 } header: {
                     Label("Priority", systemImage: "bolt.fill")
                 }
-
-                // Status (without stats — already shown above)
-                FilterStatusSection(showStats: false)
 
                 // Grouping
                 FilterGroupingSection()

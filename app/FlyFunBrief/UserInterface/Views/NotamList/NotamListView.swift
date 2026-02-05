@@ -23,17 +23,18 @@ struct NotamListView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            floatingSearchBar
+            floatingControls
         }
     }
 
-    // MARK: - Floating Search Bar
+    // MARK: - Floating Controls
 
     @ViewBuilder
-    private var floatingSearchBar: some View {
+    private var floatingControls: some View {
         let hasQuery = !(appState?.notams.searchQuery ?? "").isEmpty
 
         if isSearchActive || hasQuery {
+            // Expanded search bar
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -65,20 +66,62 @@ struct NotamListView: View {
             .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         } else {
-            Button {
-                withAnimation {
-                    isSearchActive = true
-                }
-                isSearchFocused = true
-            } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.body.weight(.medium))
-                    .padding(12)
-                    .background(.bar, in: Circle())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+            // Collapsed: row style + search buttons
+            HStack(spacing: 12) {
+                rowStyleButton
+                searchButton
             }
             .padding(.bottom, 12)
             .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    // MARK: - Row Style Button
+
+    @ViewBuilder
+    private var rowStyleButton: some View {
+        let currentStyle = appState?.notams.rowStyle ?? .standard
+
+        Menu {
+            ForEach(NotamRowStyle.allCases) { style in
+                Button {
+                    appState?.notams.rowStyle = style
+                } label: {
+                    Label(style.rawValue, systemImage: style == currentStyle ? "checkmark" : "")
+                }
+            }
+        } label: {
+            Image(systemName: rowStyleIcon)
+                .font(.body.weight(.medium))
+                .padding(12)
+                .background(.bar, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+        }
+    }
+
+    private var rowStyleIcon: String {
+        switch appState?.notams.rowStyle ?? .standard {
+        case .compact: return "rectangle.compress.vertical"
+        case .standard: return "rectangle.split.1x2"
+        case .full: return "rectangle.expand.vertical"
+        }
+    }
+
+    // MARK: - Search Button
+
+    @ViewBuilder
+    private var searchButton: some View {
+        Button {
+            withAnimation {
+                isSearchActive = true
+            }
+            isSearchFocused = true
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.body.weight(.medium))
+                .padding(12)
+                .background(.bar, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
         }
     }
 

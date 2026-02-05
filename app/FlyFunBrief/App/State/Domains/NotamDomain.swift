@@ -22,19 +22,19 @@ enum StatusFilter: String, CaseIterable, Identifiable {
 
 /// Grouping options for NOTAM list
 enum NotamGrouping: String, CaseIterable, Identifiable {
-    case none = "None"
+    case routeOrder = "Route"
     case airport = "Airport"
     case category = "Category"
-    case routeOrder = "Route Order"
+    case none = "None"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .none: return "list.bullet"
+        case .routeOrder: return "point.topleft.down.to.point.bottomright.curvepath"
         case .airport: return "building.2"
         case .category: return "folder"
-        case .routeOrder: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .none: return "list.bullet"
         }
     }
 }
@@ -258,7 +258,7 @@ final class NotamDomain {
     var selectedEnrichedNotam: EnrichedNotam?
 
     /// Current grouping
-    var grouping: NotamGrouping = .airport
+    var grouping: NotamGrouping = .routeOrder
 
     /// Row display style
     var rowStyle: NotamRowStyle = .standard

@@ -116,6 +116,18 @@ struct EnrichedNotam: Identifiable {
         return distance < 50
     }
 
+    /// Whether the altitude range is constrained (not SFC-UNL or similar full ranges)
+    var hasConstrainedAltitude: Bool {
+        let lower = notam.lowerLimit ?? 0
+        let upper = notam.upperLimit
+
+        // SFC (0 or nil) to UNL (nil) or very high (FL999+) is not constrained
+        if lower == 0 && (upper == nil || upper! >= 99900) {
+            return false
+        }
+        return true
+    }
+
     /// Formatted altitude range text (e.g., "SFC-FL100", "1000-5000ft")
     var altitudeRangeText: String? {
         let lower = notam.lowerLimit

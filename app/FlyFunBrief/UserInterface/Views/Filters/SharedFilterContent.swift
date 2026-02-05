@@ -56,6 +56,29 @@ struct FilterStatsRow: View {
     }
 }
 
+// MARK: - Status Filter Picker (standalone)
+
+/// Standalone status filter picker — can be placed independently from the status section
+struct StatusFilterPicker: View {
+    @Environment(\.appState) private var appState
+
+    var body: some View {
+        Picker("Status", selection: statusFilterBinding) {
+            ForEach(StatusFilter.allCases) { status in
+                Text(status.rawValue).tag(status)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var statusFilterBinding: Binding<StatusFilter> {
+        Binding(
+            get: { appState?.notams.statusFilter ?? .all },
+            set: { appState?.notams.statusFilter = $0 }
+        )
+    }
+}
+
 // MARK: - Status Section
 
 struct FilterStatusSection: View {
@@ -64,12 +87,7 @@ struct FilterStatusSection: View {
 
     var body: some View {
         Section {
-            Picker("Status", selection: statusFilterBinding) {
-                ForEach(StatusFilter.allCases) { status in
-                    Text(status.rawValue).tag(status)
-                }
-            }
-            .pickerStyle(.segmented)
+            StatusFilterPicker()
 
             if showStats {
                 FilterStatsRow()
@@ -77,13 +95,6 @@ struct FilterStatusSection: View {
         } header: {
             Label("Status", systemImage: "checklist")
         }
-    }
-
-    private var statusFilterBinding: Binding<StatusFilter> {
-        Binding(
-            get: { appState?.notams.statusFilter ?? .all },
-            set: { appState?.notams.statusFilter = $0 }
-        )
     }
 }
 
