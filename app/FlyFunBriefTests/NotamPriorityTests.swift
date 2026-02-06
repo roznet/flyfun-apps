@@ -3,6 +3,7 @@
 //  FlyFunBriefTests
 //
 //  Tests for NOTAM priority evaluation system.
+//  Uses JSON-decoded Notam objects to test individual rules and the evaluator chain.
 //
 
 import Testing
@@ -15,7 +16,7 @@ struct NotamPriorityTests {
 
     // MARK: - Test Helpers
 
-    /// Create a test NOTAM with specified properties
+    /// Create a test NOTAM with specified properties via JSON decoding
     private func makeNotam(
         id: String = "A1234/24",
         location: String = "LFPG",
@@ -83,18 +84,37 @@ struct NotamPriorityTests {
         )
     }
 
-    // MARK: - NotamPriority Enum Tests
+    // MARK: - NotamPriority Struct Tests
 
     @Test func priorityComparison() {
-        #expect(NotamPriority.low < NotamPriority.normal)
-        #expect(NotamPriority.normal < NotamPriority.high)
-        #expect(NotamPriority.low < NotamPriority.high)
+        // Lower level = higher priority. Comparable: higher priority sorts first (lhs.level > rhs.level)
+        let p1 = NotamPriority(level: 1, maxLevel: 5)
+        let p3 = NotamPriority(level: 3, maxLevel: 5)
+        let p5 = NotamPriority(level: 5, maxLevel: 5)
+
+        #expect(p5 < p3, "P5 should be less than P3 (lower priority)")
+        #expect(p3 < p1, "P3 should be less than P1 (lower priority)")
+        #expect(p5 < p1, "P5 should be less than P1")
     }
 
-    @Test func priorityIconNames() {
-        #expect(NotamPriority.high.iconName == "exclamationmark.triangle.fill")
-        #expect(NotamPriority.normal.iconName == nil)
-        #expect(NotamPriority.low.iconName == "arrow.down.circle")
+    @Test func priorityProperties() {
+        let critical = NotamPriority(level: 1, maxLevel: 5)
+        #expect(critical.isCritical)
+        #expect(!critical.isDefault)
+        #expect(critical.iconName == "exclamationmark.triangle.fill")
+        #expect(critical.label == "P1")
+
+        let mid = NotamPriority(level: 3, maxLevel: 5)
+        #expect(!mid.isCritical)
+        #expect(!mid.isDefault)
+        #expect(mid.iconName == "circle.fill")
+        #expect(mid.label == "P3")
+
+        let defaultPriority = NotamPriority.default(maxLevel: 5)
+        #expect(!defaultPriority.isCritical)
+        #expect(defaultPriority.isDefault)
+        #expect(defaultPriority.iconName == nil)
+        #expect(defaultPriority.label == "P5")
     }
 
     // MARK: - FlightContext Tests
@@ -152,10 +172,9 @@ struct NotamPriorityTests {
         #expect(abs(windowEnd!.timeIntervalSince(expectedEnd)) < 1)
     }
 
-    // MARK: - High Priority: Close + Altitude Rule Tests
+    // MARK: - IFR P3: Close + Altitude Rule Tests
 
-    @Test func highPriorityWhenCloseAndAltitudeOverlaps() throws {
-        // NOTAM at FL350 (35000ft), within 10nm of route
+    @Test func p3WhenCloseAndAltitudeOverlaps() throws {
         let notam = try makeNotam(
             latitude: 50.0,
             longitude: 1.0,
@@ -163,81 +182,71 @@ struct NotamPriorityTests {
             upperLimit: 37000
         )
 
-        // Route from LFPG (49.0, 2.5) to EGLL (51.5, -0.1)
-        let coords = [
-            CLLocationCoordinate2D(latitude: 49.0, longitude: 2.5),
-            CLLocationCoordinate2D(latitude: 51.5, longitude: -0.1)
-        ]
-        let context = makeContext(routeCoordinates: coords, cruiseAltitude: 35000)
+        let context = makeContext(cruiseAltitude: 35000)
+        let rule = IFRCloseAndAltitudeRelevant()
+        let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
 
-        let rule = HighPriorityCloseAndRelevantAltitude()
-        // Distance should be close since 50.0, 1.0 is near the route
-        let distance = 5.0 // Simulated close distance
-        let result = rule.evaluate(notam: notam, distanceNm: distance, context: context)
-
-        #expect(result == .high)
+        #expect(result == 3, "Close + altitude overlap should return P3")
     }
 
-    @Test func noHighPriorityWhenFarFromRoute() throws {
+    @Test func noMatchWhenFarFromRoute() throws {
         let notam = try makeNotam(
-            latitude: 40.0, // Far from route
+            latitude: 40.0,
             longitude: 10.0,
             lowerLimit: 33000,
             upperLimit: 37000
         )
 
         let context = makeContext(cruiseAltitude: 35000)
-        let rule = HighPriorityCloseAndRelevantAltitude()
-        // Use distance > threshold (50nm) to be outside the high priority range
+        let rule = IFRCloseAndAltitudeRelevant()
         let result = rule.evaluate(notam: notam, distanceNm: 51.0, context: context)
 
-        #expect(result == nil) // Rule doesn't apply when beyond threshold
+        #expect(result == nil, "Rule doesn't apply when beyond 10nm threshold")
     }
 
-    @Test func noHighPriorityWhenAltitudeDoesNotOverlap() throws {
+    @Test func noMatchWhenAltitudeDoesNotOverlap() throws {
         let notam = try makeNotam(
             lowerLimit: 0,
-            upperLimit: 5000 // Low altitude NOTAM
+            upperLimit: 5000
         )
 
         let context = makeContext(cruiseAltitude: 35000)
-        let rule = HighPriorityCloseAndRelevantAltitude()
+        let rule = IFRCloseAndAltitudeRelevant()
         let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
 
-        #expect(result == nil) // Altitude doesn't overlap
+        #expect(result == nil, "Altitude doesn't overlap cruise")
     }
 
-    @Test func surfaceToUnlimitedNotHighPriority() throws {
-        // Surface to unlimited (000/999) should not trigger altitude relevance
+    @Test func surfaceToUnlimitedNotAltitudeRelevant() throws {
         let notam = try makeNotam(
             lowerLimit: 0,
             upperLimit: 99900
         )
 
         let context = makeContext(cruiseAltitude: 35000)
-        let rule = HighPriorityCloseAndRelevantAltitude()
+        let rule = IFRCloseAndAltitudeRelevant()
         let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
 
-        #expect(result == nil)
+        #expect(result == nil, "Surface to unlimited should not be altitude relevant")
     }
 
-    // MARK: - High Priority: Runway Closure Rule Tests
+    // MARK: - IFR P1: Movement Area at Dep/Dest Tests
 
-    @Test func highPriorityForRunwayClosureAtDestination() throws {
+    @Test func p1ForRunwayClosureAtDestination() throws {
         let notam = try makeNotam(
             location: "EGLL",
-            qCode: "QMRLC", // MR = Movement area runway, LC = Closed
+            qCode: "QMRLC",
             customTags: ["closed"]
         )
 
         let context = makeContext(destinationICAO: "EGLL")
-        let rule = HighPriorityRunwayClosureAtAirport()
+        let rule = IFRMovementAreaAtDepDest()
         let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(result == .high)
+        #expect(result == 1, "Runway NOTAM at destination should be P1")
     }
 
-    @Test func highPriorityForRunwayClosureAtDeparture() throws {
+    @Test func p1ForRunwayClosureAtDeparture() throws {
         let notam = try makeNotam(
             location: "LFPG",
             qCode: "QMRLC",
@@ -245,82 +254,64 @@ struct NotamPriorityTests {
         )
 
         let context = makeContext(departureICAO: "LFPG")
-        let rule = HighPriorityRunwayClosureAtAirport()
+        let rule = IFRMovementAreaAtDepDest()
         let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(result == .high)
+        #expect(result == 1, "Runway NOTAM at departure should be P1")
     }
 
-    @Test func noHighPriorityForClosureAtOtherAirport() throws {
+    @Test func noP1ForClosureAtOtherAirport() throws {
         let notam = try makeNotam(
-            location: "KJFK", // Not on route
+            location: "KJFK",
             qCode: "QMRLC",
             customTags: ["closed"]
         )
 
         let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
-        let rule = HighPriorityRunwayClosureAtAirport()
+        let rule = IFRMovementAreaAtDepDest()
         let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(result == nil)
+        #expect(result == nil, "NOTAM at unrelated airport should not match")
     }
 
-    // MARK: - Low Priority: Obstacles Far Rule Tests
+    // MARK: - IFR P4: Facilities at Dep/Dest
 
-    @Test func lowPriorityForObstacleFarFromAirports() throws {
+    @Test func p4ForFacilityAtDepDest() throws {
         let notam = try makeNotam(
-            location: "LFRN", // Not departure or destination
-            qCode: "QOBCE" // OB = Obstacle
-        )
-
-        let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
-        let rule = LowPriorityObstaclesFarFromAirports()
-        let result = rule.evaluate(notam: notam, distanceNm: 50.0, context: context)
-
-        #expect(result == .low)
-    }
-
-    @Test func obstacleNearDepartureNotLowPriority() throws {
-        let notam = try makeNotam(
-            location: "LFPG", // At departure
-            qCode: "QOBCE"
+            location: "LFPG",
+            qCode: "QFATT"
         )
 
         let context = makeContext(departureICAO: "LFPG")
-        let rule = LowPriorityObstaclesFarFromAirports()
-        let result = rule.evaluate(notam: notam, distanceNm: 1.0, context: context)
-
-        #expect(result == nil) // Not low priority when at airport
-    }
-
-    // MARK: - Low Priority: Helicopter Rule Tests
-
-    @Test func lowPriorityForHelicopterNotams() throws {
-        let notam = try makeNotam(qCode: "QFHXX") // FH = Heliport
-
-        let context = makeContext()
-        let rule = LowPriorityHelicopterNotams()
+        let rule = IFRFacilitiesAtDepDest()
         let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(result == .low)
+        #expect(result == 4, "Facility at departure should be P4")
     }
 
-    @Test func nonHelicopterNotamNotLowPriority() throws {
-        let notam = try makeNotam(qCode: "QMRLC") // Runway NOTAM
+    // MARK: - Helicopter NOTAM (default priority, no specific rule)
 
-        let context = makeContext()
-        let rule = LowPriorityHelicopterNotams()
-        let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
+    @Test func helicopterNotamAtDepDestGetsDefaultOrFacility() throws {
+        let notam = try makeNotam(
+            location: "EGLL",
+            qCode: "QFHXX"
+        )
 
-        #expect(result == nil)
+        let context = makeContext(destinationICAO: "EGLL")
+        let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
+        let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
+
+        // FH subject is in the facility subjects set (FA, FF, FS) — no, FH is not.
+        // So helicopter NOTAM at dep/dest falls to default
+        #expect(priority.level >= 4, "Helicopter NOTAM should be low priority")
     }
 
     // MARK: - Priority Evaluator Chain Tests
 
-    @Test func evaluatorReturnsNormalWhenNoRuleMatches() throws {
+    @Test func evaluatorReturnsDefaultWhenNoRuleMatches() throws {
         let notam = try makeNotam(
             location: "LFRN",
-            qCode: "QMXXX", // Generic movement NOTAM
+            qCode: "QMXXX",
             lowerLimit: 0,
             upperLimit: 1000
         )
@@ -331,37 +322,35 @@ struct NotamPriorityTests {
             cruiseAltitude: 35000
         )
 
-        let evaluator = NotamPriorityEvaluator.shared
+        let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
         let priority = evaluator.evaluate(notam: notam, distanceNm: 100.0, context: context)
 
-        #expect(priority == .normal)
+        #expect(priority.isDefault, "Unmatched NOTAM should get default priority")
+        #expect(priority.level == 5, "IFR default level should be 5")
     }
 
-    @Test func evaluatorReturnsFirstMatchingRulePriority() throws {
-        // This NOTAM should match both helicopter (low) and be at destination
-        // But helicopter rule should fire first in the chain
-        let notam = try makeNotam(
-            location: "EGLL",
-            qCode: "QFHXX" // Helicopter NOTAM at destination
-        )
-
-        let context = makeContext(destinationICAO: "EGLL")
-
-        let evaluator = NotamPriorityEvaluator.shared
-        let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
-
-        // Helicopter rule is after runway closure in the chain, so if it's a closure it would be high
-        // But QFHXX is not a closure, so helicopter rule applies -> low
-        #expect(priority == .low)
-    }
-
-    @Test func evaluatorWithEmptyContextReturnsNormal() throws {
+    @Test func evaluatorWithEmptyContextReturnsDefault() throws {
         let notam = try makeNotam()
         let context = FlightContext.empty
 
-        let evaluator = NotamPriorityEvaluator.shared
+        let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
         let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(priority == .normal)
+        #expect(priority.isDefault, "Empty context should yield default priority")
+    }
+
+    @Test func evaluatorReturnsFirstMatchingRulePriority() throws {
+        // Movement area at departure should be P1
+        let notam = try makeNotam(
+            location: "LFPG",
+            qCode: "QMRLC"
+        )
+
+        let context = makeContext(departureICAO: "LFPG")
+        let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
+        let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
+
+        #expect(priority.level == 1, "Movement area at departure should be P1")
+        #expect(priority.isCritical)
     }
 }

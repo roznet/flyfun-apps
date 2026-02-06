@@ -1,0 +1,92 @@
+### id: rwy_closure_lfpg
+### expected_qcode: QMRLC
+### expected_location: LFPG
+### tags: movement_area, closure
+A0101/24 NOTAMN
+Q) LFFF/QMRLC/IV/NBO/A/000/999/4901N00225E005
+A) LFPG B) 2401150800 C) 2401152000
+E) RWY 09L/27R CLSD DUE TO MAINTENANCE
+===NOTAM===
+### id: ils_unavailable_egll
+### expected_qcode: QILAS
+### expected_location: EGLL
+### tags: ils, unserviceable
+A0202/24 NOTAMN
+Q) EGTT/QILAS/I/NBO/A/000/999/5128N00027W005
+A) EGLL B) 2401200600 C) 2401201800
+E) ILS RWY 27L U/S DUE TO MAINTENANCE
+===NOTAM===
+### id: airspace_restriction_lfff
+### expected_qcode: QRTCA
+### expected_location: LFFF
+### tags: airspace, aerodrome
+A0303/24 NOTAMN
+Q) LFFF/QRTCA/IV/BO/W/020/050/4845N00220E010
+A) LFFF B) 2401180900 C) 2401181700
+F) 2000FT AMSL
+G) 5000FT AMSL
+E) TEMPORARY RESTRICTED AREA ACTIVATED FOR MILITARY EXERCISE
+===NOTAM===
+### id: vor_unserviceable_lfmd
+### expected_qcode: QNVAS
+### expected_location: LFMD
+### tags: navaid, unserviceable
+A0404/24 NOTAMN
+Q) LFMM/QNVAS/IV/BO/E/000/999/4334N00705E025
+A) LFMD B) 2401220000 C) 2402152359
+E) VOR CGS 115.350MHZ CANNES U/S
+===NOTAM===
+### id: taxiway_limit_egtf
+### expected_qcode: QMXLC
+### expected_location: EGTF
+### tags: movement_area, closure
+A0505/24 NOTAMN
+Q) EGTT/QMXLC/IV/NBO/A/000/999/5121N00034W003
+A) EGTF B) 2401250800 C) 2401261600
+E) TWY A CLSD BTN RWY 07/25 AND APRON DUE TO RESURFACING
+===NOTAM===
+### id: obstacle_warning_lfrn
+### expected_qcode: QOBCE
+### expected_location: LFRN
+### tags: obstacle, aerodrome
+A0606/24 NOTAMN
+Q) LFRR/QOBCE/IV/M/A/000/003/4804N00144W002
+A) LFRN B) 2401100000 C) 2404301200
+E) CRANE ERECTED AT 480356N 0014401W HGT 250FT AGL ELEV 350FT AMSL LGTD
+===NOTAM===
+### id: helicopter_heliport_lfpg
+### expected_qcode: QFHXX
+### expected_location: LFPG
+### tags: helicopter, aerodrome
+A0707/24 NOTAMN
+Q) LFFF/QFHXX/IV/NBO/A/000/999/4901N00225E005
+A) LFPG B) 2401150000 C) 2406302359
+E) HELIPORT OPERATIONS RESTRICTED TO PRIOR PERMISSION REQUIRED
+===NOTAM===
+### id: procedure_changed_egll
+### expected_qcode: QPICH
+### expected_location: EGLL
+### tags: procedure, changed
+A0808/24 NOTAMN
+Q) EGTT/QPICH/I/NBO/A/000/999/5128N00027W005
+A) EGLL B) 2401120000 C) 2403312359
+E) INSTRUMENT APPROACH PROCEDURE ILS OR LOC RWY 27R REVISED MINIMUM SECTOR ALTITUDE MSA 25NM ARC 3500FT
+===NOTAM===
+### id: scheduled_notam_lfpt
+### expected_qcode: QMRLC
+### expected_location: LFPT
+### tags: movement_area, closure, aerodrome
+A0909/24 NOTAMN
+Q) LFFF/QMRLC/IV/NBO/A/000/999/4906N00209E005
+A) LFPT B) 2402010800 C) 2402281700
+D) MON-FRI 0800-1700
+E) RWY 12/30 CLSD FOR SCHEDULED MAINTENANCE
+===NOTAM===
+### id: facility_lfmd
+### expected_qcode: QFATT
+### expected_location: LFMD
+### tags: facility, aerodrome, permanent
+A1010/24 NOTAMN
+Q) LFMM/QFATT/IV/NBO/A/000/999/4334N00705E005
+A) LFMD B) 2401010000 C) PERM
+E) FUEL AVGAS 100LL AVAILABLE ON REQUEST ONLY. CONTACT TWR FREQ 120.150MHZ
