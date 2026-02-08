@@ -193,6 +193,7 @@ enum ScopeFilter: String, CaseIterable, Identifiable {
 /// Visibility filter - which statuses to show/hide
 struct VisibilityFilter: Equatable {
     var showIgnored: Bool = false
+    var showIgnoredAirports: Bool = false
     var showRead: Bool = true
 }
 
@@ -272,6 +273,9 @@ final class NotamDomain {
     /// Globally ignored identity keys
     private(set) var ignoredIdentityKeys: Set<String> = []
 
+    /// Airport-level ignored ICAO codes
+    private(set) var ignoredAirportCodes: Set<String> = []
+
     // MARK: - Filter State
 
     /// Route corridor filter
@@ -318,6 +322,7 @@ final class NotamDomain {
         priorityFilter.isActive ||
         !visibilityFilter.showRead ||
         visibilityFilter.showIgnored ||
+        visibilityFilter.showIgnoredAirports ||
         timeFilter.isEnabled ||
         smartFilters.hasActiveFilters ||
         !searchQuery.isEmpty
@@ -390,9 +395,14 @@ final class NotamDomain {
     var filteredEnrichedNotams: [EnrichedNotam] {
         var notams = enrichedNotams
 
-        // 1. Apply global ignore filter first (unless showing ignored)
+        // 1a. Apply global NOTAM ignore filter (unless showing ignored NOTAMs)
         if !visibilityFilter.showIgnored {
             notams = notams.excludingIgnored()
+        }
+
+        // 1b. Apply airport ignore filter (unless showing ignored airports)
+        if !visibilityFilter.showIgnoredAirports {
+            notams = notams.excludingAirportIgnored()
         }
 
         // 2. Apply route corridor filter using FlightContext coordinates
@@ -555,6 +565,7 @@ final class NotamDomain {
 
     private let flightRepository: FlightRepository
     private var ignoreListManager: IgnoreListManager?
+    private var airportIgnoreListManager: AirportIgnoreListManager?
     private var globalReadManager: GlobalReadManager?
 
     /// Resurface settings for 3-tier status resolution
@@ -565,15 +576,21 @@ final class NotamDomain {
 
     // MARK: - Init
 
-    init(flightRepository: FlightRepository, ignoreListManager: IgnoreListManager? = nil, globalReadManager: GlobalReadManager? = nil) {
+    init(flightRepository: FlightRepository, ignoreListManager: IgnoreListManager? = nil, airportIgnoreListManager: AirportIgnoreListManager? = nil, globalReadManager: GlobalReadManager? = nil) {
         self.flightRepository = flightRepository
         self.ignoreListManager = ignoreListManager
+        self.airportIgnoreListManager = airportIgnoreListManager
         self.globalReadManager = globalReadManager
     }
 
     /// Update the ignore list manager reference
     func setIgnoreListManager(_ manager: IgnoreListManager) {
         self.ignoreListManager = manager
+    }
+
+    /// Update the airport ignore list manager reference
+    func setAirportIgnoreListManager(_ manager: AirportIgnoreListManager) {
+        self.airportIgnoreListManager = manager
     }
 
     /// Update the global read manager reference
@@ -628,6 +645,7 @@ final class NotamDomain {
         // Build enriched NOTAMs (standalone mode - all unread)
         Task {
             await loadIgnoredKeys()
+            await loadIgnoredAirports()
             await loadGlobalReads()
             buildEnrichedNotamsStandalone()
         }
@@ -649,6 +667,7 @@ final class NotamDomain {
         // Build enriched NOTAMs from Core Data statuses
         Task {
             await loadIgnoredKeys()
+            await loadIgnoredAirports()
             await loadGlobalReads()
             buildEnrichedNotamsFromCoreData()
         }
@@ -668,6 +687,21 @@ final class NotamDomain {
         } catch {
             Logger.app.error("Failed to load ignored keys: \(error.localizedDescription)")
             ignoredIdentityKeys = []
+        }
+    }
+
+    /// Load airport-level ignored ICAO codes
+    private func loadIgnoredAirports() async {
+        guard let manager = airportIgnoreListManager else {
+            ignoredAirportCodes = []
+            return
+        }
+
+        do {
+            ignoredAirportCodes = try manager.getIgnoredAirportCodes()
+        } catch {
+            Logger.app.error("Failed to load ignored airports: \(error.localizedDescription)")
+            ignoredAirportCodes = []
         }
     }
 
@@ -694,6 +728,7 @@ final class NotamDomain {
             statuses: [:],  // No Core Data statuses
             previousIdentityKeys: previousIdentityKeys,
             ignoredKeys: ignoredIdentityKeys,
+            ignoredAirports: ignoredAirportCodes,
             flightContext: currentFlightContext,
             profile: currentProfile
         )
@@ -720,6 +755,7 @@ final class NotamDomain {
             globalReads: globalReads,
             previousIdentityKeys: previousIdentityKeys,
             ignoredKeys: ignoredIdentityKeys,
+            ignoredAirports: ignoredAirportCodes,
             flightContext: currentFlightContext,
             resurfaceEvaluator: resurfaceEvaluator,
             resurfaceSettings: resurfaceSettings,
@@ -920,6 +956,44 @@ final class NotamDomain {
     func isGloballyIgnored(_ notam: Notam) -> Bool {
         let identityKey = NotamIdentity.key(for: notam)
         return ignoredIdentityKeys.contains(identityKey)
+    }
+
+    // MARK: - Airport Ignore List
+
+    /// Add an airport to the ignore list
+    func addAirportToIgnoreList(_ icaoCode: String, reason: String? = nil) async {
+        guard let manager = airportIgnoreListManager else {
+            Logger.app.warning("AirportIgnoreListManager not available")
+            return
+        }
+
+        do {
+            _ = try manager.addToIgnoreList(icaoCode: icaoCode, reason: reason)
+            await loadIgnoredAirports()
+            refreshEnrichedNotams()
+            Logger.app.info("Added airport \(icaoCode) to ignore list")
+        } catch {
+            Logger.app.error("Failed to add airport to ignore list: \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove an airport from the ignore list
+    func removeAirportFromIgnoreList(_ icaoCode: String) async {
+        guard let manager = airportIgnoreListManager else { return }
+
+        do {
+            try manager.removeFromIgnoreList(icaoCode: icaoCode)
+            await loadIgnoredAirports()
+            refreshEnrichedNotams()
+            Logger.app.info("Removed airport \(icaoCode) from ignore list")
+        } catch {
+            Logger.app.error("Failed to remove airport from ignore list: \(error.localizedDescription)")
+        }
+    }
+
+    /// Check if an airport is ignored
+    func isAirportIgnored(_ icaoCode: String) -> Bool {
+        ignoredAirportCodes.contains(icaoCode.uppercased())
     }
 
     // MARK: - Smart Filter Helpers

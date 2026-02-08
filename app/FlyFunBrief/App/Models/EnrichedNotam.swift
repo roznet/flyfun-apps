@@ -50,6 +50,9 @@ struct EnrichedNotam: Identifiable {
     /// Whether this NOTAM matches a global ignore entry
     let isGloballyIgnored: Bool
 
+    /// Whether this NOTAM's airport is in the airport ignore list
+    let isAirportIgnored: Bool
+
     // MARK: - Flight Context (computed at enrichment time)
 
     /// Distance from route centerline in nautical miles.
@@ -80,6 +83,7 @@ struct EnrichedNotam: Identifiable {
         statusChangedAt: Date? = nil,
         isNew: Bool = false,
         isGloballyIgnored: Bool = false,
+        isAirportIgnored: Bool = false,
         routeDistanceNm: Double? = nil,
         isAltitudeRelevant: Bool = false,
         isActiveForFlight: Bool = true,
@@ -92,6 +96,7 @@ struct EnrichedNotam: Identifiable {
         self.statusChangedAt = statusChangedAt
         self.isNew = isNew
         self.isGloballyIgnored = isGloballyIgnored
+        self.isAirportIgnored = isAirportIgnored
         self.routeDistanceNm = routeDistanceNm
         self.isAltitudeRelevant = isAltitudeRelevant
         self.isActiveForFlight = isActiveForFlight
@@ -216,6 +221,11 @@ extension Array where Element == EnrichedNotam {
         filter { !$0.isGloballyIgnored }
     }
 
+    /// Exclude airport-ignored NOTAMs
+    func excludingAirportIgnored() -> [EnrichedNotam] {
+        filter { !$0.isAirportIgnored }
+    }
+
     /// Group by airport
     func groupedByAirport() -> [String: [EnrichedNotam]] {
         Dictionary(grouping: self) { $0.location }
@@ -319,6 +329,7 @@ extension EnrichedNotam {
         statuses: [String: CDNotamStatus],
         previousIdentityKeys: Set<String>,
         ignoredKeys: Set<String>,
+        ignoredAirports: Set<String> = [],
         flightContext: FlightContext? = nil,
         profile: PriorityProfile = PriorityProfiles.default
     ) -> [EnrichedNotam] {
@@ -352,6 +363,7 @@ extension EnrichedNotam {
                 statusChangedAt: cdStatus?.updatedAt,
                 isNew: !previousIdentityKeys.contains(identityKey),
                 isGloballyIgnored: ignoredKeys.contains(identityKey),
+                isAirportIgnored: ignoredAirports.contains(notam.location.uppercased()),
                 routeDistanceNm: routeDistance,
                 isAltitudeRelevant: altitudeRelevant,
                 isActiveForFlight: activeForFlight,
@@ -383,6 +395,7 @@ extension EnrichedNotam {
         globalReads: [String: CDGlobalNotamRead],
         previousIdentityKeys: Set<String>,
         ignoredKeys: Set<String>,
+        ignoredAirports: Set<String> = [],
         flightContext: FlightContext,
         resurfaceEvaluator: NotamResurfaceEvaluator,
         resurfaceSettings: ResurfaceSettings,
@@ -428,6 +441,7 @@ extension EnrichedNotam {
                 statusChangedAt: cdStatus?.updatedAt,
                 isNew: !previousIdentityKeys.contains(identityKey),
                 isGloballyIgnored: ignoredKeys.contains(identityKey),
+                isAirportIgnored: ignoredAirports.contains(notam.location.uppercased()),
                 routeDistanceNm: routeDistance,
                 isAltitudeRelevant: altitudeRelevant,
                 isActiveForFlight: activeForFlight,

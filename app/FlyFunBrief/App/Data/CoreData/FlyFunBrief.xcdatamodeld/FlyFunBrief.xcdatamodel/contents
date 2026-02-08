@@ -32,6 +32,15 @@
             <fetchIndexElement property="identityKey" type="Binary" order="ascending"/>
         </fetchIndex>
     </entity>
+    <entity name="CDIgnoredAirport" representedClassName="CDIgnoredAirport" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="icaoCode" attributeType="String" defaultValueString=""/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="reason" optional="YES" attributeType="String"/>
+        <fetchIndex name="byIcaoCodeIndex">
+            <fetchIndexElement property="icaoCode" type="Binary" order="ascending"/>
+        </fetchIndex>
+    </entity>
     <entity name="CDIgnoredNotam" representedClassName="CDIgnoredNotam" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
         <attribute name="expiresAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
