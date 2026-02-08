@@ -242,6 +242,24 @@ def _build_agent_graph(
             if tool_result.get("_tool_type") == "comparison" and comparison_formatter_chain:
                 logger.info(f"📋 Using comparison formatter for synthesis")
 
+                rules_context = tool_result.get("rules_context", "").strip()
+
+                # Short-circuit: if no rules data, don't call LLM (prevents hallucination)
+                if not rules_context:
+                    countries_str = ", ".join(tool_result.get("countries", []))
+                    answer = (
+                        "I don't have specific comparison data for "
+                        f"{countries_str} on this topic in my rules database."
+                    )
+                    from .formatting import build_ui_payload
+                    suggested_queries = state.get("suggested_queries")
+                    ui_payload = build_ui_payload(plan, tool_result, suggested_queries) if plan else None
+                    return {
+                        "final_answer": answer,
+                        "thinking": state.get("planning_reasoning", ""),
+                        "ui_payload": ui_payload,
+                    }
+
                 # Build topic context for prompt
                 topic_parts = []
                 if tool_result.get("tag"):
@@ -254,7 +272,7 @@ def _build_agent_graph(
                 chain_result = comparison_formatter_chain.invoke({
                     "countries": ", ".join(tool_result.get("countries", [])),
                     "topic_context": topic_context,
-                    "rules_context": tool_result.get("rules_context", "No differences found."),
+                    "rules_context": rules_context,
                 })
 
                 answer = chain_result if isinstance(chain_result, str) else str(

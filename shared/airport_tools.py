@@ -1416,6 +1416,7 @@ def compare_rules_between_countries(
     ctx: ToolContext,
     countries: List[str],
     tags: Optional[List[str]] = None,
+    question: Optional[str] = None,
     use_embeddings: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -1427,6 +1428,31 @@ def compare_rules_between_countries(
     """
     countries = [c.upper() for c in countries]
 
+    # Use QuestionMatcher to narrow to semantically relevant questions
+    matched_question_ids = None
+    if question and ctx.question_matcher:
+        try:
+            rules_manager = ctx.ensure_rules_manager()
+            # Get rules from one country for question matching
+            # (question_ids are shared across countries)
+            ref_country = countries[0]
+            ref_rules = rules_manager.get_rules_for_country(
+                country_code=ref_country,
+                tags=tags,
+            )
+            if ref_rules:
+                matched_ids = ctx.question_matcher.match_questions(
+                    query=question,
+                    questions=ref_rules,
+                )
+                if matched_ids:
+                    matched_question_ids = matched_ids
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Question matching for comparison failed, falling back to tags: {e}"
+            )
+
     # Try embedding-based comparison first (smarter - detects semantic differences)
     # NOTE: Tool returns DATA only - synthesis is done by formatter
     if use_embeddings and ctx.comparison_service:
@@ -1434,11 +1460,21 @@ def compare_rules_between_countries(
             result = ctx.comparison_service.compare_countries(
                 countries=countries,
                 tags=tags,
+                question_ids=matched_question_ids,
                 synthesize=False,  # Never synthesize in tool - formatter does this
             )
 
             # Build differences for response
             differences = result.differences if result.differences else []
+
+            # If embedding comparison analyzed 0 questions (e.g., missing answers collection),
+            # fall through to text-based comparison which can still use QuestionMatcher filtering
+            if result.questions_analyzed == 0:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Embedding comparison analyzed 0 questions, falling back to text"
+                )
+                raise RuntimeError("No questions analyzed by embedding comparison")
 
             # Build rules_context for formatter (pre-formatted for synthesis prompt)
             rules_context_lines = []
@@ -1452,6 +1488,9 @@ def compare_rules_between_countries(
                 rules_context_lines.append("")
 
             countries_str = ", ".join(countries)
+            retrieval_mode = "embedding"
+            if matched_question_ids is not None:
+                retrieval_mode = "llm_match+embedding"
             return {
                 "found": True,
                 "countries": countries,
@@ -1459,6 +1498,7 @@ def compare_rules_between_countries(
                 "total_questions": result.total_questions,
                 "questions_analyzed": result.questions_analyzed,
                 "filtered_by_embedding": result.filtered_by_embedding,
+                "retrieval_mode": retrieval_mode,
                 "differences": differences,
                 "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
                 "total_differences": len(differences),
@@ -1483,14 +1523,34 @@ def compare_rules_between_countries(
     else:
         comparison = {"differences": []}
 
-    diff_count = len(comparison.get('differences', []))
+    differences = comparison.get('differences', [])
+
+    # Filter by matched question IDs if QuestionMatcher narrowed the set
+    if matched_question_ids is not None:
+        matched_id_set = set(matched_question_ids)
+        differences = [
+            d for d in differences
+            if d.get('question_id') in matched_id_set
+            or d.get('question') in matched_id_set  # text comparison uses 'question' field
+        ]
+
+    diff_count = len(differences)
 
     # Build rules_context from text-based comparison for formatter
+    # Text comparison uses 'question' (not 'question_text') and stores answers
+    # under country code keys (e.g., 'FR', 'DE') with 'answer' sub-field
     rules_context_lines = []
-    for i, diff in enumerate(comparison.get('differences', []), 1):
-        rules_context_lines.append(f"\n### {i}. {diff.get('question_text', 'Unknown')}")
-        for cc, rule in diff.get('rules', {}).items():
-            rules_context_lines.append(f"**{cc}**: {rule}")
+    for i, diff in enumerate(differences, 1):
+        question_text = diff.get('question_text') or diff.get('question', 'Unknown')
+        rules_context_lines.append(f"\n### {i}. {question_text}")
+        for cc in countries:
+            country_data = diff.get(cc)
+            if isinstance(country_data, dict):
+                answer = country_data.get('answer', '')
+                if answer:
+                    rules_context_lines.append(f"**{cc}**: {answer}")
+            elif isinstance(country_data, str) and country_data:
+                rules_context_lines.append(f"**{cc}**: {country_data}")
         rules_context_lines.append("")
 
     countries_str = ", ".join(countries)
@@ -1499,10 +1559,11 @@ def compare_rules_between_countries(
         "countries": countries,
         "tags": tags,
         "comparison": comparison,
-        "differences": comparison.get('differences', []),
+        "differences": differences,
         "rules_context": "\n".join(rules_context_lines),  # For formatter synthesis
         "total_differences": diff_count,
         "filtered_by_embedding": False,
+        "retrieval_mode": "llm_match+text" if matched_question_ids is not None else "text",
         "message": f"Comparison between {countries_str} complete.",
         "_tool_type": "comparison",
     }
@@ -1512,13 +1573,14 @@ def _compare_rules_between_countries_tool(
     ctx: ToolContext,
     countries: List[str],
     tags: Optional[List[str]] = None,
+    question: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Wrapper that adds a human readable summary field expected by UI clients.
     Used as the actual handler in the tool registry.
     """
     result = compare_rules_between_countries(
-        ctx, countries, tags=tags
+        ctx, countries, tags=tags, question=question
     )
     if result.get("formatted_summary") and "pretty" not in result:
         result["pretty"] = result["formatted_summary"]
@@ -1860,6 +1922,10 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Optional list of tags to filter (e.g., ['flight_plan', 'transponder']).",
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "The user's question about aviation rules to compare.",
                         },
                     },
                     "required": ["countries"],

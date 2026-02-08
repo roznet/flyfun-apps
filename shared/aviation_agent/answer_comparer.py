@@ -459,6 +459,7 @@ class AnswerComparer:
         self,
         countries: List[str],
         tags: Optional[List[str]] = None,
+        question_ids: Optional[List[str]] = None,
         max_questions: int = 15,
         min_difference: float = 0.1,
         send_all_threshold: int = 10,
@@ -471,6 +472,8 @@ class AnswerComparer:
         Args:
             countries: List of country codes to compare
             tags: Optional list of tags to filter questions (union of all tag matches)
+            question_ids: Optional pre-filtered question IDs (e.g. from QuestionMatcher).
+                          When provided, takes priority over tags for question selection.
             max_questions: Maximum questions to include
             min_difference: Minimum semantic difference threshold
             send_all_threshold: If total questions <= this, include all
@@ -492,8 +495,10 @@ class AnswerComparer:
         if not self.rules_manager.loaded:
             self.rules_manager.load_rules()
 
-        # Get question IDs based on tags filter
-        if tags:
+        # Get question IDs: pre-filtered IDs take priority, then tags, then all
+        if question_ids is not None:
+            pass  # Use provided IDs directly
+        elif tags:
             question_ids = self.rules_manager.get_questions_by_tags(tags)
         else:
             # All questions

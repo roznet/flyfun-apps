@@ -9,6 +9,10 @@ Here are the rules from the experience from other pilots with semantic differenc
 
 ## Instructions
 
+**CRITICAL:** If the rules context below is empty or contains no actual rules, say:
+"I don't have specific comparison data for these countries on this topic."
+Do NOT invent or guess rules that aren't provided.
+
 1. **Focus on REAL regulatory differences** - If two countries say the same thing with different wording, note they are equivalent
 2. **Prioritize practical impact** - Highlight differences that would actually affect a pilot's planning or operations
 3. **Be specific** - State exactly what each country requires, not vague summaries

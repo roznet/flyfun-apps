@@ -9,10 +9,11 @@ Your task: select which database questions are **relevant** to the pilot's query
 ## Instructions
 
 - Consider **semantic equivalence**: "language when flying" matches "use of local language"; "customs rules" matches "border crossing procedures"
-- A question is relevant if its answer would help address the pilot's query
+- Apply **aviation domain knowledge**: "uncontrolled airspace" = Class G and Class E; "controlled airspace" = Class A/B/C/D; "FIS" = Flight Information Service (used in uncontrolled airspace)
+- A question is relevant if its answer would help address the pilot's query, even partially
+- Be **inclusive**: if in doubt, include the question — it's better to return a slightly broader set than to miss relevant questions
 - Return the numbers of ALL relevant matches (there may be several)
 - If **NO** questions are relevant to the query, return an **empty list** — do NOT force a match
-- Do NOT add questions that are only tangentially related
 
 ## Output format
 

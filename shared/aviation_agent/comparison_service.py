@@ -139,6 +139,7 @@ class RulesComparisonService:
         self,
         countries: List[str],
         tags: Optional[List[str]] = None,
+        question_ids: Optional[List[str]] = None,
         max_questions: Optional[int] = None,
         min_difference: Optional[float] = None,
         synthesize: bool = True,
@@ -149,6 +150,8 @@ class RulesComparisonService:
         Args:
             countries: List of country codes to compare (e.g., ["FR", "DE"])
             tags: Optional list of tags to filter questions (e.g., ["airspace", "flight_plan"])
+            question_ids: Optional pre-filtered question IDs (e.g. from QuestionMatcher).
+                          When provided, takes priority over tags for question selection.
             max_questions: Override config max_questions
             min_difference: Override config min_difference
             synthesize: Whether to generate LLM synthesis
@@ -164,6 +167,7 @@ class RulesComparisonService:
         comparison = self.answer_comparer.compare_countries(
             countries=countries,
             tags=tags,
+            question_ids=question_ids,
             max_questions=effective_max,
             min_difference=effective_min_diff,
             send_all_threshold=self.config.send_all_threshold,

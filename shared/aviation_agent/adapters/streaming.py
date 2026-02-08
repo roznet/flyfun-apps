@@ -83,6 +83,9 @@ async def stream_aviation_agent(
             "configurable": {"thread_id": effective_thread_id},
         }
 
+        message_streamed = False  # Track if any message content was streamed
+        tool_completed = False  # Only stream LLM output after tool execution
+
         async for event in graph.astream_events(
             initial_state,
             version="v2",
@@ -128,7 +131,8 @@ async def stream_aviation_agent(
                     }
             
             elif kind == "on_chain_end" and event.get("name") == "tool":
-                # Tool execution completed
+                # Tool execution completed — LLM streaming after this is from formatter
+                tool_completed = True
                 output = event.get("data", {}).get("output", {})
                 result = output.get("tool_result") if isinstance(output, dict) else None
                 plan = event.get("data", {}).get("input", {}).get("plan")
@@ -178,8 +182,9 @@ async def stream_aviation_agent(
             # Capture LLM streaming - LangGraph uses on_chat_model_stream for ChatOpenAI
             # This is emitted when the LLM streams chunks inside a chain.invoke() call
             # We want to capture this from the formatter's LLM, not the planner's
-            elif kind == "on_chat_model_stream":
-                # Capture all chat_model_stream events (planner doesn't stream)
+            elif kind == "on_chat_model_stream" and tool_completed:
+                # Only capture streaming after tool execution (formatter LLM)
+                # Ignores planner and any LLM calls during tool execution (e.g., QuestionMatcher)
                 chunk = event.get("data", {}).get("chunk")
                 if chunk:
                     # Handle AIMessageChunk - has .content attribute
@@ -192,6 +197,7 @@ async def stream_aviation_agent(
                         content = chunk
 
                     if content:
+                        message_streamed = True
                         yield {
                             "event": "message",
                             "data": {"content": content}
@@ -211,8 +217,8 @@ async def stream_aviation_agent(
             # Also capture streaming from StrOutputParser (which streams strings)
             # This is important - StrOutputParser streams string chunks after LLM
             # Capture all chain_stream events (they'll be from formatter's StrOutputParser)
-            elif kind == "on_chain_stream":
-                # StrOutputParser outputs strings directly
+            elif kind == "on_chain_stream" and tool_completed:
+                # StrOutputParser outputs strings directly (from formatter only)
                 chunk = event.get("data", {}).get("chunk")
                 if chunk:
                     if isinstance(chunk, str) and chunk.strip():
@@ -253,13 +259,20 @@ async def stream_aviation_agent(
                         "data": {}
                     }
                 
+                # If formatter short-circuited (no LLM call), emit final_answer as message
+                if not message_streamed and output.get("final_answer"):
+                    yield {
+                        "event": "message",
+                        "data": {"content": output["final_answer"]}
+                    }
+
                 # Emit error if present
                 if output.get("error"):
                     yield {
                         "event": "error",
                         "data": {"message": output["error"]}
                     }
-                
+
                 # Emit UI payload
                 if output.get("ui_payload"):
                     yield {
