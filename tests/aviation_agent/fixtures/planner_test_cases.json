@@ -485,6 +485,34 @@
   },
 
   {
+    "question": "is the use of FIS compulsory in Spain?",
+    "expected_tool": "answer_rules_question",
+    "expected_arguments": {
+      "country_code": "ES",
+      "question": "is the use of FIS compulsory in Spain?"
+    },
+    "description": "Single country rules - Spain not in database, should still route correctly"
+  },
+  {
+    "question": "how does uncontrolled airspace work in croatia",
+    "expected_tool": "answer_rules_question",
+    "expected_arguments": {
+      "country_code": "HR",
+      "question": "how does uncontrolled airspace work in croatia"
+    },
+    "description": "Single country rules - Croatia not in database, should still route correctly"
+  },
+  {
+    "question": "how should a mechanic do an annual in france",
+    "expected_tool": "answer_rules_question",
+    "expected_arguments": {
+      "country_code": "FR",
+      "question": "how should a mechanic do an annual in france"
+    },
+    "description": "Unrelated topic - no matching rules, should still route to answer_rules_question"
+  },
+
+  {
     "question": "Opening/closing/amending FPLs in France",
     "expected_tool": "answer_rules_question",
     "expected_arguments": {
