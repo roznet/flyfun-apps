@@ -429,6 +429,35 @@
     },
     "description": "Compare visual circuit procedures FR vs UK"
   },
+  {
+    "question": "Compare how does uncontrolled airspace work between France and Germany",
+    "expected_tool": "compare_rules_between_countries",
+    "expected_arguments": {
+      "countries": ["FR", "DE"],
+      "question": "Compare how does uncontrolled airspace work between France and Germany",
+      "tags": ["airspace"]
+    },
+    "description": "Compare uncontrolled airspace rules - should use question for semantic narrowing"
+  },
+  {
+    "question": "What are the differences in language requirements between France and Germany?",
+    "expected_tool": "compare_rules_between_countries",
+    "expected_arguments": {
+      "countries": ["FR", "DE"],
+      "question": "What are the differences in language requirements between France and Germany?"
+    },
+    "description": "Compare language rules between France and Germany"
+  },
+
+  {
+    "question": "What should I know about the use of language when flying in France?",
+    "expected_tool": "answer_rules_question",
+    "expected_arguments": {
+      "country_code": "FR",
+      "question": "What should I know about the use of language when flying in France?"
+    },
+    "description": "Single country rules - language question should match 'use of local language' rule"
+  },
 
   {
     "question": "Opening/closing/amending FPLs in France",
