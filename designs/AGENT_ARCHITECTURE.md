@@ -203,7 +203,7 @@ shared/aviation_agent/
   adapters/
     streaming.py            # SSE streaming adapter
     logging.py              # Conversation logging
-    langgraph_runner.py     # Orchestration helpers
+    langgraph_runner.py     # Orchestration, provider factory (_resolve_llm, _PROVIDER_REGISTRY)
 
 shared/
   aircraft_speeds.py        # GA aircraft speed lookup
@@ -214,18 +214,22 @@ web/server/api/
   aviation_agent_chat.py    # FastAPI router
 
 configs/aviation_agent/
-  default.json              # Main behavior config
+  default.json              # Default config (OpenAI)
+  anthropic.json            # Anthropic Claude config
+  gemini.json               # Google Gemini config
   prompts/
     planner_v1.md           # Planner system prompt
     formatter_v1.md         # Formatter system prompt
     comparison_synthesis_v1.md  # Comparison prompt
     router_v1.md            # Router system prompt
     rules_agent_v1.md       # Rules agent prompt
+    ab_judge_v1.md          # LLM judge prompt for A/B comparison
 
 tests/aviation_agent/
   conftest.py               # Shared fixtures
+  test_utils.py             # Shared test utilities (load_test_cases, match_tool_and_args)
   test_planning.py
-  test_planner_behavior.py  # LLM tests
+  test_planner_behavior.py  # LLM behavioral tests (multi-provider via config)
   test_formatting.py
   test_formatter_behavior.py
   test_graph_e2e.py
@@ -233,6 +237,11 @@ tests/aviation_agent/
   test_integration.py
   test_rules_rag.py
   test_routing.py
+
+tools/
+  avdbg.py                  # Debug CLI (supports --config for provider selection)
+  ab_test.py                # A/B planner behavior test runner across configs
+  ab_compare.py             # LLM judge full-answer comparison
 ```
 
 ---
@@ -324,6 +333,8 @@ See `AGENT_CONFIG.md` for complete configuration documentation.
 | E2E | `test_graph_e2e.py` | Full graph execution |
 | E2E | `test_streaming.py` | SSE event streaming |
 | Integration | `test_integration.py` | FastAPI endpoint |
+| A/B | `tools/ab_test.py` | Cross-provider planner comparison |
+| A/B | `tools/ab_compare.py` | LLM judge full-answer comparison |
 
 **Dependency Injection for Tests:**
 ```python

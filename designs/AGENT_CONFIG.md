@@ -8,7 +8,10 @@
 |------|---------|
 | `shared/aviation_agent/config.py` | Settings and config loading |
 | `shared/aviation_agent/behavior_config.py` | Pydantic schema for JSON config |
-| `configs/aviation_agent/default.json` | Default behavior configuration |
+| `shared/aviation_agent/adapters/langgraph_runner.py` | Provider factory (`_resolve_llm()`, `_PROVIDER_REGISTRY`) |
+| `configs/aviation_agent/default.json` | Default behavior config (OpenAI) |
+| `configs/aviation_agent/anthropic.json` | Anthropic Claude config |
+| `configs/aviation_agent/gemini.json` | Google Gemini config |
 | `configs/aviation_agent/prompts/` | System prompt files |
 
 **Key Exports:**
@@ -54,6 +57,8 @@ Infrastructure and deployment settings:
 | `RULES_JSON` | Rules JSON path | – |
 | `COHERE_API_KEY` | Cohere API key (for reranking) | – |
 | `OPENAI_API_KEY` | OpenAI API key | – |
+| `ANTHROPIC_API_KEY` | Anthropic API key | – |
+| `GOOGLE_API_KEY` | Google API key | – |
 
 ---
 
@@ -71,16 +76,21 @@ JSON files in `configs/aviation_agent/`:
 
   "llms": {
     "planner": {
+      "provider": "openai",
       "model": null,
       "temperature": 0.0,
-      "streaming": false
+      "streaming": false,
+      "max_retries": 3,
+      "request_timeout": 60
     },
     "formatter": {
+      "provider": "openai",
       "model": null,
       "temperature": 0.0,
       "streaming": true
     },
     "router": {
+      "provider": "openai",
       "model": "gpt-4o-mini",
       "temperature": 0.0,
       "streaming": false
@@ -144,9 +154,22 @@ JSON files in `configs/aviation_agent/`:
 | `rules` | Rules synthesis | uses `formatter` |
 
 **Per-component settings:**
+- `provider`: LLM provider — `"openai"`, `"anthropic"`, or `"google"` (default: `"openai"`)
 - `model`: Model name or `null` (use env var)
 - `temperature`: 0.0-2.0 (0.0 = deterministic)
 - `streaming`: Enable streaming (formatter only)
+- `max_retries`: Retry count for transient failures (default: 3)
+- `request_timeout`: Timeout per request in seconds (default: 60)
+
+**Multi-Provider Support:**
+
+Provider resolution is handled by `_PROVIDER_REGISTRY` in `langgraph_runner.py`. Each provider maps to a LangChain class, required API key env var, and provider-specific kwargs. All providers accept `model=` and `timeout=` as common constructor params.
+
+| Provider | LangChain Class | API Key | Notes |
+|----------|----------------|---------|-------|
+| `openai` | `ChatOpenAI` | `OPENAI_API_KEY` | Needs `stream_usage=True` for streaming token tracking |
+| `anthropic` | `ChatAnthropic` | `ANTHROPIC_API_KEY` | |
+| `google` | `ChatGoogleGenerativeAI` | `GOOGLE_API_KEY` | |
 
 #### RAG
 
@@ -256,6 +279,24 @@ cp configs/aviation_agent/default.json configs/aviation_agent/experiment.json
 export AVIATION_AGENT_CONFIG=experiment
 ```
 
+### Example: Anthropic Provider
+
+```json
+{
+  "llms": {
+    "planner": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "formatter": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929",
+      "streaming": true
+    }
+  }
+}
+```
+
 ### Example: Test Different Models
 
 ```json
@@ -268,19 +309,6 @@ export AVIATION_AGENT_CONFIG=experiment
     "planner": {
       "model": "gpt-4o-mini",
       "temperature": 0.0
-    }
-  }
-}
-```
-
-### Example: Higher Temperature
-
-```json
-{
-  "llms": {
-    "formatter": {
-      "model": "gpt-4o",
-      "temperature": 0.3
     }
   }
 }
@@ -313,18 +341,16 @@ export AVIATION_AGENT_CONFIG=experiment
 
 ```
 configs/aviation_agent/
-  default.json              # Default configuration
-  fast.json                 # Faster models, less features
-  high_quality.json         # Best models, all features
-  experiment_a.json         # A/B test variant
+  default.json              # Default configuration (OpenAI)
+  anthropic.json            # Anthropic Claude config
+  gemini.json               # Google Gemini config
   prompts/
     planner_v1.md
-    planner_v2.md           # Alternative planner
     formatter_v1.md
-    formatter_v2_concise.md # Shorter answers
     comparison_synthesis_v1.md
     router_v1.md
     rules_agent_v1.md
+    ab_judge_v1.md          # LLM judge prompt for A/B comparison
 ```
 
 ---
@@ -340,7 +366,7 @@ All components automatically use behavior config:
 | `formatting.py` | formatter prompt |
 | `routing.py` | router model and prompt |
 | `rules_rag.py` | RAG settings, reranking |
-| `langgraph_runner.py` | LLM models, temperatures |
+| `langgraph_runner.py` | LLM models, providers, temperatures |
 
 ---
 
@@ -364,8 +390,9 @@ planner = build_planner_runnable(llm=mock_llm, tools=tools)
 ## Debug CLI
 
 ```bash
-# Use specific config
-python tools/avdbg.py "Find airports" --config fast
+# Use specific config/provider
+python tools/avdbg.py "Find airports" --config anthropic
+python tools/avdbg.py "Find airports" --config gemini --plan
 
 # Show current config
 python tools/avdbg.py "Find airports" -v
@@ -374,20 +401,51 @@ python tools/avdbg.py "Find airports" -v
 
 ---
 
+## A/B Testing Tools
+
+### Planner Behavior Test (`tools/ab_test.py`)
+
+Runs planner test cases across configs, compares tool selection accuracy:
+
+```bash
+python tools/ab_test.py --configs default anthropic gemini
+python tools/ab_test.py --configs default anthropic --cases 5
+python tools/ab_test.py --configs default anthropic --output results/comparison.csv
+```
+
+Uses shared test utilities from `tests/aviation_agent/test_utils.py`.
+
+### LLM Judge Comparison (`tools/ab_compare.py`)
+
+Runs full agent queries through two configs and uses a judge LLM to compare answers on accuracy, completeness, clarity, and helpfulness (1-5 scale each):
+
+```bash
+python tools/ab_compare.py --configs default anthropic --query "Find airports near Paris with AVGAS"
+python tools/ab_compare.py --configs default anthropic --queries queries.txt
+python tools/ab_compare.py --configs default anthropic --judge openai
+```
+
+Judge prompt: `configs/aviation_agent/prompts/ab_judge_v1.md`
+
+---
+
 ## Pydantic Schema
 
 ```python
 class LLMConfig(BaseModel):
+    provider: str = "openai"  # "openai", "anthropic", "google"
     model: Optional[str] = None
-    temperature: float = 0.0
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     streaming: bool = False
+    max_retries: int = Field(default=3, ge=0, le=10)
+    request_timeout: int = Field(default=60, ge=5, le=300)
 
 
 class LLMsConfig(BaseModel):
-    planner: LLMConfig = LLMConfig()
-    formatter: LLMConfig = LLMConfig(streaming=True)
-    router: LLMConfig = LLMConfig(model="gpt-4o-mini")
-    rules: Optional[LLMConfig] = None
+    planner: LLMConfig
+    formatter: LLMConfig
+    router: LLMConfig
+    rules: Optional[LLMConfig] = None  # None = use formatter
 
 
 class RetrievalConfig(BaseModel):
