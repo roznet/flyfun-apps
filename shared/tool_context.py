@@ -89,6 +89,7 @@ class ToolContext:
     rules_manager: Optional[RulesManager] = None
     comparison_service: Optional[Any] = None  # RulesComparisonService (lazy import)
     rules_rag: Optional[Any] = None  # RulesRAG for semantic search (lazy import)
+    question_matcher: Optional[Any] = None  # QuestionMatcher for LLM-based matching (lazy import)
 
     @classmethod
     def create(
@@ -195,6 +196,16 @@ class ToolContext:
                     logger.debug(f"RulesRAG not available: {e}")
                     pass  # Service is optional
 
+        # Initialize QuestionMatcher (lightweight — no vector DB needed, just LLM)
+        question_matcher = None
+        if load_rag and rules_manager:
+            try:
+                from shared.aviation_agent.question_matcher import QuestionMatcher
+                question_matcher = QuestionMatcher()
+                logger.info("✓ QuestionMatcher initialized (lazy LLM)")
+            except Exception as e:
+                logger.debug(f"QuestionMatcher not available: {e}")
+
         return cls(
             model=model,
             notification_service=notification_service,
@@ -202,6 +213,7 @@ class ToolContext:
             rules_manager=rules_manager,
             comparison_service=comparison_service,
             rules_rag=rules_rag,
+            question_matcher=question_matcher,
         )
 
     def ensure_rules_manager(self) -> RulesManager:

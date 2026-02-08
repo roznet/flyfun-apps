@@ -1238,7 +1238,7 @@ def answer_rules_question(
 ) -> Dict[str, Any]:
     """
     Answer a specific question about aviation rules for a country.
-    Uses semantic search (RAG) to find the most relevant Q&A pairs.
+    Uses LLM-based question matching (primary), RAG (fallback), or tag filtering.
 
     Args:
         country_code: ISO-2 country code (e.g., FR, GB)
@@ -1249,7 +1249,66 @@ def answer_rules_question(
     country_code = country_code.upper()
     rules_manager = ctx.ensure_rules_manager()
 
-    # Try RAG-based retrieval first
+    # Get all rules for this country (needed by both LLM matcher and tag fallback)
+    all_rules = rules_manager.get_rules_for_country(
+        country_code=country_code,
+        tags=tags,
+    )
+
+    if not all_rules:
+        available = ", ".join(rules_manager.get_available_countries())
+        return {
+            "found": False,
+            "country_code": country_code,
+            "count": 0,
+            "retrieval_mode": "tags",
+            "message": f"No rules found for {country_code}. Available countries: {available}"
+        }
+
+    # Primary: LLM-based question matching
+    if ctx.question_matcher:
+        try:
+            matched_ids = ctx.question_matcher.match_questions(
+                query=question,
+                questions=all_rules,
+            )
+            if matched_ids:
+                matched_id_set = set(matched_ids)
+                matched_rules = [r for r in all_rules if r.get("question_id") in matched_id_set]
+
+                formatted_lines = []
+                for r in matched_rules:
+                    q = r.get('question_text', '')
+                    a = r.get('answer_html', r.get('answer', ''))
+                    formatted_lines.append(f"**Q: {q}**\nA: {a}")
+
+                return {
+                    "found": True,
+                    "country_code": country_code,
+                    "count": len(matched_rules),
+                    "retrieval_mode": "llm_match",
+                    "rules": matched_rules,
+                    "formatted_text": "\n\n".join(formatted_lines),
+                }
+            else:
+                # LLM found no relevant questions — return explicit "not found"
+                return {
+                    "found": False,
+                    "country_code": country_code,
+                    "count": 0,
+                    "retrieval_mode": "llm_match",
+                    "message": (
+                        f"No rules in the database match this question for {country_code}. "
+                        "The rules database covers common VFR/IFR regulatory topics."
+                    ),
+                }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"LLM question matching failed, falling back: {e}"
+            )
+
+    # Fallback: RAG-based retrieval
     if use_rag and ctx.rules_rag:
         try:
             results = ctx.rules_rag.retrieve_rules(
@@ -1260,7 +1319,6 @@ def answer_rules_question(
             )
 
             if results:
-                # Format results for display
                 formatted_lines = []
                 for r in results:
                     q = r.get('question_text', '')
@@ -1280,30 +1338,15 @@ def answer_rules_question(
             import logging
             logging.getLogger(__name__).warning(f"RAG retrieval failed, falling back to tags: {e}")
 
-    # Fallback to tag-based retrieval
-    rules = rules_manager.get_rules_for_country(
-        country_code=country_code,
-        tags=tags
-    )
-
-    if not rules:
-        available = ", ".join(rules_manager.get_available_countries())
-        return {
-            "found": False,
-            "country_code": country_code,
-            "count": 0,
-            "retrieval_mode": "tags",
-            "message": f"No rules found for {country_code}. Available countries: {available}"
-        }
-
-    formatted_text = rules_manager.format_rules_for_display(rules, group_by_category=True)
+    # Final fallback: return all tag-filtered rules
+    formatted_text = rules_manager.format_rules_for_display(all_rules, group_by_category=True)
 
     return {
         "found": True,
         "country_code": country_code,
-        "count": len(rules),
+        "count": len(all_rules),
         "retrieval_mode": "tags",
-        "rules": rules[:20],  # Limit for tag-based (less targeted)
+        "rules": all_rules[:20],
         "formatted_text": formatted_text,
     }
 
