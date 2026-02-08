@@ -1,0 +1,138 @@
+{
+  "id": "ifr",
+  "display_name": "IFR",
+  "max_level": 5,
+  "level_descriptions": {
+    "1": "Runway/taxiway at dep/dest, ILS/procedure unavailable at dep/dest",
+    "2": "ILS/procedure changed at dep/dest, airspace restrictions in corridor, rwy/twy closed near route",
+    "3": "ATS/RNAV route changes, movement area limits near route, close NOTAMs at altitude, navaids, procedure unavailable near route",
+    "4": "Facilities/services/comms at dep/dest, other dep/dest NOTAMs, conditions near route",
+    "5": "Other NOTAMs"
+  },
+  "rules": [
+    {
+      "id": "ifr_p1_movement_area",
+      "name": "Runway/taxiway/threshold conditions at dep/dest",
+      "type": "q_code_match",
+      "level": 1,
+      "subjects": ["MR", "MT", "MX"],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p1_procedure_unavailable",
+      "name": "ILS/procedure unavailable at dep/dest",
+      "type": "q_code_match",
+      "level": 1,
+      "subjects": [
+        "IL", "IG", "IM", "IO", "II", "IS", "IT", "IU", "ID", "IW", "IX", "IY",
+        "PI", "PA", "PD", "PU", "PH"
+      ],
+      "condition_filter": "unavailable",
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p2_procedure_changed",
+      "name": "ILS/procedure changed at dep/dest",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": [
+        "IL", "IG", "IM", "IO", "II", "IS", "IT", "IU", "ID", "IW", "IX", "IY",
+        "PI", "PA", "PD", "PU", "PH",
+        "PM", "PO", "PT", "PX", "PF", "PR", "PC", "PL", "PN", "PZ"
+      ],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p2_airspace_restrictions",
+      "name": "Airspace restrictions within corridor (D/P/R areas)",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["RA", "RR", "RT"],
+      "max_distance_nm": 50,
+      "altitude_check": "if_available"
+    },
+    {
+      "id": "ifr_p2_movement_area_closed_near_route",
+      "name": "Runway/taxiway closed near route",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["MR", "MT", "MX"],
+      "condition_filter": "unavailable",
+      "location": "not_dep_dest",
+      "max_distance_nm": 20
+    },
+    {
+      "id": "ifr_p3_ats_route_changes",
+      "name": "ATS/RNAV route changes in corridor",
+      "type": "q_code_match",
+      "level": 3,
+      "subjects": ["AR", "AN"],
+      "max_distance_nm": 50,
+      "altitude_check": "if_available"
+    },
+    {
+      "id": "ifr_p3_movement_area_near_route",
+      "name": "Runway/taxiway limitations near route",
+      "type": "q_code_match",
+      "level": 3,
+      "subjects": ["MR", "MT", "MX"],
+      "condition_filter": "limitation",
+      "location": "not_dep_dest",
+      "max_distance_nm": 50
+    },
+    {
+      "id": "ifr_p3_close_altitude",
+      "name": "Close to route at flight altitude",
+      "type": "q_code_match",
+      "level": 3,
+      "max_distance_nm": 10,
+      "altitude_check": "required",
+      "no_altitude_fallback_distance_nm": 5
+    },
+    {
+      "id": "ifr_p3_navaid_issues",
+      "name": "Navaid issues along route",
+      "type": "q_code_match",
+      "level": 3,
+      "subjects": ["NV", "ND", "NB", "NT", "NL"],
+      "max_distance_nm": 25
+    },
+    {
+      "id": "ifr_p3_procedure_unavailable_near_route",
+      "name": "Procedure unavailable at diversion airports near route",
+      "type": "q_code_match",
+      "level": 3,
+      "subjects": ["PI", "PA", "PD", "PU", "PH"],
+      "condition_filter": "unavailable",
+      "max_distance_nm": 25
+    },
+    {
+      "id": "ifr_p4_facilities",
+      "name": "Facilities/services at dep/dest",
+      "type": "q_code_match",
+      "level": 4,
+      "subjects": [
+        "FA", "FF", "FS",
+        "CA", "CO", "CS",
+        "SA", "SS", "SE",
+        "LA", "LB", "LC", "LI"
+      ],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p4_other_dep_dest",
+      "name": "Other NOTAMs at dep/dest",
+      "type": "q_code_match",
+      "level": 4,
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p4_near_route",
+      "name": "Conditions near route",
+      "type": "q_code_match",
+      "level": 4,
+      "max_distance_nm": 50,
+      "altitude_check": "if_available"
+    }
+  ]
+}

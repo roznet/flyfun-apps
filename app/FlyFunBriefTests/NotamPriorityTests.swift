@@ -16,7 +16,8 @@ struct NotamPriorityTests {
 
     // MARK: - Test Helpers
 
-    /// Create a test NOTAM with specified properties via JSON decoding
+    /// Create a test NOTAM with specified properties via JSON decoding.
+    /// Automatically generates `q_code_info` from `qCode` when it has >= 5 chars.
     private func makeNotam(
         id: String = "A1234/24",
         location: String = "LFPG",
@@ -40,6 +41,32 @@ struct NotamPriorityTests {
         let upperJson = upperLimit.map { "\"upper_limit\": \($0)," } ?? ""
         let tagsJson = customTags.isEmpty ? "[]" : "[\(customTags.map { "\"\($0)\"" }.joined(separator: ", "))]"
 
+        // Build q_code_info from qCode when possible (need >= 5 chars: Q + 2 subject + 2 condition)
+        let qCodeInfoJson: String
+        if let qc = qCode, qc.count >= 5 {
+            let subjectCode = String(qc[qc.index(qc.startIndex, offsetBy: 1)..<qc.index(qc.startIndex, offsetBy: 3)])
+            let conditionCode = String(qc[qc.index(qc.startIndex, offsetBy: 3)..<qc.index(qc.startIndex, offsetBy: 5)])
+            qCodeInfoJson = """
+            "q_code_info": {
+                "q_code": "\(qc)",
+                "subject_code": "\(subjectCode)",
+                "subject_meaning": "Test",
+                "subject_phrase": "test",
+                "subject_category": "Test",
+                "condition_code": "\(conditionCode)",
+                "condition_meaning": "Test",
+                "condition_phrase": "test",
+                "condition_category": "Test",
+                "display_text": "Test: Test",
+                "short_text": "TEST",
+                "is_checklist": false,
+                "is_plain_language": false
+            },
+            """
+        } else {
+            qCodeInfoJson = ""
+        }
+
         let json = """
         {
             "id": "\(id)",
@@ -47,6 +74,7 @@ struct NotamPriorityTests {
             "raw_text": "TEST NOTAM",
             "message": "Test message",
             "q_code": \(qCode.map { "\"\($0)\"" } ?? "null"),
+            \(qCodeInfoJson)
             \(coordJson)
             \(lowerJson)
             \(upperJson)
@@ -172,141 +200,220 @@ struct NotamPriorityTests {
         #expect(abs(windowEnd!.timeIntervalSince(expectedEnd)) < 1)
     }
 
-    // MARK: - IFR P3: Close + Altitude Rule Tests
+    // MARK: - JSON Profile Loading Tests
 
-    @Test func p3WhenCloseAndAltitudeOverlaps() throws {
-        let notam = try makeNotam(
-            latitude: 50.0,
-            longitude: 1.0,
-            lowerLimit: 33000,
-            upperLimit: 37000
-        )
-
-        let context = makeContext(cruiseAltitude: 35000)
-        let rule = IFRCloseAndAltitudeRelevant()
-        let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
-
-        #expect(result == 3, "Close + altitude overlap should return P3")
+    @Test func ifrProfileLoadsCorrectly() {
+        let profile = PriorityProfiles.ifr
+        #expect(profile.id == "ifr")
+        #expect(profile.displayName == "IFR")
+        #expect(profile.maxLevel == 5)
+        #expect(profile.rules.count == 13)
+        #expect(profile.levelDescriptions.count == 5)
     }
 
-    @Test func noMatchWhenFarFromRoute() throws {
-        let notam = try makeNotam(
-            latitude: 40.0,
-            longitude: 10.0,
-            lowerLimit: 33000,
-            upperLimit: 37000
-        )
-
-        let context = makeContext(cruiseAltitude: 35000)
-        let rule = IFRCloseAndAltitudeRelevant()
-        let result = rule.evaluate(notam: notam, distanceNm: 51.0, context: context)
-
-        #expect(result == nil, "Rule doesn't apply when beyond 10nm threshold")
+    @Test func vfrProfileLoadsCorrectly() {
+        let profile = PriorityProfiles.vfr
+        #expect(profile.id == "vfr")
+        #expect(profile.displayName == "VFR")
+        #expect(profile.maxLevel == 3)
+        #expect(profile.rules.count == 11)
+        #expect(profile.levelDescriptions.count == 3)
     }
 
-    @Test func noMatchWhenAltitudeDoesNotOverlap() throws {
-        let notam = try makeNotam(
-            lowerLimit: 0,
-            upperLimit: 5000
-        )
+    @Test func profileFromJSONRoundTrip() throws {
+        let json = """
+        {
+            "id": "test",
+            "display_name": "Test Profile",
+            "max_level": 2,
+            "level_descriptions": {"1": "Important", "2": "Other"},
+            "rules": [
+                {
+                    "id": "test_rule",
+                    "name": "Test Rule",
+                    "type": "q_code_match",
+                    "level": 1,
+                    "subjects": ["MR"]
+                }
+            ]
+        }
+        """.data(using: .utf8)!
 
-        let context = makeContext(cruiseAltitude: 35000)
-        let rule = IFRCloseAndAltitudeRelevant()
-        let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
+        let profile = try PriorityProfile.fromJSON(json)
+        #expect(profile.id == "test")
+        #expect(profile.maxLevel == 2)
+        #expect(profile.rules.count == 1)
+        #expect(profile.rules[0].id == "test_rule")
+        #expect(profile.levelDescriptions[1] == "Important")
+    }
 
-        #expect(result == nil, "Altitude doesn't overlap cruise")
+    // MARK: - QCodeMatchRule Filter Tests
+
+    @Test func subjectFilter() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "subjects": ["MR", "MT"]}
+        """)
+        let context = makeContext()
+
+        let runwayNotam = try makeNotam(qCode: "QMRLC")
+        #expect(rule.evaluate(notam: runwayNotam, distanceNm: nil, context: context) == 1)
+
+        let navaidNotam = try makeNotam(qCode: "QNVAS")
+        #expect(rule.evaluate(notam: navaidNotam, distanceNm: nil, context: context) == nil)
+    }
+
+    @Test func conditionFilterUnavailable() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "condition_filter": "unavailable"}
+        """)
+        let context = makeContext()
+
+        // LC = closed = unavailable
+        let closedNotam = try makeNotam(qCode: "QMRLC")
+        #expect(rule.evaluate(notam: closedNotam, distanceNm: nil, context: context) == 1)
+
+        // CH = changed, not unavailable
+        let changedNotam = try makeNotam(qCode: "QMRCH")
+        #expect(rule.evaluate(notam: changedNotam, distanceNm: nil, context: context) == nil)
+
+        // Custom tag "closed" also triggers unavailable
+        let taggedNotam = try makeNotam(qCode: "QMRCH", customTags: ["closed"])
+        #expect(rule.evaluate(notam: taggedNotam, distanceNm: nil, context: context) == 1)
+    }
+
+    @Test func conditionFilterLimitation() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "condition_filter": "limitation"}
+        """)
+        let context = makeContext()
+
+        // LC = closed, starts with L = limitation
+        let closedNotam = try makeNotam(qCode: "QMRLC")
+        #expect(rule.evaluate(notam: closedNotam, distanceNm: nil, context: context) == 1)
+
+        // LR = reduced length, starts with L = limitation
+        let reducedNotam = try makeNotam(qCode: "QMRLR")
+        #expect(rule.evaluate(notam: reducedNotam, distanceNm: nil, context: context) == 1)
+
+        // CH = changed, not limitation
+        let changedNotam = try makeNotam(qCode: "QMRCH")
+        #expect(rule.evaluate(notam: changedNotam, distanceNm: nil, context: context) == nil)
+    }
+
+    @Test func locationFilterDepDest() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "location": "dep_dest"}
+        """)
+        let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
+
+        let atDep = try makeNotam(location: "LFPG")
+        #expect(rule.evaluate(notam: atDep, distanceNm: nil, context: context) == 1)
+
+        let atDest = try makeNotam(location: "EGLL")
+        #expect(rule.evaluate(notam: atDest, distanceNm: nil, context: context) == 1)
+
+        let elsewhere = try makeNotam(location: "KJFK")
+        #expect(rule.evaluate(notam: elsewhere, distanceNm: nil, context: context) == nil)
+    }
+
+    @Test func locationFilterNotDepDest() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "location": "not_dep_dest"}
+        """)
+        let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
+
+        let atDep = try makeNotam(location: "LFPG")
+        #expect(rule.evaluate(notam: atDep, distanceNm: nil, context: context) == nil)
+
+        let elsewhere = try makeNotam(location: "EGTF")
+        #expect(rule.evaluate(notam: elsewhere, distanceNm: nil, context: context) == 1)
+    }
+
+    @Test func distanceFilter() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "max_distance_nm": 25}
+        """)
+        let context = makeContext()
+
+        let notam = try makeNotam()
+        #expect(rule.evaluate(notam: notam, distanceNm: 20.0, context: context) == 1)
+        #expect(rule.evaluate(notam: notam, distanceNm: 25.0, context: context) == 1)
+        #expect(rule.evaluate(notam: notam, distanceNm: 26.0, context: context) == nil)
+        #expect(rule.evaluate(notam: notam, distanceNm: nil, context: context) == nil)
+    }
+
+    @Test func altitudeCheckIfAvailable() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "max_distance_nm": 50, "altitude_check": "if_available"}
+        """)
+
+        // With cruise altitude set, must overlap
+        let contextWithAlt = makeContext(cruiseAltitude: 35000)
+        let overlapping = try makeNotam(lowerLimit: 33000, upperLimit: 37000)
+        #expect(rule.evaluate(notam: overlapping, distanceNm: 10.0, context: contextWithAlt) == 1)
+
+        let nonOverlapping = try makeNotam(lowerLimit: 0, upperLimit: 5000)
+        #expect(rule.evaluate(notam: nonOverlapping, distanceNm: 10.0, context: contextWithAlt) == nil)
+
+        // Without cruise altitude, pass through (if_available = permissive)
+        let contextNoAlt = makeContext(cruiseAltitude: nil)
+        #expect(rule.evaluate(notam: nonOverlapping, distanceNm: 10.0, context: contextNoAlt) == 1)
+    }
+
+    @Test func altitudeCheckRequired() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "max_distance_nm": 10, "altitude_check": "required", "no_altitude_fallback_distance_nm": 5}
+        """)
+
+        // With cruise altitude, must overlap
+        let contextWithAlt = makeContext(cruiseAltitude: 35000)
+        let overlapping = try makeNotam(lowerLimit: 33000, upperLimit: 37000)
+        #expect(rule.evaluate(notam: overlapping, distanceNm: 5.0, context: contextWithAlt) == 1)
+
+        let nonOverlapping = try makeNotam(lowerLimit: 0, upperLimit: 5000)
+        #expect(rule.evaluate(notam: nonOverlapping, distanceNm: 5.0, context: contextWithAlt) == nil)
+
+        // Without cruise altitude, fallback to distance check
+        let contextNoAlt = makeContext(cruiseAltitude: nil)
+        let notam = try makeNotam()
+        #expect(rule.evaluate(notam: notam, distanceNm: 4.0, context: contextNoAlt) == 1, "Within fallback distance")
+        #expect(rule.evaluate(notam: notam, distanceNm: 6.0, context: contextNoAlt) == nil, "Beyond fallback distance")
     }
 
     @Test func surfaceToUnlimitedNotAltitudeRelevant() throws {
-        let notam = try makeNotam(
-            lowerLimit: 0,
-            upperLimit: 99900
-        )
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1, "max_distance_nm": 50, "altitude_check": "if_available"}
+        """)
 
         let context = makeContext(cruiseAltitude: 35000)
-        let rule = IFRCloseAndAltitudeRelevant()
-        let result = rule.evaluate(notam: notam, distanceNm: 5.0, context: context)
-
-        #expect(result == nil, "Surface to unlimited should not be altitude relevant")
+        let surfaceToUnlimited = try makeNotam(lowerLimit: 0, upperLimit: 99900)
+        #expect(rule.evaluate(notam: surfaceToUnlimited, distanceNm: 5.0, context: context) == nil)
     }
 
-    // MARK: - IFR P1: Movement Area at Dep/Dest Tests
+    @Test func noQCodeSubjectReturnsNil() throws {
+        let rule = try decodeRule("""
+        {"id": "t", "name": "t", "type": "q_code_match", "level": 1}
+        """)
+        let context = makeContext()
 
-    @Test func p1ForRunwayClosureAtDestination() throws {
-        let notam = try makeNotam(
-            location: "EGLL",
-            qCode: "QMRLC",
-            customTags: ["closed"]
-        )
+        let noQCode = try makeNotam(qCode: nil)
+        #expect(rule.evaluate(notam: noQCode, distanceNm: nil, context: context) == nil)
 
-        let context = makeContext(destinationICAO: "EGLL")
-        let rule = IFRMovementAreaAtDepDest()
-        let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
-
-        #expect(result == 1, "Runway NOTAM at destination should be P1")
+        let shortQCode = try makeNotam(qCode: "QM")
+        #expect(rule.evaluate(notam: shortQCode, distanceNm: nil, context: context) == nil)
     }
 
-    @Test func p1ForRunwayClosureAtDeparture() throws {
-        let notam = try makeNotam(
-            location: "LFPG",
-            qCode: "QMRLC",
-            customTags: ["closed"]
-        )
+    // MARK: - Evaluator Integration Tests
 
+    @Test func evaluatorReturnsP1ForRunwayAtDeparture() throws {
+        let notam = try makeNotam(location: "LFPG", qCode: "QMRLC")
         let context = makeContext(departureICAO: "LFPG")
-        let rule = IFRMovementAreaAtDepDest()
-        let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
-
-        #expect(result == 1, "Runway NOTAM at departure should be P1")
-    }
-
-    @Test func noP1ForClosureAtOtherAirport() throws {
-        let notam = try makeNotam(
-            location: "KJFK",
-            qCode: "QMRLC",
-            customTags: ["closed"]
-        )
-
-        let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
-        let rule = IFRMovementAreaAtDepDest()
-        let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
-
-        #expect(result == nil, "NOTAM at unrelated airport should not match")
-    }
-
-    // MARK: - IFR P4: Facilities at Dep/Dest
-
-    @Test func p4ForFacilityAtDepDest() throws {
-        let notam = try makeNotam(
-            location: "LFPG",
-            qCode: "QFATT"
-        )
-
-        let context = makeContext(departureICAO: "LFPG")
-        let rule = IFRFacilitiesAtDepDest()
-        let result = rule.evaluate(notam: notam, distanceNm: nil, context: context)
-
-        #expect(result == 4, "Facility at departure should be P4")
-    }
-
-    // MARK: - Helicopter NOTAM (default priority, no specific rule)
-
-    @Test func helicopterNotamAtDepDestGetsDefaultOrFacility() throws {
-        let notam = try makeNotam(
-            location: "EGLL",
-            qCode: "QFHXX"
-        )
-
-        let context = makeContext(destinationICAO: "EGLL")
         let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
         let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        // FH subject is in the facility subjects set (FA, FF, FS) — no, FH is not.
-        // So helicopter NOTAM at dep/dest falls to default
-        #expect(priority.level >= 4, "Helicopter NOTAM should be low priority")
+        #expect(priority.level == 1, "Movement area at departure should be P1")
+        #expect(priority.isCritical)
     }
-
-    // MARK: - Priority Evaluator Chain Tests
 
     @Test func evaluatorReturnsDefaultWhenNoRuleMatches() throws {
         let notam = try makeNotam(
@@ -339,18 +446,20 @@ struct NotamPriorityTests {
         #expect(priority.isDefault, "Empty context should yield default priority")
     }
 
-    @Test func evaluatorReturnsFirstMatchingRulePriority() throws {
-        // Movement area at departure should be P1
-        let notam = try makeNotam(
-            location: "LFPG",
-            qCode: "QMRLC"
-        )
-
-        let context = makeContext(departureICAO: "LFPG")
+    @Test func helicopterNotamAtDepDestGetsDefault() throws {
+        let notam = try makeNotam(location: "EGLL", qCode: "QFHXX")
+        let context = makeContext(destinationICAO: "EGLL")
         let evaluator = NotamPriorityEvaluator(profile: PriorityProfiles.ifr)
         let priority = evaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(priority.level == 1, "Movement area at departure should be P1")
-        #expect(priority.isCritical)
+        // FH subject is not in any IFR rule's subject set, but ifr_p4_other_dep_dest
+        // catches any Q-code at dep/dest
+        #expect(priority.level == 4, "Helicopter NOTAM at dep/dest should be P4 (other dep/dest)")
+    }
+
+    // MARK: - Helper
+
+    private func decodeRule(_ json: String) throws -> QCodeMatchRule {
+        try JSONDecoder().decode(QCodeMatchRule.self, from: json.data(using: .utf8)!)
     }
 }

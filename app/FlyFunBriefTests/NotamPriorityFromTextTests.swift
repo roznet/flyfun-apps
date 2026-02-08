@@ -80,12 +80,13 @@ struct NotamPriorityFromTextTests {
         #expect(priority.level == 2, "Airspace restriction within corridor at relevant altitude should be IFR P2, got P\(priority.level)")
     }
 
-    @Test func ifrP2TaxiwayLimitationNearRoute() throws {
+    @Test func ifrP3TaxiwayLimitationNearRoute() throws {
         let notam = try parseFixture("taxiway_limit_egtf")
         let context = makeContext(departureICAO: "LFPG", destinationICAO: "EGLL")
         let priority = ifrEvaluator.evaluate(notam: notam, distanceNm: 30.0, context: context)
 
-        #expect(priority.level == 2, "Taxiway limitation near route (not at dep/dest) should be IFR P2, got P\(priority.level)")
+        // JSON splits: P2 for unavailable ≤20nm, P3 for limitation ≤50nm
+        #expect(priority.level == 3, "Taxiway limitation near route (not at dep/dest) should be IFR P3, got P\(priority.level)")
     }
 
     @Test func ifrP2ProcedureChangedAtDestination() throws {
@@ -113,14 +114,14 @@ struct NotamPriorityFromTextTests {
         #expect(priority.level == 4, "Facility at destination should be IFR P4, got P\(priority.level)")
     }
 
-    @Test func ifrDefaultForHelicopter() throws {
+    @Test func ifrP4ForHelicopterAtDepDest() throws {
         let notam = try parseFixture("helicopter_heliport_lfpg")
         let context = makeContext(departureICAO: "LFPG")
-        // Use nil distance: helicopter subject (FH) doesn't match any dep/dest rule
+        // Use nil distance: helicopter subject (FH) doesn't match specific dep/dest rules
         let priority = ifrEvaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        // Helicopter FH subject is not in any IFR rule's subject set
-        #expect(priority.isDefault, "Helicopter NOTAM should be default priority for IFR, got P\(priority.level)")
+        // FH doesn't match specific subject rules, but ifr_p4_other_dep_dest catches all Q-codes at dep/dest
+        #expect(priority.level == 4, "Helicopter NOTAM at dep/dest should be IFR P4, got P\(priority.level)")
     }
 
     // MARK: - VFR Priority Tests
@@ -142,14 +143,14 @@ struct NotamPriorityFromTextTests {
         #expect(priority.level == 1, "Airspace restriction along route should be VFR P1, got P\(priority.level)")
     }
 
-    @Test func vfrDefaultForILSUnavailable() throws {
-        // VFR doesn't care about ILS — should NOT get P1
+    @Test func vfrP2ForILSUnavailableAtDepDest() throws {
+        // VFR doesn't have ILS-specific rules, but catch-all dep/dest rule applies
         let notam = try parseFixture("ils_unavailable_egll")
         let context = makeContext(destinationICAO: "EGLL")
-        // Use nil distance: we're testing that VFR has no ILS rule, not distance proximity
         let priority = vfrEvaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
-        #expect(priority.isDefault, "ILS unavailable should be default priority for VFR, got P\(priority.level)")
+        // vfr_p2_other_dep_dest catches any Q-code at dep/dest
+        #expect(priority.level == 2, "ILS at dep/dest should be VFR P2 (other dep/dest), got P\(priority.level)")
     }
 
     @Test func vfrP2TaxiwayLimitationNearRoute() throws {
@@ -179,12 +180,12 @@ struct NotamPriorityFromTextTests {
         let notam = try parseFixture("ils_unavailable_egll")
         let context = makeContext(destinationICAO: "EGLL")
 
-        // Use nil distance to test dep/dest rules without distance-based catchall rules
         let ifrPriority = ifrEvaluator.evaluate(notam: notam, distanceNm: nil, context: context)
         let vfrPriority = vfrEvaluator.evaluate(notam: notam, distanceNm: nil, context: context)
 
         #expect(ifrPriority.level == 1, "ILS unavailable should be IFR P1")
-        #expect(vfrPriority.isDefault, "ILS unavailable should be VFR default")
+        // VFR has no ILS-specific rules, but catch-all dep/dest rule gives P2
+        #expect(vfrPriority.level == 2, "ILS unavailable at dep/dest should be VFR P2 (other dep/dest)")
     }
 
     // MARK: - Context Sensitivity Tests
@@ -197,10 +198,10 @@ struct NotamPriorityFromTextTests {
         let p1 = ifrEvaluator.evaluate(notam: notam, distanceNm: 0.0, context: atDep)
         #expect(p1.level == 1, "At departure should be P1")
 
-        // Near route (not dep/dest): P2 (movement area limitation)
+        // Near route (not dep/dest): P3 (movement area limitation, JSON splits P2/P3)
         let nearRoute = makeContext(departureICAO: "EGLL", destinationICAO: "EHAM")
-        let p2 = ifrEvaluator.evaluate(notam: notam, distanceNm: 30.0, context: nearRoute)
-        #expect(p2.level == 2, "Near route but not at dep/dest should be P2")
+        let p3 = ifrEvaluator.evaluate(notam: notam, distanceNm: 30.0, context: nearRoute)
+        #expect(p3.level == 3, "Near route but not at dep/dest should be P3")
 
         // Far from route: default
         let farAway = makeContext(departureICAO: "EGLL", destinationICAO: "EHAM")

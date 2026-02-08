@@ -37,7 +37,8 @@ struct EnrichedNotam: Identifiable {
     let status: NotamStatus       // read/unread/important/ignored/followUp
     let textNote: String?         // User annotation
     let isNew: Bool               // First time seen in this flight's history
-    let isGloballyIgnored: Bool   // Matches global ignore list
+    let isGloballyIgnored: Bool   // Matches global NOTAM ignore list
+    let isAirportIgnored: Bool    // Airport is in airport ignore list
 
     // Flight context (computed at enrichment time)
     let routeDistanceNm: Double?  // Distance from route centerline
@@ -130,7 +131,8 @@ final class NotamDomain {
     var currentRoute: Route?
 
     // User state (persisted via Core Data through FlightRepository)
-    var ignoredIdentityKeys: Set<String> = []  // global ignore list
+    var ignoredIdentityKeys: Set<String> = []   // global NOTAM ignore list
+    var ignoredAirportCodes: Set<String> = []   // airport-level ignore list
     var previousIdentityKeys: Set<String> = []  // for "new" detection
 
     // Filter state
@@ -146,7 +148,7 @@ final class NotamDomain {
     // Other filters
     var statusFilter: StatusFilter = .all
     var priorityFilter: PriorityFilter         // Cumulative priority filter
-    var visibilityFilter: VisibilityFilter  // showIgnored, showRead
+    var visibilityFilter: VisibilityFilter  // showIgnored, showIgnoredAirports, showRead
     var routeFilter: RouteFilter            // isEnabled, corridorWidthNm
     var timeFilter: TimeFilter              // isEnabled, buffers
 
@@ -172,8 +174,10 @@ final class NotamDomain {
 ```swift
 var filteredEnrichedNotams: [EnrichedNotam] {
     enrichedNotams
-        // 1. Global ignore filter
+        // 1a. Global NOTAM ignore filter
         .filter { showIgnored || !$0.isGloballyIgnored }
+        // 1b. Airport ignore filter
+        .filter { showIgnoredAirports || !$0.isAirportIgnored }
         // 2. Route corridor filter
         .filter { corridorFilter($0.notam) }
         // 3. Time window filter
@@ -337,23 +341,33 @@ func timeWindowFilter(_ notam: Notam) -> Bool {
 }
 ```
 
-## Global Ignore List
+## Ignore Lists
 
-Persistent ignore list applied across all briefings and flights:
+Two independent ignore systems, both persistent across briefings and flights:
+
+### NOTAM Ignore List
+Ignores individual NOTAMs by identity key. Auto-expires when NOTAM's `effectiveTo` passes.
 
 ```swift
-// Add to ignore list
-func ignoreGlobally(_ notam: Notam, reason: String?) {
-    ignoreListManager.addToIgnoreList(notam, reason: reason)
-    refreshEnrichedNotams()
-}
-
-// Check at enrichment time
-let ignoredKeys = ignoreListManager.getIgnoredIdentityKeys()
-let isIgnored = ignoredKeys.contains(identityKey)
+func addToGlobalIgnoreList(_ notam: Notam, reason: String?) async
+func removeFromGlobalIgnoreList(_ notam: Notam) async
+func isGloballyIgnored(_ notam: Notam) -> Bool
 ```
 
-**Auto-expiration:** Ignored entries automatically expire when the NOTAM's `effectiveTo` date passes, unless marked permanent.
+### Airport Ignore List
+Ignores all NOTAMs from a given airport by ICAO code. No expiration — persists until manually removed. Useful for filtering out large commercial airports (EGLL, LFPG) along routes.
+
+```swift
+func addAirportToIgnoreList(_ icaoCode: String, reason: String?) async
+func removeAirportFromIgnoreList(_ icaoCode: String) async
+func isAirportIgnored(_ icaoCode: String) -> Bool
+```
+
+Both are loaded at enrichment time and set flags on `EnrichedNotam`:
+- `isGloballyIgnored` — NOTAM identity key in NOTAM ignore list
+- `isAirportIgnored` — NOTAM location in airport ignore list
+
+Each has an independent visibility toggle in `VisibilityFilter`.
 
 ## Priority System
 
@@ -384,7 +398,7 @@ The context is set by AppState when a flight is selected and passed to `NotamDom
 
 ### Priority Profiles
 
-Priority evaluation is driven by selectable profiles. Each profile defines its own number of levels and evaluation rules. The active profile is persisted in UserDefaults via `SettingsDomain`.
+Priority evaluation is driven by selectable profiles loaded from JSON config files (`configs/priority_profiles/*.json`). Each profile defines its own number of levels and evaluation rules. The active profile is persisted in UserDefaults via `SettingsDomain`.
 
 ```swift
 struct PriorityProfile: Identifiable, Equatable {
@@ -394,6 +408,9 @@ struct PriorityProfile: Identifiable, Equatable {
     let rules: [any ProfilePriorityRule]
     let levelDescriptions: [Int: String]
     var levels: ClosedRange<Int> { 1...maxLevel }
+
+    static func fromJSON(_ data: Data) throws -> PriorityProfile
+    static func bundled(name: String) -> PriorityProfile
 }
 
 protocol ProfilePriorityRule {
@@ -405,35 +422,49 @@ protocol ProfilePriorityRule {
 
 Rules are evaluated in order; first non-nil result wins. Unmatched NOTAMs get the profile's `maxLevel` (lowest priority).
 
-### IFR Profile (5 levels)
+### JSON Rule Format
 
-| Level | Description | Rules |
-|-------|-------------|-------|
-| P1 | Critical | Runway/taxiway closure at dep/dest, ILS/approach unavailable at dep/dest |
-| P2 | Important | SID/STAR/procedure changes at dep/dest, airspace restrictions within 50nm corridor |
-| P3 | Relevant | Within 10nm + altitude relevant, navaid issues within 25nm |
-| P4 | Nearby | Facilities/services/comms at dep/dest, conditions within 50nm at flight altitude |
-| P5 | Default | Unmatched NOTAMs |
+All rules use a single `QCodeMatchRule` struct decoded from JSON. Each rule is a conjunction of optional filters — all present filters must match:
 
-### VFR Profile (3 levels)
-
-| Level | Description | Rules |
-|-------|-------------|-------|
-| P1 | Critical | Runway/taxiway closure at dep/dest, airspace restrictions within 25nm |
-| P2 | Relevant | Lighting at dep/dest, navigation issues within 25nm, conditions within 10nm |
-| P3 | Default | Unmatched NOTAMs |
-
-### Shared Rule Helpers
-
-Common evaluation logic is shared across profiles via `PriorityRuleHelpers`:
-
-```swift
-enum PriorityRuleHelpers {
-    static func isAtDepDest(_ notam: Notam, context: FlightContext) -> Bool
-    static func isClosureCondition(_ notam: Notam) -> Bool
-    static func isAltitudeRelevant(_ notam: Notam, context: FlightContext) -> Bool
+```json
+{
+    "id": "ifr_p2_airspace_restrictions",
+    "name": "Airspace restrictions within corridor",
+    "type": "q_code_match",
+    "level": 2,
+    "subjects": ["RA", "RR", "RT"],
+    "max_distance_nm": 50,
+    "altitude_check": "if_available"
 }
 ```
+
+**Available filters:**
+- `subjects` — Q-code subject must be in set (e.g., `["MR", "MT", "MX"]`)
+- `condition_filter` — `"unavailable"` (closed/canceled) or `"limitation"` (L-prefix conditions)
+- `location` — `"dep_dest"` or `"not_dep_dest"`
+- `max_distance_nm` — maximum distance from route
+- `altitude_check` — `"if_available"` (permissive when no altitude set) or `"required"` (must overlap)
+- `no_altitude_fallback_distance_nm` — fallback distance when altitude check is required but no cruise altitude
+
+The JSON configs in `configs/priority_profiles/` are the **single source of truth** shared with the Python evaluator (`tools/priority_evaluator.py`). Copies are bundled in `app/FlyFunBrief/Resources/PriorityProfiles/`.
+
+### IFR Profile (5 levels, 13 rules)
+
+| Level | Description | Rules |
+|-------|-------------|-------|
+| P1 | Critical | Runway/taxiway at dep/dest, ILS/procedure unavailable at dep/dest |
+| P2 | Important | ILS/procedure changed at dep/dest, airspace restrictions in corridor, rwy/twy closed near route |
+| P3 | Relevant | ATS/RNAV route changes, movement area limits near route, close NOTAMs at altitude, navaids, procedure unavailable near route |
+| P4 | Nearby | Facilities/services at dep/dest, other dep/dest NOTAMs, conditions near route |
+| P5 | Default | Unmatched NOTAMs |
+
+### VFR Profile (3 levels, 11 rules)
+
+| Level | Description | Rules |
+|-------|-------------|-------|
+| P1 | Critical | Runway/taxiway at dep/dest, VFR procedure unavailable at dep/dest, airspace restrictions along route |
+| P2 | Relevant | ATS route changes, VFR procedure changed at dep/dest, rwy/twy limits near route, lighting at dep/dest, navigation near route, procedure unavailable near route, other dep/dest NOTAMs, conditions near route |
+| P3 | Default | Unmatched NOTAMs |
 
 ### Priority Filter
 
@@ -515,6 +546,7 @@ func setBriefing(_ briefing: Briefing, cdBriefing: CDBriefing, previousKeys: Set
         statuses: statuses,
         previousIdentityKeys: previousKeys,
         ignoredKeys: ignoredIdentityKeys,
+        ignoredAirports: ignoredAirportCodes,
         profile: currentProfile
     )
 }
@@ -581,7 +613,7 @@ Comprehensive filter configuration:
 - **Time Filter** - Active at flight time
 - **Status Filter** - All/unread/important/followUp
 - **Priority Filter** - Profile picker (segmented IFR/VFR) + cumulative level buttons (All/P1/P2/../PN) with per-level count badges + level descriptions
-- **Visibility** - Show read, show ignored
+- **Visibility** - Show read, show ignored NOTAMs, show ignored airports
 - **Grouping** - None/airport/category/route order
 
 ### SettingsView
@@ -593,7 +625,7 @@ Priority Profile section with:
 
 1. **Always use identity keys** - Not NOTAM IDs for matching
 2. **Enrichment is expensive** - Cache and only rebuild when needed
-3. **Ignored vs status.ignored** - Global ignore list is separate from per-NOTAM ignore status
+3. **Three ignore mechanisms** - Global NOTAM ignore (by identity key), airport ignore (by ICAO code), and per-NOTAM ignore status are all independent
 4. **"New" is flight-scoped** - Compared to all previous briefings for this flight
 5. **Filter order matters** - Route corridor first (expensive) then cheap filters
 6. **Use icaoCategory, not category** - The `icaoCategory` computed property derives from Q-code, with fallback to stored category
@@ -605,18 +637,24 @@ Priority Profile section with:
 12. **Cumulative filtering** - Priority filter is cumulative: selecting P2 shows P1+P2, not just P2
 13. **Single-level edge case** - A profile with maxLevel=1 has P1 that is both `isCritical` and `isDefault`; `isCritical` takes precedence for color/icon
 14. **Priority never persisted** - Priority is computed at enrichment time from the active profile, never stored in Core Data
+15. **JSON configs are source of truth** - Priority rules live in `configs/priority_profiles/*.json`, shared with Python evaluator. Bundled copies in `app/FlyFunBrief/Resources/PriorityProfiles/` must be kept in sync
+16. **Airport ignore uses ICAO code** - Matched against `notam.location.uppercased()`, not identity key. No expiration unlike NOTAM ignores
+17. **Airport ignore has own visibility toggle** - `showIgnoredAirports` is separate from `showIgnored` (NOTAM-level); both default to false
 
 ## References
 
 - Key code: `app/FlyFunBrief/App/State/Domains/NotamDomain.swift`
 - Priority: `app/FlyFunBrief/App/Models/NotamPriority.swift`
 - Profiles: `app/FlyFunBrief/App/Models/PriorityProfile.swift`
-- IFR rules: `app/FlyFunBrief/App/Models/PriorityRules/IFRPriorityRules.swift`
-- VFR rules: `app/FlyFunBrief/App/Models/PriorityRules/VFRPriorityRules.swift`
-- Rule helpers: `app/FlyFunBrief/App/Models/PriorityRules/PriorityRuleHelpers.swift`
+- Rule engine: `app/FlyFunBrief/App/Models/PriorityRules/QCodeMatchRule.swift`
+- JSON configs: `configs/priority_profiles/ifr.json`, `configs/priority_profiles/vfr.json`
+- Bundled copies: `app/FlyFunBrief/Resources/PriorityProfiles/`
+- Python evaluator: `tools/priority_evaluator.py`
 - Flight context: `app/FlyFunBrief/App/Models/FlightContext.swift`
 - Enriched model: `app/FlyFunBrief/App/Models/EnrichedNotam.swift`
 - Settings: `app/FlyFunBrief/App/State/Domains/SettingsDomain.swift`
 - Row view: `app/FlyFunBrief/UserInterface/Views/NotamList/NotamRowView.swift`
 - Filter UI: `app/FlyFunBrief/UserInterface/Views/Filters/SharedFilterContent.swift`
+- Ignore list UI: `app/FlyFunBrief/UserInterface/Views/IgnoreList/IgnoreListView.swift`
+- Airport ignore manager: `app/FlyFunBrief/App/Data/Repositories/AirportIgnoreListManager.swift`
 - Related: [BRIEFING_APP_DATA.md](BRIEFING_APP_DATA.md) for persistence

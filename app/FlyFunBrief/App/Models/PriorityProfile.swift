@@ -17,7 +17,8 @@ import RZFlight
 /// that assign each NOTAM to a level. Unmatched NOTAMs receive the profile's
 /// lowest priority (maxLevel).
 ///
-/// Two built-in profiles are provided: IFR (5 levels) and VFR (3 levels).
+/// Two built-in profiles are provided: IFR (5 levels) and VFR (3 levels),
+/// loaded from JSON configs in `configs/priority_profiles/`.
 struct PriorityProfile: Identifiable, Equatable {
     /// Unique identifier (e.g., "ifr", "vfr")
     let id: String
@@ -39,6 +40,59 @@ struct PriorityProfile: Identifiable, Equatable {
 
     static func == (lhs: PriorityProfile, rhs: PriorityProfile) -> Bool {
         lhs.id == rhs.id
+    }
+}
+
+// MARK: - JSON Loading
+
+extension PriorityProfile {
+
+    /// Decode a priority profile from JSON data.
+    static func fromJSON(_ data: Data) throws -> PriorityProfile {
+        let decoded = try JSONDecoder().decode(ProfileJSON.self, from: data)
+
+        let levelDescriptions = Dictionary(
+            uniqueKeysWithValues: decoded.levelDescriptions.map { (Int($0.key)!, $0.value) }
+        )
+
+        return PriorityProfile(
+            id: decoded.id,
+            displayName: decoded.displayName,
+            maxLevel: decoded.maxLevel,
+            rules: decoded.rules,
+            levelDescriptions: levelDescriptions
+        )
+    }
+
+    /// Load a bundled profile by name (e.g., "ifr", "vfr").
+    /// Fatal error if the resource is missing — this is a build-time guarantee.
+    static func bundled(name: String, in bundle: Bundle = .main) -> PriorityProfile {
+        guard let url = bundle.url(forResource: name, withExtension: "json") else {
+            fatalError("Missing bundled priority profile: \(name).json")
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            return try fromJSON(data)
+        } catch {
+            fatalError("Failed to load priority profile \(name).json: \(error)")
+        }
+    }
+
+    /// JSON structure matching `configs/priority_profiles/*.json`
+    private struct ProfileJSON: Decodable {
+        let id: String
+        let displayName: String
+        let maxLevel: Int
+        let levelDescriptions: [String: String]
+        let rules: [QCodeMatchRule]
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case displayName = "display_name"
+            case maxLevel = "max_level"
+            case levelDescriptions = "level_descriptions"
+            case rules
+        }
     }
 }
 
@@ -67,33 +121,11 @@ enum PriorityProfiles {
     /// All available profiles
     static let all: [PriorityProfile] = [ifr, vfr]
 
-    /// IFR profile with 5 priority levels
-    static let ifr = PriorityProfile(
-        id: "ifr",
-        displayName: "IFR",
-        maxLevel: 5,
-        rules: IFRPriorityRules.all,
-        levelDescriptions: [
-            1: "Runway/taxiway at dep/dest, ILS/procedure unavailable at dep/dest",
-            2: "ILS/procedure changed at dep/dest, airspace restrictions, rwy/twy limits near route",
-            3: "Nearby NOTAMs at relevant altitude, navaid issues along route",
-            4: "Facilities/services/comms at dep/dest, conditions near route",
-            5: "Other NOTAMs"
-        ]
-    )
+    /// IFR profile loaded from bundled JSON config
+    static let ifr = PriorityProfile.bundled(name: "ifr")
 
-    /// VFR profile with 3 priority levels
-    static let vfr = PriorityProfile(
-        id: "vfr",
-        displayName: "VFR",
-        maxLevel: 3,
-        rules: VFRPriorityRules.all,
-        levelDescriptions: [
-            1: "Runway/taxiway at dep/dest, VFR procedure unavailable, airspace restrictions",
-            2: "VFR procedure changed, rwy/twy limits near route, lighting, navigation",
-            3: "Other NOTAMs"
-        ]
-    )
+    /// VFR profile loaded from bundled JSON config
+    static let vfr = PriorityProfile.bundled(name: "vfr")
 
     /// Default profile
     static let `default` = ifr
