@@ -37,11 +37,9 @@ final class AirportIgnoreListManager {
         let uppercased = icaoCode.uppercased()
 
         // Prevent duplicates
-        if CDIgnoredAirport.isIgnored(icaoCode: uppercased, in: viewContext) {
+        if let existing = CDIgnoredAirport.find(icaoCode: uppercased, in: viewContext) {
             Logger.persistence.info("Airport \(uppercased) already in ignore list")
-            if let existing = CDIgnoredAirport.find(icaoCode: uppercased, in: viewContext) {
-                return existing
-            }
+            return existing
         }
 
         let ignored = CDIgnoredAirport.create(in: viewContext, icaoCode: uppercased, reason: reason)
