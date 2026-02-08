@@ -210,13 +210,35 @@ Token usage aggregated across all LLM calls:
 - Formatter (answer synthesis)
 - Router (query classification) - if enabled
 - Rules Agent (rules synthesis) - if rules path
+```
 
-# Extraction from events
+### Non-Streaming Token Extraction
+
+Two extraction paths to support all providers:
+
+```python
+# Path 1: OpenAI - uses response_metadata.token_usage
 if kind == "on_llm_end":
     usage = output.response_metadata.get("token_usage", {})
     total_input_tokens += usage.get("prompt_tokens", 0)
     total_output_tokens += usage.get("completion_tokens", 0)
+
+# Path 2: Anthropic/Google fallback - uses usage_metadata
+if not usage and hasattr(output, "usage_metadata"):
+    um = output.usage_metadata
+    total_input_tokens += um.get("input_tokens", 0)
+    total_output_tokens += um.get("output_tokens", 0)
 ```
+
+| Provider | Non-Streaming Path | Key Names |
+|----------|-------------------|-----------|
+| OpenAI | `response_metadata.token_usage` | `prompt_tokens`, `completion_tokens` |
+| Anthropic | `usage_metadata` | `input_tokens`, `output_tokens` |
+| Google | `usage_metadata` | `input_tokens`, `output_tokens` |
+
+### Streaming Token Extraction
+
+Streaming uses `usage_metadata` on the final chunk — this is standardized across all providers, no special handling needed.
 
 ### Token Usage in done Event
 

@@ -1,23 +1,23 @@
 {
   "version": "1.0",
-  "name": "default",
-  "description": "Default aviation agent configuration",
+  "name": "gemini",
+  "description": "Aviation agent using Google Gemini models",
   "llms": {
     "planner": {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
+      "provider": "google",
+      "model": "gemini-2.0-flash",
       "temperature": 0.0,
       "streaming": false
     },
     "formatter": {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
+      "provider": "google",
+      "model": "gemini-2.0-flash",
       "temperature": 0.0,
       "streaming": true
     },
     "router": {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
+      "provider": "google",
+      "model": "gemini-2.0-flash",
       "temperature": 0.0,
       "streaming": false
     },

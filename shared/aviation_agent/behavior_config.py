@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMConfig(BaseModel):
+    provider: str = "openai"  # "openai", "anthropic", "google"
     model: Optional[str] = None
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     streaming: bool = False

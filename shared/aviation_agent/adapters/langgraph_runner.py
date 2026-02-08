@@ -107,6 +107,7 @@ def build_agent(
         planner_llm,
         behavior_config.llms.planner.model,
         role="planner",
+        provider=behavior_config.llms.planner.provider,
         config_name=settings.agent_config_name,
         temperature=behavior_config.llms.planner.temperature,
         streaming=behavior_config.llms.planner.streaming,
@@ -118,6 +119,7 @@ def build_agent(
         formatter_llm,
         behavior_config.llms.formatter.model,
         role="formatter",
+        provider=behavior_config.llms.formatter.provider,
         config_name=settings.agent_config_name,
         temperature=behavior_config.llms.formatter.temperature,
         streaming=behavior_config.llms.formatter.streaming,
@@ -209,10 +211,31 @@ def run_aviation_agent(
     return result
 
 
+_PROVIDER_REGISTRY = {
+    "openai": {
+        "class_path": "langchain_openai.ChatOpenAI",
+        "api_key_env": "OPENAI_API_KEY",
+        "extra_kwargs": lambda streaming: {"stream_usage": streaming},
+    },
+    "anthropic": {
+        "class_path": "langchain_anthropic.ChatAnthropic",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "extra_kwargs": lambda streaming: {},
+    },
+    "google": {
+        "class_path": "langchain_google_genai.ChatGoogleGenerativeAI",
+        "api_key_env": "GOOGLE_API_KEY",
+        "extra_kwargs": lambda streaming: {},
+    },
+}
+
+
 def _resolve_llm(
     llm: Optional[Runnable],
     model_name: Optional[str],
     role: str,
+    *,
+    provider: str = "openai",
     config_name: Optional[str] = None,
     temperature: float = 0.0,
     streaming: bool = False,
@@ -222,14 +245,14 @@ def _resolve_llm(
     """
     Resolve an LLM instance with retry configuration.
 
-    Configures LLM with:
-    - max_retries: Number of retries for transient failures (rate limits, timeouts)
-    - request_timeout: Timeout per request in seconds
+    Supports multiple providers (openai, anthropic, google) via a registry.
+    Each provider's LangChain integration is imported lazily.
 
     Args:
         llm: Existing LLM instance (returned as-is if provided)
         model_name: Model name from config
         role: Role name for error messages (planner, formatter, etc.)
+        provider: LLM provider name ("openai", "anthropic", "google")
         config_name: Config file name for error messages
         temperature: LLM temperature setting
         streaming: Whether to enable streaming
@@ -247,28 +270,50 @@ def _resolve_llm(
             f"No {role} LLM configured. Set llms.{role}.model{config_hint} or pass an llm instance."
         )
 
-    try:
-        from langchain_openai import ChatOpenAI
-    except Exception as exc:  # pragma: no cover - optional dependency
+    if provider not in _PROVIDER_REGISTRY:
         raise RuntimeError(
-            f"Cannot auto-create {role} LLM. Install langchain-openai or inject a custom Runnable."
+            f"Unknown LLM provider '{provider}' for {role}. "
+            f"Supported providers: {', '.join(sorted(_PROVIDER_REGISTRY))}"
+        )
+
+    reg = _PROVIDER_REGISTRY[provider]
+
+    # Check API key is available
+    import os
+    api_key_env = reg["api_key_env"]
+    if not os.environ.get(api_key_env):
+        raise RuntimeError(
+            f"{api_key_env} environment variable is required for provider '{provider}' ({role} LLM). "
+            f"Set it in your .env file or environment."
+        )
+
+    # Dynamically import the provider class
+    module_path, class_name = reg["class_path"].rsplit(".", 1)
+    try:
+        import importlib
+        module = importlib.import_module(module_path)
+        llm_class = getattr(module, class_name)
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            f"Cannot import {reg['class_path']} for {role} LLM. "
+            f"Install the required package: pip install {module_path.replace('.', '-')}"
         ) from exc
 
-    # Configure LLM with retry support for transient failures
-    # max_retries handles: rate limits, timeouts, temporary API errors
-    # request_timeout prevents hanging on slow responses
-    # stream_usage: include token usage in streaming responses (required for token tracking)
-    llm_instance = ChatOpenAI(
-        model=model_name,
-        temperature=temperature,
-        streaming=streaming,
-        stream_usage=streaming,
-        max_retries=max_retries,
-        request_timeout=request_timeout,
-    )
+    # Build common kwargs
+    kwargs = {
+        "model": model_name,
+        "temperature": temperature,
+        "streaming": streaming,
+        "max_retries": max_retries,
+        "timeout": request_timeout,
+    }
+    # Add provider-specific kwargs
+    kwargs.update(reg["extra_kwargs"](streaming))
+
+    llm_instance = llm_class(**kwargs)
 
     logger.debug(
-        f"Created {role} LLM: model={model_name}, "
+        f"Created {role} LLM: provider={provider}, model={model_name}, "
         f"max_retries={max_retries}, timeout={request_timeout}s"
     )
 

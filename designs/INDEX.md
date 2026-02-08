@@ -64,8 +64,8 @@ Key exports: `get_shared_tool_specs()`, `AIRCRAFT_CRUISE_SPEEDS`, tool implement
 → Full doc: AGENT_TOOLS.md
 
 ### Agent Configuration
-JSON-based behavior configuration, environment variables, prompt management.
-Key exports: `get_settings()`, `get_behavior_config()`, `AgentBehaviorConfig`
+JSON-based behavior configuration, multi-provider support (OpenAI/Anthropic/Google), environment variables, prompt management, A/B testing tools.
+Key exports: `get_settings()`, `get_behavior_config()`, `AgentBehaviorConfig`, `_PROVIDER_REGISTRY`
 → Full doc: AGENT_CONFIG.md
 
 ### Agent Streaming

@@ -178,6 +178,18 @@ async def stream_aviation_agent(
                         # TokenUsage object
                         total_input_tokens += usage.prompt_tokens or 0
                         total_output_tokens += usage.completion_tokens or 0
+
+                # Fallback: check standardized usage_metadata (Anthropic, Google providers)
+                # LangChain AIMessage populates usage_metadata with input_tokens/output_tokens
+                if not usage and hasattr(output, "usage_metadata"):
+                    um = output.usage_metadata
+                    if um:
+                        if isinstance(um, dict):
+                            total_input_tokens += um.get("input_tokens", 0)
+                            total_output_tokens += um.get("output_tokens", 0)
+                        elif hasattr(um, "input_tokens"):
+                            total_input_tokens += um.input_tokens or 0
+                            total_output_tokens += um.output_tokens or 0
             
             # Capture LLM streaming - LangGraph uses on_chat_model_stream for ChatOpenAI
             # This is emitted when the LLM streams chunks inside a chain.invoke() call
