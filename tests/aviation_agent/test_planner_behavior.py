@@ -23,23 +23,15 @@ from typing import Any, Dict
 
 import pytest
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
+from shared.aviation_agent.adapters.langgraph_runner import _resolve_llm
 from shared.aviation_agent.planning import build_planner_runnable
 from shared.aviation_agent.tools import AviationToolClient
+from tests.aviation_agent.test_utils import load_test_cases, normalize_expected, match_tool_and_args
 
 
 # Global list to collect test results for CSV export
 _test_results: list[Dict[str, Any]] = []
-
-
-def _load_test_cases() -> list[Dict[str, Any]]:
-    """Load test cases from JSON fixture file."""
-    fixture_path = Path(__file__).parent / "fixtures" / "planner_test_cases.json"
-    with open(fixture_path) as f:
-        all_cases = json.load(f)
-    # Filter out comment-only entries (those without a "question" field)
-    return [tc for tc in all_cases if "question" in tc]
 
 
 def _should_run_behavior_tests() -> bool:
@@ -53,12 +45,17 @@ def live_planner_llm():
     if not _should_run_behavior_tests():
         pytest.skip("Behavioral tests require RUN_PLANNER_BEHAVIOR_TESTS=1")
 
-    model = os.getenv("AVIATION_AGENT_PLANNER_MODEL", "gpt-4o-mini")
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        pytest.skip("OPENAI_API_KEY not set")
+    from shared.aviation_agent.config import get_behavior_config
+    config_name = os.getenv("AVIATION_AGENT_CONFIG", "default")
+    behavior_config = get_behavior_config(config_name)
 
-    return ChatOpenAI(model=model, temperature=0, api_key=api_key)
+    return _resolve_llm(
+        None,
+        behavior_config.llms.planner.model,
+        role="planner",
+        provider=behavior_config.llms.planner.provider,
+        temperature=behavior_config.llms.planner.temperature,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -104,7 +101,7 @@ def save_csv_on_finish(request):
 
 
 @pytest.mark.planner_behavior
-@pytest.mark.parametrize("test_case", _load_test_cases(), ids=lambda tc: tc.get("question", "")[:40])
+@pytest.mark.parametrize("test_case", load_test_cases(), ids=lambda tc: tc.get("question", "")[:40])
 def test_planner_selects_correct_tool(
     test_case: Dict[str, Any],
     live_planner_llm,
@@ -116,18 +113,8 @@ def test_planner_selects_correct_tool(
     This is a behavioral/integration test that requires a live LLM.
     """
     question = test_case["question"]
-    expected_tool_raw = test_case["expected_tool"]
-    expected_args_raw = test_case.get("expected_arguments", {})
     description = test_case.get("description", "")
-
-    # Normalize to lists for multiple valid choices
-    # expected_tool can be string or array, expected_arguments must match
-    if isinstance(expected_tool_raw, list):
-        expected_tools = expected_tool_raw
-        expected_args_list = expected_args_raw  # Should be array of same size
-    else:
-        expected_tools = [expected_tool_raw]
-        expected_args_list = [expected_args_raw]
+    expected_tools, expected_args_list = normalize_expected(test_case)
 
     # Get available tags from rules manager for dynamic prompt injection
     available_tags = None
@@ -145,29 +132,16 @@ def test_planner_selects_correct_tool(
     messages = [HumanMessage(content=question)]
     plan = planner.invoke({"messages": messages})
 
-    # Determine if tool matches any valid option
-    plan_args = plan.arguments or {}
-    tool_match = False
-    matched_index = -1
-    for i, valid_tool in enumerate(expected_tools):
-        if plan.selected_tool == valid_tool:
-            tool_match = True
-            matched_index = i
-            break
+    # Validate using shared utilities
+    tool_match, args_match, reason = match_tool_and_args(
+        plan.selected_tool, plan.arguments or {}, expected_tools, expected_args_list,
+    )
 
-    # Check args match for the matched tool (or first if no match)
-    expected_args = expected_args_list[matched_index] if matched_index >= 0 else expected_args_list[0]
-    args_match = True
-    for key, expected_value in expected_args.items():
-        if key not in plan_args:
-            args_match = False
-            break
-        if isinstance(expected_value, dict):
-            plan_value = plan_args.get(key, {})
-            for nested_key, nested_value in expected_value.items():
-                if nested_key not in plan_value or plan_value[nested_key] != nested_value:
-                    args_match = False
-                    break
+    # Determine expected_args for CSV (use matched tool's args or first)
+    matched_index = next(
+        (i for i, t in enumerate(expected_tools) if t == plan.selected_tool), 0
+    )
+    expected_args = expected_args_list[matched_index]
 
     # Collect result for CSV
     test_case_num = len(_test_results)
@@ -194,91 +168,10 @@ def test_planner_selects_correct_tool(
     print(f"{'='*60}")
 
     # Assertions
-    assert plan.selected_tool in expected_tools, (
-        f"Expected one of {expected_tools} but got '{plan.selected_tool}'. "
-        f"Description: {description}"
+    assert tool_match and args_match, (
+        f"FAIL: {reason}\n"
+        f"Description: {description}\n"
+        f"Expected tool(s): {expected_tools}, got: '{plan.selected_tool}'\n"
+        f"Expected args: {json.dumps(expected_args)}\n"
+        f"Actual args:   {json.dumps(plan.arguments)}"
     )
-
-    # Check that expected arguments are present (allowing extra args)
-    for key, expected_value in expected_args.items():
-        assert key in plan_args, (
-            f"Expected argument '{key}' not found in plan.arguments. "
-            f"Got: {plan_args}"
-        )
-
-        if isinstance(expected_value, dict):
-            # For nested dicts (like filters), check that expected keys exist
-            plan_value = plan_args.get(key, {})
-            for nested_key, nested_value in expected_value.items():
-                assert nested_key in plan_value, (
-                    f"Expected nested argument '{key}.{nested_key}' not found. "
-                    f"Got: {plan_value}"
-                )
-                assert plan_value[nested_key] == nested_value, (
-                    f"Expected '{key}.{nested_key}' = {nested_value}, "
-                    f"got {plan_value[nested_key]}"
-                )
-        else:
-            # For simple values, check match
-            plan_value = plan_args[key]
-            if isinstance(expected_value, str) and isinstance(plan_value, str):
-                # For 'question' field in answer_rules_question, allow reformulation
-                # The planner can improve/clarify the question, we just check it exists
-                if key == "question":
-                    # Just verify it's non-empty - planner can reformulate
-                    assert len(plan_value) > 0, f"Expected non-empty 'question' field"
-                # For location fields, allow country disambiguation suffix
-                # e.g., "Paris" matches "Paris, France", "Bromley" matches "Bromley, UK"
-                elif key in {"from_location", "to_location", "location_query"}:
-                    # Accept if actual starts with expected (case-insensitive)
-                    # This allows "Paris, France" to match expected "Paris"
-                    assert plan_value.upper().startswith(expected_value.upper()), (
-                        f"Expected '{key}' to start with '{expected_value}', "
-                        f"got '{plan_value}'"
-                    )
-                # For aircraft_type, normalize and allow variations
-                # e.g., "C172", "Cessna 172", "cessna172" should all match
-                elif key == "aircraft_type":
-                    from shared.aircraft_speeds import normalize_aircraft_type
-                    expected_normalized = normalize_aircraft_type(expected_value)
-                    actual_normalized = normalize_aircraft_type(plan_value)
-                    assert expected_normalized == actual_normalized, (
-                        f"Expected aircraft_type '{expected_value}' (normalized: {expected_normalized}), "
-                        f"got '{plan_value}' (normalized: {actual_normalized})"
-                    )
-                else:
-                    # Exact match (case-insensitive) for other string fields
-                    assert plan_value.upper() == expected_value.upper(), (
-                        f"Expected '{key}' = '{expected_value}' (case-insensitive), "
-                        f"got '{plan_value}'"
-                    )
-            elif key == "tags" and isinstance(expected_value, list) and isinstance(plan_value, list):
-                # For tags, require exact match (order-independent)
-                # This ensures we notice when planner starts returning extra/different tags
-                expected_set = set(expected_value)
-                actual_set = set(plan_value)
-
-                missing_tags = expected_set - actual_set
-                extra_tags = actual_set - expected_set
-
-                if missing_tags:
-                    assert False, (
-                        f"Missing tags for question: \"{question[:60]}...\"\n"
-                        f"  Missing: {sorted(missing_tags)}\n"
-                        f"  Expected: {sorted(expected_set)}\n"
-                        f"  Actual:   {sorted(actual_set)}"
-                    )
-
-                if extra_tags:
-                    assert False, (
-                        f"New tags appeared for question: \"{question[:60]}...\"\n"
-                        f"  Extra tags: {sorted(extra_tags)}\n"
-                        f"  Expected:   {sorted(expected_set)}\n"
-                        f"  Actual:     {sorted(actual_set)}\n\n"
-                        f"  → Should we expand the expectation to include {sorted(extra_tags)}?\n"
-                        f"  → If yes, update the test fixture. If no, check why planner added these tags."
-                    )
-            else:
-                assert plan_value == expected_value, (
-                    f"Expected '{key}' = {expected_value}, got {plan_value}"
-                )
