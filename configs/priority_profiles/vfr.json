@@ -4,7 +4,7 @@
   "max_level": 3,
   "level_descriptions": {
     "1": "Runway/taxiway at dep/dest, VFR procedure unavailable at dep/dest, airspace restrictions along route",
-    "2": "VFR procedure changed at dep/dest, rwy/twy limits near route, lighting at dep/dest, navigation near route, conditions near route",
+    "2": "ATS/RNAV route changes, VFR procedure changed at dep/dest, rwy/twy limits near route, lighting at dep/dest, navigation near route, procedure unavailable near route, other dep/dest NOTAMs, conditions near route",
     "3": "Other NOTAMs"
   },
   "rules": [
@@ -30,7 +30,15 @@
       "name": "Airspace restrictions along route",
       "type": "q_code_match",
       "level": 1,
-      "subjects": ["RA", "RR", "RT", "AR"],
+      "subjects": ["RA", "RR", "RT"],
+      "max_distance_nm": 25
+    },
+    {
+      "id": "vfr_p2_ats_route_changes",
+      "name": "ATS/RNAV route changes along route",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["AR", "AN"],
       "max_distance_nm": 25
     },
     {
@@ -66,6 +74,22 @@
       "level": 2,
       "subjects": ["NV", "ND", "NB", "GN"],
       "max_distance_nm": 25
+    },
+    {
+      "id": "vfr_p2_procedure_unavailable_near_route",
+      "name": "VFR procedure unavailable at diversion airports near route",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["PB", "PE", "PK"],
+      "condition_filter": "unavailable",
+      "max_distance_nm": 25
+    },
+    {
+      "id": "vfr_p2_other_dep_dest",
+      "name": "Other NOTAMs at dep/dest",
+      "type": "q_code_match",
+      "level": 2,
+      "location": "dep_dest"
     },
     {
       "id": "vfr_p2_near_route",
