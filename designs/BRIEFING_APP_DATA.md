@@ -18,10 +18,15 @@ Manage flight and briefing persistence with CloudKit sync. Track NOTAM status ac
 │                    Repositories                          │
 │  ┌──────────────────┐  ┌─────────────────────────────┐  │
 │  │ FlightRepository │  │    IgnoreListManager        │  │
-│  │  - Flight CRUD   │  │  - Global ignore list       │  │
+│  │  - Flight CRUD   │  │  - Global NOTAM ignore      │  │
 │  │  - Briefing imp  │  │  - Identity key cache       │  │
 │  │  - Status update │  │  - Auto-expiration          │  │
-│  └──────────────────┘  └─────────────────────────────┘  │
+│  └──────────────────┘  ├─────────────────────────────┤  │
+│                        │  AirportIgnoreListManager   │  │
+│                        │  - Airport-level ignore     │  │
+│                        │  - ICAO code cache          │  │
+│                        │  - No expiration            │  │
+│                        └─────────────────────────────┘  │
 └──────────────────────────┬──────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────┐
@@ -134,6 +139,27 @@ extension CDIgnoredNotam {
 }
 ```
 
+### CDIgnoredAirport
+Airport-level ignore list entries. Simpler than NOTAM ignores — no expiration, ICAO code as natural key.
+
+| Attribute | Type | Notes |
+|-----------|------|-------|
+| id | UUID | |
+| icaoCode | String | ICAO code (indexed, uppercased) |
+| reason | String? | User's ignore reason |
+| createdAt | Date | |
+
+**Extensions:**
+```swift
+extension CDIgnoredAirport {
+    static func create(in:icaoCode:reason:)  // Uppercases ICAO
+    static func find(icaoCode:in:)
+    static func isIgnored(icaoCode:in:)
+    static func allIgnoresFetchRequest()     // Sorted by ICAO
+    var formattedCreatedAt: String
+}
+```
+
 ## Repositories
 
 ### FlightRepository
@@ -191,6 +217,28 @@ Global ignore list with caching.
 }
 ```
 
+### AirportIgnoreListManager
+
+Airport-level ignore list with caching. Mirrors `IgnoreListManager` but simpler — no expiration.
+
+```swift
+@MainActor final class AirportIgnoreListManager {
+    private var ignoredCodesCache: Set<String>?
+
+    // CRUD (with duplicate prevention)
+    func addToIgnoreList(icaoCode: String, reason: String?) -> CDIgnoredAirport
+    func removeFromIgnoreList(_ ignored: CDIgnoredAirport)
+    func removeFromIgnoreList(icaoCode: String)
+
+    // Lookup (cache-backed)
+    func isIgnored(icaoCode: String) -> Bool
+    func getIgnoredAirportCodes() -> Set<String>
+
+    // Fetch
+    func fetchAllIgnores() -> [CDIgnoredAirport]
+}
+```
+
 ## Key Data Flows
 
 ### Briefing Import with Status Transfer
@@ -228,20 +276,21 @@ func importBriefing(_ briefing: Briefing, for flight: CDFlight) -> CDBriefing {
 }
 ```
 
-### Global Ignore List Usage
+### Ignore List Usage
 
 ```swift
-// In NotamDomain.buildEnrichedNotams()
+// In NotamDomain — both NOTAM and airport ignore lists are loaded at enrichment time
 let ignoredKeys = ignoreListManager.getIgnoredIdentityKeys()
+let ignoredAirports = airportIgnoreListManager.getIgnoredAirportCodes()
 
-enrichedNotams = allNotams.map { notam in
-    let key = NotamIdentity.key(for: notam)
-    return EnrichedNotam(
-        notam: notam,
-        status: statuses[key]?.statusEnum ?? .unread,
-        isGloballyIgnored: ignoredKeys.contains(key)
-    )
-}
+enrichedNotams = EnrichedNotam.enrich(
+    notams: allNotams,
+    statuses: statuses,
+    ignoredKeys: ignoredKeys,
+    ignoredAirports: ignoredAirports,  // Airport-level ignore
+    ...
+)
+// Each EnrichedNotam gets isGloballyIgnored and isAirportIgnored flags
 ```
 
 ## PersistenceController
@@ -296,9 +345,11 @@ let url = SecretsManager.shared.apiBaseURL
 ## Gotchas
 
 1. **Always use identity keys for NOTAM matching** - NOTAM IDs can change between briefings
-2. **Ignore list auto-expires** - Entries removed when NOTAM's effectiveTo date passes
-3. **Status transfer happens at import time** - Not retroactive
-4. **Cache invalidation** - Call `IgnoreListManager.refreshCache()` after bulk operations
+2. **NOTAM ignore list auto-expires** - Entries removed when NOTAM's effectiveTo date passes
+3. **Airport ignore list never expires** - ICAO code entries persist until manually removed
+4. **Status transfer happens at import time** - Not retroactive
+5. **Cache invalidation** - Call `refreshCache()` on either manager after bulk operations
+6. **Two ignore systems** - NOTAM-level (by identity key, with expiration) and airport-level (by ICAO code, no expiration) are independent
 
 ## References
 

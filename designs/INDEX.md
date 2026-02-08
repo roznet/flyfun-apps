@@ -1,6 +1,6 @@
-# flyfun-rules
+# flyfun-apps
 
-> Aviation planning web app with LLM agent, European AIP data, and GA friendliness scoring
+> Aviation planning web app with LLM agent, European AIP data, and GA friendliness scoring. Also includes FlyFunBrief (briefing app) and FlyFunEuroAIP (iOS/macOS app).
 
 ## Web App (Frontend)
 
@@ -102,12 +102,12 @@ Key exports: `AppState`, `BriefingDomain`, `NotamDomain`, `FlightDomain`, `Enric
 → Full doc: BRIEFING_APP_ARCHITECTURE.md
 
 ### Briefing App Data Layer
-Core Data stack with CloudKit sync, repository pattern, identity key-based status transfer, global ignore list with auto-expiration.
-Key exports: `FlightRepository`, `IgnoreListManager`, `PersistenceController`, `CDFlight`, `CDBriefing`, `CDNotamStatus`
+Core Data stack with CloudKit sync, repository pattern, identity key-based status transfer, global NOTAM ignore list with auto-expiration, airport-level ignore list.
+Key exports: `FlightRepository`, `IgnoreListManager`, `AirportIgnoreListManager`, `PersistenceController`, `CDFlight`, `CDBriefing`, `CDNotamStatus`, `CDIgnoredAirport`
 → Full doc: BRIEFING_APP_DATA.md
 
 ### Briefing App NOTAM System
-NOTAM domain, filtering pipeline, enriched model pattern, identity matching across briefings, global ignore list, profile-driven priority evaluation (IFR/VFR) with cumulative filtering.
+NOTAM domain, filtering pipeline, enriched model pattern, identity matching across briefings, NOTAM and airport ignore lists, profile-driven priority evaluation (IFR/VFR) with cumulative filtering.
 Key exports: `NotamDomain`, `EnrichedNotam`, `NotamIdentity`, `NotamStatus`, `NotamPriority`, `PriorityProfile`, `PriorityFilter`, filter types
 → Full doc: BRIEFING_APP_NOTAMS.md
 
