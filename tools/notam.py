@@ -4,7 +4,8 @@
 NOTAM Extractor - Extract NOTAMs from ForeFlight PDF briefings to CSV or test fixture text.
 
 Parses ForeFlight briefing PDFs and outputs NOTAM data in CSV format
-for analysis and review. Supports optional route distance calculation.
+for analysis and review. Supports optional route distance calculation
+and priority evaluation using JSON profile configs.
 
 Usage:
     # Basic extraction to CSV
@@ -15,6 +16,15 @@ Usage:
 
     # With route distance calculation (uses AIRPORTS_DB env var or airports.db)
     python tools/notam.py briefing.pdf --route LFPT LSGS
+
+    # With priority evaluation (IFR profile, auto dep/dest from route)
+    python tools/notam.py briefing.pdf --route LFPT LSGS --profile ifr --altitude 8000
+
+    # VFR profile
+    python tools/notam.py briefing.pdf --route LFPT LSGS --profile vfr
+
+    # Override dep/dest for multi-stop routes
+    python tools/notam.py briefing.pdf --route LFPT LFML LSGS --dep LFPT --dest LSGS --profile ifr
 
     # Extract raw NOTAM text blocks for Swift test fixtures
     python tools/notam.py briefing.pdf --extract-text -o fixtures.txt
@@ -31,6 +41,9 @@ Examples:
 
     # Extract with route distance (auto-detects airports.db or AIRPORTS_DB)
     python tools/notam.py briefing.pdf --route LFPT LSGS
+
+    # Extract with priority evaluation
+    python tools/notam.py briefing.pdf --route LFPT LSGS --profile ifr --altitude 8000
 
     # Extract raw text for test fixtures
     python tools/notam.py briefing.pdf --extract-text --limit 10 -o test_fixtures.txt
@@ -173,13 +186,20 @@ def escape_csv_text(text: str) -> str:
     return text.strip()
 
 
-def notam_to_row(notam: Notam, route_distance: Optional[float] = None) -> dict:
+def notam_to_row(
+    notam: Notam,
+    route_distance: Optional[float] = None,
+    priority: Optional[int] = None,
+    priority_rule: Optional[str] = None,
+) -> dict:
     """
     Convert NOTAM to CSV row dictionary.
 
     Args:
         notam: NOTAM object
         route_distance: Optional distance to route in NM
+        priority: Optional priority level (1-N)
+        priority_rule: Optional matched rule ID
 
     Returns:
         Dictionary with CSV fields
@@ -213,7 +233,7 @@ def notam_to_row(notam: Notam, route_distance: Optional[float] = None) -> dict:
     if route_distance is not None:
         distance_nm = f"{route_distance:.1f}"
 
-    return {
+    row = {
         'id': notam.id,
         'location': notam.location,
         'fir': notam.fir or "",
@@ -233,8 +253,15 @@ def notam_to_row(notam: Notam, route_distance: Optional[float] = None) -> dict:
         'latitude': latitude,
         'longitude': longitude,
         'distance_nm': distance_nm,
-        'raw_text': escape_csv_text(notam.raw_text),
     }
+
+    if priority is not None:
+        row['priority'] = f"P{priority}"
+        row['priority_rule'] = priority_rule or ""
+
+    row['raw_text'] = escape_csv_text(notam.raw_text)
+
+    return row
 
 
 def extract_notams(
@@ -242,6 +269,10 @@ def extract_notams(
     output_path: Optional[Path] = None,
     route_airports: Optional[List[str]] = None,
     database_path: Optional[str] = None,
+    profile_path: Optional[str] = None,
+    dep_icao: Optional[str] = None,
+    dest_icao: Optional[str] = None,
+    cruise_altitude_ft: Optional[int] = None,
 ) -> List[dict]:
     """
     Extract NOTAMs from PDF and write to CSV.
@@ -251,6 +282,10 @@ def extract_notams(
         output_path: Output CSV path (defaults to pdf_path with .csv extension)
         route_airports: Optional list of route airport ICAO codes for distance calculation
         database_path: Optional path to airports database
+        profile_path: Optional path to priority profile JSON
+        dep_icao: Optional departure ICAO (auto-detected from route if not set)
+        dest_icao: Optional destination ICAO (auto-detected from route if not set)
+        cruise_altitude_ft: Optional cruise altitude in feet
 
     Returns:
         List of NOTAM row dictionaries
@@ -285,13 +320,38 @@ def extract_notams(
             logger.warning("Insufficient route points for distance calculation")
             route_points = []
 
+    # Set up priority evaluator if profile specified
+    evaluator = None
+    if profile_path:
+        from tools.priority_evaluator import PriorityEvaluator
+        evaluator = PriorityEvaluator(profile_path)
+        # Auto-detect dep/dest from route if not explicitly set
+        if route_airports and len(route_airports) >= 2:
+            if not dep_icao:
+                dep_icao = route_airports[0]
+            if not dest_icao:
+                dest_icao = route_airports[-1]
+        logger.info(
+            f"Priority profile: {evaluator.display_name}"
+            f" | dep={dep_icao or 'N/A'} dest={dest_icao or 'N/A'}"
+            f" | altitude={cruise_altitude_ft or 'N/A'}ft"
+        )
+
     # Convert NOTAMs to rows
     rows = []
     for notam in briefing.notams:
         route_distance = None
         if route_points:
             route_distance = calculate_route_distance(notam, route_points)
-        rows.append(notam_to_row(notam, route_distance))
+
+        priority = None
+        priority_rule = None
+        if evaluator:
+            priority, priority_rule = evaluator.evaluate(
+                notam, route_distance, dep_icao, dest_icao, cruise_altitude_ft
+            )
+
+        rows.append(notam_to_row(notam, route_distance, priority, priority_rule))
 
     # Determine output path
     if output_path is None:
@@ -534,6 +594,31 @@ def main():
     )
 
     parser.add_argument(
+        '--profile',
+        metavar='PROFILE',
+        help='Priority profile: ifr, vfr, or path to JSON file (default: none)'
+    )
+
+    parser.add_argument(
+        '--dep',
+        metavar='ICAO',
+        help='Departure airport ICAO (auto-detected from --route if not set)'
+    )
+
+    parser.add_argument(
+        '--dest',
+        metavar='ICAO',
+        help='Destination airport ICAO (auto-detected from --route if not set)'
+    )
+
+    parser.add_argument(
+        '--altitude',
+        type=int,
+        metavar='FEET',
+        help='Cruise altitude in feet for altitude-based priority rules'
+    )
+
+    parser.add_argument(
         '--extract-text',
         action='store_true',
         help='Extract raw NOTAM text blocks for test fixtures (instead of CSV)'
@@ -568,16 +653,36 @@ def main():
             print(f"\nExtracted {count} NOTAM text blocks")
             return
 
+        # Resolve priority profile if specified
+        profile_path = None
+        if args.profile:
+            from tools.priority_evaluator import resolve_profile_path
+            profile_path = resolve_profile_path(args.profile)
+
         rows = extract_notams(
             pdf_path=args.pdf,
             output_path=args.output,
             route_airports=args.route,
             database_path=args.database,
+            profile_path=profile_path,
+            dep_icao=args.dep,
+            dest_icao=args.dest,
+            cruise_altitude_ft=args.altitude,
         )
 
         # Print summary
         if rows:
             print(f"\nExtracted {len(rows)} NOTAMs")
+
+            # Priority summary (if evaluated)
+            if rows[0].get('priority'):
+                print(f"\nBy priority ({args.profile}):")
+                priority_counts = {}
+                for row in rows:
+                    p = row.get('priority', 'N/A')
+                    priority_counts[p] = priority_counts.get(p, 0) + 1
+                for p, count in sorted(priority_counts.items()):
+                    print(f"  {p}: {count}")
 
             # Count by location
             locations = {}

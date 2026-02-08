@@ -1,0 +1,103 @@
+{
+  "id": "ifr",
+  "display_name": "IFR",
+  "max_level": 5,
+  "level_descriptions": {
+    "1": "Runway/taxiway at dep/dest, ILS/procedure unavailable at dep/dest",
+    "2": "ILS/procedure changed at dep/dest, airspace restrictions in corridor, rwy/twy limits near route",
+    "3": "Close NOTAMs at relevant altitude, navaid issues along route",
+    "4": "Facilities/services/comms at dep/dest, conditions near route",
+    "5": "Other NOTAMs"
+  },
+  "rules": [
+    {
+      "id": "ifr_p1_movement_area",
+      "name": "Runway/taxiway/threshold conditions at dep/dest",
+      "type": "q_code_match",
+      "level": 1,
+      "subjects": ["MR", "MT", "MX"],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p1_procedure_unavailable",
+      "name": "ILS/procedure unavailable at dep/dest",
+      "type": "q_code_match",
+      "level": 1,
+      "subjects": [
+        "IL", "IG", "IM", "IO", "II", "IS", "IT", "IU", "ID", "IW", "IX", "IY",
+        "PI", "PA", "PD", "PU", "PH"
+      ],
+      "condition_filter": "unavailable",
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p2_procedure_changed",
+      "name": "ILS/procedure changed at dep/dest",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": [
+        "IL", "IG", "IM", "IO", "II", "IS", "IT", "IU", "ID", "IW", "IX", "IY",
+        "PI", "PA", "PD", "PU", "PH",
+        "PM", "PO", "PT", "PX", "PF", "PR", "PC", "PL", "PN", "PZ"
+      ],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p2_airspace_restrictions",
+      "name": "Airspace restrictions within corridor",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["RA", "RR", "RT", "AR"],
+      "max_distance_nm": 50,
+      "altitude_check": "if_available"
+    },
+    {
+      "id": "ifr_p2_movement_area_near_route",
+      "name": "Runway/taxiway limitations near route",
+      "type": "q_code_match",
+      "level": 2,
+      "subjects": ["MR", "MT", "MX"],
+      "condition_filter": "limitation",
+      "location": "not_dep_dest",
+      "max_distance_nm": 50
+    },
+    {
+      "id": "ifr_p3_close_altitude",
+      "name": "Close to route at flight altitude",
+      "type": "q_code_match",
+      "level": 3,
+      "max_distance_nm": 10,
+      "altitude_check": "required",
+      "no_altitude_fallback_distance_nm": 5
+    },
+    {
+      "id": "ifr_p3_navaid_issues",
+      "name": "Navaid issues along route",
+      "type": "q_code_match",
+      "level": 3,
+      "subjects": ["NV", "ND", "NB", "NT", "NL"],
+      "max_distance_nm": 25
+    },
+    {
+      "id": "ifr_p4_facilities",
+      "name": "Facilities/services at dep/dest",
+      "type": "q_code_match",
+      "level": 4,
+      "subjects": [
+        "FA", "FF", "FS",
+        "CA", "CO", "CS",
+        "SA", "SS", "SE",
+        "LA", "LB", "LC", "LI"
+      ],
+      "location": "dep_dest"
+    },
+    {
+      "id": "ifr_p4_near_route",
+      "name": "Conditions near route",
+      "type": "q_code_match",
+      "level": 4,
+      "max_distance_nm": 50,
+      "altitude_check": "if_available"
+    }
+  ]
+}
