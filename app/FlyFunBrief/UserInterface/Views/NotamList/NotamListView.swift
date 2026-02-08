@@ -183,6 +183,7 @@ struct NotamListView: View {
         let sortedKeys = grouped.keys.sorted()
 
         ForEach(sortedKeys, id: \.self) { airport in
+            let isIgnored = appState?.notams.isAirportIgnored(airport) ?? false
             Section(isExpanded: sectionExpandedBinding(for: airport)) {
                 if let notams = grouped[airport] {
                     ForEach(notams, id: \.notamId) { enrichedNotam in
@@ -191,7 +192,26 @@ struct NotamListView: View {
                     }
                 }
             } header: {
-                NotamSectionHeader(title: airport, count: grouped[airport]?.count ?? 0, isExpanded: sectionExpandedBinding(for: airport))
+                NotamSectionHeader(title: airport, count: grouped[airport]?.count ?? 0, isExpanded: sectionExpandedBinding(for: airport), isIgnored: isIgnored)
+                    .contextMenu {
+                        if isIgnored {
+                            Button {
+                                Task {
+                                    await appState?.notams.removeAirportFromIgnoreList(airport)
+                                }
+                            } label: {
+                                Label("Show \(airport) NOTAMs", systemImage: "eye")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                Task {
+                                    await appState?.notams.addAirportToIgnoreList(airport)
+                                }
+                            } label: {
+                                Label("Ignore All \(airport) NOTAMs", systemImage: "eye.slash")
+                            }
+                        }
+                    }
             }
         }
     }
@@ -291,6 +311,7 @@ struct NotamSectionHeader: View {
     let title: String
     let count: Int
     @Binding var isExpanded: Bool
+    var isIgnored: Bool = false
 
     var body: some View {
         Button {
@@ -301,6 +322,12 @@ struct NotamSectionHeader: View {
             HStack {
                 Text(title)
                     .font(.headline)
+                    .strikethrough(isIgnored)
+                if isIgnored {
+                    Image(systemName: "eye.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text("\(count)")
                     .font(.caption)
@@ -313,6 +340,7 @@ struct NotamSectionHeader: View {
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
+            .opacity(isIgnored ? 0.6 : 1.0)
         }
         .buttonStyle(.plain)
     }

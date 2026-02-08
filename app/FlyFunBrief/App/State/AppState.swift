@@ -51,6 +51,9 @@ final class AppState {
     /// Global NOTAM ignore list manager
     let ignoreListManager: IgnoreListManager
 
+    /// Airport-level ignore list manager
+    let airportIgnoreListManager: AirportIgnoreListManager
+
     /// Global NOTAM read tracking manager
     let globalReadManager: GlobalReadManager
 
@@ -75,6 +78,7 @@ final class AppState {
         self.persistenceController = PersistenceController.shared
         self.flightRepository = FlightRepository(persistenceController: persistenceController)
         self.ignoreListManager = IgnoreListManager(persistenceController: persistenceController)
+        self.airportIgnoreListManager = AirportIgnoreListManager(persistenceController: persistenceController)
         self.globalReadManager = GlobalReadManager(persistenceController: persistenceController)
 
         // Initialize services
@@ -98,7 +102,7 @@ final class AppState {
         // Initialize domains
         self.flights = FlightDomain(repository: flightRepository)
         self.briefing = BriefingDomain(service: briefingService)
-        self.notams = NotamDomain(flightRepository: flightRepository, ignoreListManager: ignoreListManager, globalReadManager: globalReadManager)
+        self.notams = NotamDomain(flightRepository: flightRepository, ignoreListManager: ignoreListManager, airportIgnoreListManager: airportIgnoreListManager, globalReadManager: globalReadManager)
         self.navigation = NavigationDomain()
         self.settings = SettingsDomain()
 

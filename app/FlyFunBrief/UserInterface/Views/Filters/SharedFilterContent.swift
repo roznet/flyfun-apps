@@ -155,7 +155,8 @@ struct FilterVisibilitySection: View {
     var body: some View {
         Section {
             Toggle("Show Read", isOn: showReadBinding)
-            Toggle("Show Ignored", isOn: showIgnoredBinding)
+            Toggle("Show Ignored NOTAMs", isOn: showIgnoredBinding)
+            Toggle("Show Ignored Airports", isOn: showIgnoredAirportsBinding)
         } header: {
             Label("Visibility", systemImage: "eye")
         }
@@ -172,6 +173,13 @@ struct FilterVisibilitySection: View {
         Binding(
             get: { appState?.notams.visibilityFilter.showIgnored ?? false },
             set: { appState?.notams.visibilityFilter.showIgnored = $0 }
+        )
+    }
+
+    private var showIgnoredAirportsBinding: Binding<Bool> {
+        Binding(
+            get: { appState?.notams.visibilityFilter.showIgnoredAirports ?? false },
+            set: { appState?.notams.visibilityFilter.showIgnoredAirports = $0 }
         )
     }
 }
