@@ -434,7 +434,6 @@
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
       "countries": ["FR", "DE"],
-      "question": "Compare how does uncontrolled airspace work between France and Germany",
       "tags": ["airspace"]
     },
     "description": "Compare uncontrolled airspace rules - should use question for semantic narrowing"
@@ -443,8 +442,7 @@
     "question": "What are the differences in language requirements between France and Germany?",
     "expected_tool": "compare_rules_between_countries",
     "expected_arguments": {
-      "countries": ["FR", "DE"],
-      "question": "What are the differences in language requirements between France and Germany?"
+      "countries": ["FR", "DE"]
     },
     "description": "Compare language rules between France and Germany"
   },
@@ -457,6 +455,33 @@
       "question": "What should I know about the use of language when flying in France?"
     },
     "description": "Single country rules - language question should match 'use of local language' rule"
+  },
+
+  {
+    "question": "can FIS provide clearance to enter controlled airspace in germany and danemark",
+    "expected_tool": "compare_rules_between_countries",
+    "expected_arguments": {
+      "countries": ["DE", "DK"]
+    },
+    "description": "Compare FIS clearance - DK has no data, should still show DE rules"
+  },
+  {
+    "question": "how does IFR outside of controlled airspace work in germany and Hungary?",
+    "expected_tool": "compare_rules_between_countries",
+    "expected_arguments": {
+      "countries": ["DE", "HU"],
+      "tags": ["ifr"]
+    },
+    "description": "Compare IFR outside controlled airspace - question narrows to relevant rules"
+  },
+  {
+    "question": "Can I arrive into a vfr only airport in germany from an IFR flight plan",
+    "expected_tool": "answer_rules_question",
+    "expected_arguments": {
+      "country_code": "DE",
+      "question": "Can I arrive into a vfr only airport in germany from an IFR flight plan"
+    },
+    "description": "Single country - IFR to VFR airport arrival"
   },
 
   {

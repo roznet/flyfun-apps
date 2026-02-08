@@ -1525,6 +1525,61 @@ def compare_rules_between_countries(
 
     differences = comparison.get('differences', [])
 
+    # Check if one country has no data at all — fall back to single-country answer
+    total_c1 = comparison.get('total_rules_country1', 0)
+    total_c2 = comparison.get('total_rules_country2', 0)
+    missing_country = None
+    available_country = None
+    if total_c1 == 0 and total_c2 > 0:
+        missing_country, available_country = countries[0], countries[1]
+    elif total_c2 == 0 and total_c1 > 0:
+        missing_country, available_country = countries[1], countries[0]
+
+    if missing_country and available_country:
+        # One country has no rules — provide available country's data instead
+        available_rules = rules_manager.get_rules_for_country(
+            country_code=available_country, tags=tags
+        )
+        # Narrow by QuestionMatcher if we have matched IDs
+        if matched_question_ids is not None:
+            matched_id_set = set(matched_question_ids)
+            available_rules = [
+                r for r in available_rules
+                if r.get('question_id') in matched_id_set
+            ]
+        available_countries = ", ".join(rules_manager.get_available_countries())
+        rules_context_lines = [
+            f"**Note:** No rules data available for {missing_country}. "
+            f"Available countries: {available_countries}.\n"
+            f"Below are the rules for **{available_country}** on this topic:\n"
+        ]
+        for i, rule in enumerate(available_rules, 1):
+            q = rule.get('question_text') or rule.get('question_id', 'Unknown')
+            a = rule.get('answer_html', '')
+            if a:
+                rules_context_lines.append(f"### {i}. {q}")
+                rules_context_lines.append(f"**{available_country}**: {a}\n")
+
+        countries_str = ", ".join(countries)
+        retrieval_mode = "llm_match+text" if matched_question_ids is not None else "text"
+        return {
+            "found": True,
+            "countries": countries,
+            "tags": tags,
+            "comparison": comparison,
+            "differences": [],
+            "rules_context": "\n".join(rules_context_lines),
+            "total_differences": 0,
+            "filtered_by_embedding": False,
+            "retrieval_mode": f"{retrieval_mode}+partial",
+            "missing_countries": [missing_country],
+            "message": (
+                f"No rules data for {missing_country}. "
+                f"Showing {available_country} rules only."
+            ),
+            "_tool_type": "comparison",
+        }
+
     # Filter by matched question IDs if QuestionMatcher narrowed the set
     if matched_question_ids is not None:
         matched_id_set = set(matched_question_ids)

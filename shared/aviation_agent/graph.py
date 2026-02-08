@@ -145,10 +145,21 @@ def _build_agent_graph(
         try:
             # Execute the tool
             tool_calls = plan.get_tool_calls()
-            
+
             if not tool_calls:
                 return {"error": "No tools selected in plan"}
-            
+
+            # Ensure comparison tool always has the user's question for QuestionMatcher.
+            # The planner doesn't always include it despite prompt instructions.
+            if plan.selected_tool == "compare_rules_between_countries":
+                if not (plan.arguments or {}).get("question"):
+                    messages = state.get("messages", [])
+                    if messages and hasattr(messages[-1], "content"):
+                        if plan.arguments is None:
+                            plan.arguments = {}
+                        plan.arguments["question"] = messages[-1].content
+                        logger.info("Injected user question into comparison tool arguments")
+
             # Single tool execution
             result = tool_runner.run(plan, state)
             

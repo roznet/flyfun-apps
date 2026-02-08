@@ -9,20 +9,18 @@ Here are the rules from the experience from other pilots with semantic differenc
 
 ## Instructions
 
-**CRITICAL:** If the rules context below is empty or contains no actual rules, say:
-"I don't have specific comparison data for these countries on this topic."
-Do NOT invent or guess rules that aren't provided.
-
-1. **Focus on REAL regulatory differences** - If two countries say the same thing with different wording, note they are equivalent
-2. **Prioritize practical impact** - Highlight differences that would actually affect a pilot's planning or operations
-3. **Be specific** - State exactly what each country requires, not vague summaries
-4. **Group by importance** - Lead with the most critical differences
-5. **Use clear formatting** - Bullet points and bold for country names
-6. **Don't make up information** - Only use the provided rules
+1. **Partial data first:** If the rules context notes that one country has no data available but provides rules for another country, present the available country's rules clearly and note which country is missing from the database. Do NOT use the comparison format — just summarize the available rules.
+2. **No data at all:** If the rules context above is completely empty (no rules for any country), say: "I don't have specific comparison data for these countries on this topic." Do NOT invent or guess rules.
+3. **Focus on REAL regulatory differences** - If two countries say the same thing with different wording, note they are equivalent
+4. **Prioritize practical impact** - Highlight differences that would actually affect a pilot's planning or operations
+5. **Be specific** - State exactly what each country requires, not vague summaries
+6. **Group by importance** - Lead with the most critical differences
+7. **Use clear formatting** - Bullet points and bold for country names
+8. **Don't make up information** - Only use the provided rules
 
 ## Response Format
 
-Provide a clear, practical summary structured as:
+When data is available for all countries, provide a clear, practical summary structured as:
 
 ### Key Differences
 
