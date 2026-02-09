@@ -161,6 +161,30 @@ curl http://localhost:8000/health
 **What requires rebuild vs restart:**
 - **Rebuild needed:** `web/server/*.py`, `web/client/`, `shared/`, `requirements.txt`
 - **Restart only:** `.env`, `security_config.py`, `tools/`, data files in `data/`
+- **Base image rebuild needed:** `rzflight`/`euro_aip` changes, `requirements.txt` — see [Update rzflight](#update-rzflight--euro_aip)
+
+### Update rzflight / euro_aip
+
+The `euro_aip` package is installed from GitHub into the **base image** (`Dockerfile.base`). Docker caches this layer, so pushing a new version of rzflight to GitHub is **not** automatically picked up — you must force a rebuild of the base image.
+
+```bash
+# 1. Rebuild the base image (--no-cache forces re-fetching euro_aip from GitHub)
+docker compose build --no-cache base
+
+# 2. Rebuild services that depend on the base image
+docker compose build web-server mcp-server
+
+# 3. Restart with new images
+docker compose up -d web-server mcp-server
+
+# 4. Verify the new version is installed
+docker exec flyfun-web-server pip show euro-aip
+docker compose logs web-server --tail=20
+```
+
+**Why `--no-cache` is needed:** The `pip install` line in `Dockerfile.base` references a remote git URL. Docker sees the line hasn't changed and reuses the cached layer with the old version. `--no-cache` forces Docker to re-run every layer, including the `pip install`.
+
+**Note:** Only the `base` service needs `--no-cache`. The `web-server` and `mcp-server` builds will pick up the new base image automatically since their `FROM flyfun-base:latest` references the just-rebuilt image.
 
 ### Update airports.db
 
