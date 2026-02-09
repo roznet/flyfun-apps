@@ -17,9 +17,9 @@ RUN chown -R flyfun-mcp:flyfun-mcp /app
 # Switch to non-root user
 USER flyfun-mcp
 
-# Health check (MCP servers typically use stdio, but we can check process)
+# Health check via HTTP (MCP server runs in streamable-http mode)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD pgrep -f "python.*main.py" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:8000/mcp')" || exit 1
 
 # Run the MCP server
 WORKDIR /app/mcp_server
