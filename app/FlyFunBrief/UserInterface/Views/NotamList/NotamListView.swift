@@ -193,25 +193,6 @@ struct NotamListView: View {
                 }
             } header: {
                 NotamSectionHeader(title: airport, count: grouped[airport]?.count ?? 0, isExpanded: sectionExpandedBinding(for: airport), isIgnored: isIgnored)
-                    .contextMenu {
-                        if isIgnored {
-                            Button {
-                                Task {
-                                    await appState?.notams.removeAirportFromIgnoreList(airport)
-                                }
-                            } label: {
-                                Label("Show \(airport) NOTAMs", systemImage: "eye")
-                            }
-                        } else {
-                            Button(role: .destructive) {
-                                Task {
-                                    await appState?.notams.addAirportToIgnoreList(airport)
-                                }
-                            } label: {
-                                Label("Ignore All \(airport) NOTAMs", systemImage: "eye.slash")
-                            }
-                        }
-                    }
             }
         }
     }

@@ -53,6 +53,47 @@ struct NotamRowView: View {
             }
             .tint(.secondary)
         }
+        .contextMenu {
+            // NOTAM-level actions
+            Button {
+                appState?.notams.markAsRead(notam)
+            } label: {
+                Label("Mark as Read", systemImage: "checkmark")
+            }
+            Button {
+                appState?.notams.toggleImportant(notam)
+            } label: {
+                Label("Important", systemImage: "star")
+            }
+            Button {
+                appState?.notams.markAsIgnored(notam)
+            } label: {
+                Label("Ignore NOTAM", systemImage: "xmark")
+            }
+
+            Divider()
+
+            // Airport-level ignore
+            let location = notam.location.uppercased()
+            let isAirportIgnored = appState?.notams.isAirportIgnored(location) ?? false
+            if isAirportIgnored {
+                Button {
+                    Task {
+                        await appState?.notams.removeAirportFromIgnoreList(location)
+                    }
+                } label: {
+                    Label("Show \(location) NOTAMs", systemImage: "eye")
+                }
+            } else {
+                Button(role: .destructive) {
+                    Task {
+                        await appState?.notams.addAirportToIgnoreList(location)
+                    }
+                } label: {
+                    Label("Ignore All \(location) NOTAMs", systemImage: "eye.slash")
+                }
+            }
+        }
     }
 
     // MARK: - Status Indicator
