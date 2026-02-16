@@ -457,6 +457,28 @@ chmod 777 out logs
 # Or: chown -R 2000:2000 out logs
 ```
 
+### Disk Space / Cleanup
+
+Repeated rebuilds leave old images and build cache that Docker does **not** clean up automatically.
+
+```bash
+# Check disk usage summary
+docker system df
+
+# List all images sorted by size
+docker image ls --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+
+# Remove images not used by running containers
+docker image prune -a
+
+# Remove stale build cache
+docker builder prune
+```
+
+Both prune commands prompt for confirmation. Safe to run — images used by running containers are kept. Good habit to run after each deploy.
+
+**Warning:** Do not use `docker system prune -a` unless you understand it removes **everything** unused (images, stopped containers, networks, and build cache).
+
 ### Services Not Communicating
 
 ```bash
