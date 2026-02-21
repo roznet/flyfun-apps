@@ -3,31 +3,41 @@
 """
 Weather Analysis Tool - METAR/TAF analysis using euro_aip library.
 
-Fetches historical METAR/TAF data from ogimet.com, caches in SQLite,
-and provides flight category analysis, runway wind components, and
-TAF-vs-METAR forecast accuracy comparison.
+Supports three modes:
+1. Historical (single ICAO + date): Fetches from ogimet.com, caches in SQLite
+2. Live (single or multiple ICAOs, no date): Fetches from aviationweather.gov
+3. Route (--route flag): Finds airports along a route corridor, fetches live weather
 
 Usage:
-    # Show all reports for a day (chronological)
+    # Historical: show all reports for a day (chronological)
     python tools/weather.py EGLL 20250115
 
-    # Show reports up to a specific time with flight categories
+    # Historical: show reports up to a specific time with flight categories
     python tools/weather.py EGLL 20250115 1430 -c
 
-    # With runway wind components
+    # Historical: with runway wind components
     python tools/weather.py EGLL 20250115 -c -r 27,09
 
-    # With crosswind/gust limits (highlights red/green)
+    # Historical: with crosswind/gust limits (highlights red/green)
     python tools/weather.py EGLL 20250115 -c -r 27,09 -x 20 -g 35
 
-    # Daily summary statistics
+    # Historical: daily summary statistics
     python tools/weather.py EGLL 20250115 -s
 
-    # Use existing database
+    # Historical: use existing database
     python tools/weather.py EGLL 20250115 --db tmp/metar_taf.db
 
-    # Visibility in statute miles instead of metric
-    python tools/weather.py EGLL 20250115 -c --statute-miles
+    # Live: single airport
+    python tools/weather.py EGLL -c
+
+    # Live: multiple airports
+    python tools/weather.py EGLL LFPG LSGG -c
+
+    # Route: find airports along route corridor
+    python tools/weather.py --route EGLL LFPG -d 25 -c
+
+    # Route: with more waypoints and runway wind components
+    python tools/weather.py --route EGLL LFRN LFMN -d 50 -c -r 27,09
 """
 
 import argparse
@@ -53,6 +63,7 @@ from euro_aip.briefing.weather import (
 
 RESET = "\033[0m"
 DIM = "\033[2m"
+BOLD = "\033[1m"
 COLORS = {
     FlightCategory.VFR: "\033[92m",    # Green
     FlightCategory.MVFR: "\033[94m",   # Blue
@@ -301,6 +312,61 @@ class WeatherDisplay:
                 if current_taf:
                     self._print_taf_comparisons(report, current_taf)
 
+    def show_live(self, collection):
+        """Display live weather for one or more airports."""
+        groups = collection.group_by_airport()
+        for icao in sorted(groups.keys()):
+            group = groups[icao]
+            metars = group.metars().chronological().all()
+            tafs = group.tafs().chronological().all()
+
+            print(f"\n{BOLD}--- {icao} ---{RESET}")
+
+            if metars:
+                print("METARs:")
+                for m in metars:
+                    self._print_metar_line(m)
+            else:
+                print("  No METARs")
+
+            if tafs:
+                print("TAFs:")
+                for t in tafs:
+                    print(f"  {t.raw_text}")
+            else:
+                print("  No TAFs")
+
+    def show_route_weather(self, result):
+        """Display weather along a route corridor."""
+        from euro_aip.briefing.weather.route_weather import RouteWeatherResult
+
+        print(f"\n{BOLD}Route: {' → '.join(result.route_icaos)} "
+              f"(corridor: {result.corridor_nm}nm){RESET}")
+
+        with_wx = result.airports_with_weather
+        total = len(result.airports)
+
+        for apt in with_wx:
+            # Header line
+            name = f" ({apt.name})" if apt.name else ""
+            dist = f"{apt.distance_from_route_nm:.0f}nm from route"
+            enroute = ""
+            if apt.enroute_distance_nm is not None:
+                enroute = f", {apt.enroute_distance_nm:.0f}nm enroute"
+            print(f"\n{BOLD}{apt.icao}{name}{RESET} — {dist}{enroute}")
+
+            # Latest METAR
+            metar = apt.latest_metar
+            if metar:
+                self._print_metar_line(metar)
+
+            # Latest TAF
+            taf = apt.latest_taf
+            if taf:
+                print(f"  TAF: {taf.raw_text}")
+
+        print(f"\n{DIM}{len(with_wx)}/{total} airports with weather along route{RESET}")
+
     def show_summary(self, metars, tafs):
         """Display daily summary statistics."""
         print("\nDaily Forecast Analysis:")
@@ -522,15 +588,120 @@ def parse_runways(runway_arg):
     return runways or None
 
 
+def _is_date(value):
+    """Check if a string looks like a YYYYMMDD date."""
+    if len(value) != 8:
+        return False
+    try:
+        datetime.strptime(value, "%Y%m%d")
+        return True
+    except ValueError:
+        return False
+
+
+def run_historical(args, display):
+    """Historical mode: single ICAO + date, fetch from ogimet."""
+    icao = args.icao[0].upper()
+    report_dt = datetime.strptime(args.date, "%Y%m%d")
+    if args.time:
+        time_str = f"{args.time[:2]}:{args.time[2:]}"
+        report_dt = datetime.strptime(f"{args.date} {time_str}", "%Y%m%d %H:%M")
+
+    db = WeatherDB(args.db)
+    if not db.has_data(icao, report_dt):
+        fetcher = OgimetFetcher(cache_dir=args.cache_dir)
+        raw_reports = fetcher.fetch(icao, report_dt)
+        db.store_reports(raw_reports)
+        print(f"Stored {len(raw_reports)} reports for {icao}", file=sys.stderr)
+
+    rows = db.get_reports(icao, report_dt)
+    all_reports = parse_db_rows(rows)
+    collection = WeatherCollection(all_reports)
+    metars = collection.metars().chronological().all()
+    tafs = collection.tafs().chronological().all()
+
+    if args.summary:
+        display.show_summary(metars, tafs)
+    elif args.time:
+        filtered = collection.before(report_dt).chronological().all()
+        recent_tafs = [t for t in tafs if t.observation_time and t.observation_time <= report_dt]
+        if recent_tafs:
+            last_taf = recent_tafs[-1]
+            filtered = [
+                r for r in collection.chronological().all()
+                if r.observation_time and last_taf.observation_time <= r.observation_time <= report_dt
+            ]
+        display.show_chronological(filtered)
+    else:
+        display.show_chronological(collection.chronological().all())
+
+
+def run_live(args, display):
+    """Live mode: fetch from aviationweather.gov for one or more airports."""
+    from euro_aip.briefing.sources.avwx import AvWxSource
+
+    icaos = [i.upper() for i in args.icao]
+    print(f"Fetching live weather for: {', '.join(icaos)}", file=sys.stderr)
+
+    source = AvWxSource()
+    reports = source.fetch_weather(icaos)
+    collection = WeatherCollection(reports)
+
+    if args.summary:
+        metars = collection.metars().chronological().all()
+        tafs = collection.tafs().chronological().all()
+        display.show_summary(metars, tafs)
+    else:
+        display.show_live(collection)
+
+
+def run_route(args, display):
+    """Route mode: find airports along route, fetch weather."""
+    from euro_aip.briefing.weather.route_weather import RouteWeatherService
+    from euro_aip.storage import DatabaseStorage
+
+    icaos = [i.upper() for i in args.icao]
+    corridor = args.distance
+
+    if not args.airport_db:
+        print("Error: --airport-db required for route mode", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Loading airport database: {args.airport_db}", file=sys.stderr)
+    model = DatabaseStorage(args.airport_db).load_model()
+
+    print(f"Finding airports along {' → '.join(icaos)} "
+          f"within {corridor}nm corridor...", file=sys.stderr)
+
+    service = RouteWeatherService()
+    result = service.fetch_route_weather(
+        route_icaos=icaos,
+        corridor_nm=corridor,
+        model=model,
+    )
+
+    display.show_route_weather(result)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fetch and analyze METAR/TAF reports.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("icao", type=str, help="ICAO airport code (e.g., EGLL)")
-    parser.add_argument("date", type=str, help="Date in YYYYMMDD format")
-    parser.add_argument("time", type=str, nargs="?", help="Optional time in HHMM format")
+    parser.add_argument("icao", type=str, nargs="+",
+                        help="ICAO airport code(s) (e.g., EGLL or EGLL LFPG)")
+    parser.add_argument("date", type=str, nargs="?", default=None,
+                        help="Date in YYYYMMDD format (historical mode)")
+    parser.add_argument("time", type=str, nargs="?",
+                        help="Optional time in HHMM format (historical mode)")
+
+    parser.add_argument("--route", action="store_true",
+                        help="Route mode: find airports along route corridor")
+    parser.add_argument("-d", "--distance", type=float, default=25,
+                        help="Route corridor width in nm (default: 25)")
+    parser.add_argument("--airport-db", type=str,
+                        help="Airport database path for route mode")
 
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("-c", "--category", action="store_true", help="Show flight categories")
@@ -544,32 +715,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse datetime
-    if args.time:
-        time_str = f"{args.time[:2]}:{args.time[2:]}"
-        report_dt = datetime.strptime(f"{args.date} {time_str}", "%Y%m%d %H:%M")
-    else:
-        report_dt = datetime.strptime(args.date, "%Y%m%d")
+    # Disambiguate: if the last "icao" looks like a date, move it to date
+    if args.date is None and len(args.icao) >= 2 and _is_date(args.icao[-1]):
+        args.date = args.icao.pop()
 
-    icao = args.icao.upper()
+    if args.debug:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
 
-    # Ensure data is available
-    db = WeatherDB(args.db)
-    if not db.has_data(icao, report_dt):
-        fetcher = OgimetFetcher(cache_dir=args.cache_dir)
-        raw_reports = fetcher.fetch(icao, report_dt)
-        db.store_reports(raw_reports)
-        print(f"Stored {len(raw_reports)} reports for {icao}", file=sys.stderr)
-
-    # Load and parse
-    rows = db.get_reports(icao, report_dt)
-    all_reports = parse_db_rows(rows)
-
-    collection = WeatherCollection(all_reports)
-    metars = collection.metars().chronological().all()
-    tafs = collection.tafs().chronological().all()
-
-    # Display
     display = WeatherDisplay(
         show_category=args.category,
         runways=parse_runways(args.runway),
@@ -578,25 +731,13 @@ def main():
         gust_limit=args.gust_limit,
     )
 
-    if args.summary:
-        display.show_summary(metars, tafs)
+    # Mode detection
+    if args.route:
+        run_route(args, display)
+    elif args.date:
+        run_historical(args, display)
     else:
-        # Filter by time if specified
-        if args.time:
-            # Show reports up to specified time
-            filtered = collection.before(report_dt).chronological().all()
-            # Include the most recent TAF before the window
-            recent_tafs = [t for t in tafs if t.observation_time and t.observation_time <= report_dt]
-            if recent_tafs:
-                last_taf = recent_tafs[-1]
-                # Get reports from last TAF time onward
-                filtered = [
-                    r for r in collection.chronological().all()
-                    if r.observation_time and last_taf.observation_time <= r.observation_time <= report_dt
-                ]
-            display.show_chronological(filtered)
-        else:
-            display.show_chronological(collection.chronological().all())
+        run_live(args, display)
 
 
 if __name__ == "__main__":
