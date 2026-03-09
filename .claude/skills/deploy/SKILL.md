@@ -48,12 +48,18 @@ Tell the user what will be rebuilt and why.
    ```
    ssh <user>@<server> "cd flyfun-apps && git pull"
    ```
-3. Rebuild based on scope determined above. The most common case (code changes):
+3. **Before rebuilding**, check if `flyfun-base` image exists (it may have been pruned):
+   ```
+   ssh <user>@<server> "docker images --format '{{.Repository}}:{{.Tag}}' | grep flyfun-base || echo 'MISSING'"
+   ```
+   If missing, build it first: `ssh <user>@<server> "cd flyfun-apps && docker compose build base"`
+
+4. Rebuild based on scope determined above. The most common case (code changes):
    ```
    ssh <user>@<server> "cd flyfun-apps && docker compose build web-server && docker compose up -d web-server"
    ```
 
-   If base image rebuild is needed:
+   If base image rebuild is needed (requirements.txt, euro_aip changes):
    ```
    ssh <user>@<server> "cd flyfun-apps && docker compose build --no-cache base && docker compose build web-server mcp-server && docker compose up -d"
    ```
@@ -63,17 +69,17 @@ Tell the user what will be rebuilt and why.
    ssh <user>@<server> "cd flyfun-apps && docker compose restart web-server"
    ```
 
-4. If RAG rebuild is needed (rules.json changed):
+5. If RAG rebuild is needed (rules.json changed):
    ```
    ssh <user>@<server> "docker exec -it flyfun-web-server python /app/tools/xls_to_rules.py --out /app/data/rules.json --build-rag"
    ```
 
-5. Wait a few seconds, then verify the health check:
+6. Wait a few seconds, then verify the health check:
    ```
    ssh <user>@<server> "docker inspect --format='{{.State.Health.Status}}' flyfun-web-server"
    ```
 
-6. Also check the endpoint is responding:
+7. Also check the endpoint is responding:
    ```
    curl -s -o /dev/null -w '%{http_code}' https://maps.flyfun.aero/health
    ```
