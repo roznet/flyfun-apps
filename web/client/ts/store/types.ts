@@ -415,6 +415,28 @@ export interface RulesState {
 }
 
 /**
+ * Auth state
+ */
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  approved: boolean;
+}
+
+export interface ChatUsageInfo {
+  used: number;
+  limit: number;
+}
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  user: AuthUser | null;
+  chatUsage: ChatUsageInfo | null;
+}
+
+/**
  * Complete application state
  */
 export interface AppState {
@@ -448,6 +470,9 @@ export interface AppState {
 
   // Country rules / regulations state
   rules: RulesState;
+
+  // Authentication state
+  auth: AuthState;
 }
 
 /**

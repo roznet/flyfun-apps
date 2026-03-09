@@ -11,6 +11,9 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from flyfun_common.db import current_user_id, SessionLocal
 
 from shared.aviation_agent.adapters import (
     ChatRequest,
@@ -85,6 +88,7 @@ def feature_enabled(settings: Optional[AviationAgentSettings] = None) -> bool:
 @router.post("/chat", response_model=ChatResponse)
 def aviation_agent_chat(
     request: ChatRequest,
+    user_id: str = Depends(current_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
 ) -> ChatResponse:
     """
@@ -121,6 +125,7 @@ def aviation_agent_chat(
 @router.post("/chat/stream")
 async def aviation_agent_chat_stream(
     request: ChatRequest,
+    user_id: str = Depends(current_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
     session_id: Optional[str] = None,  # Extract from header if available
 ) -> StreamingResponse:
@@ -137,6 +142,14 @@ async def aviation_agent_chat_stream(
     """
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
+
+    # Check per-user daily rate limit before starting the expensive LLM call
+    from api.chat_usage import check_chat_rate_limit, log_chat_usage
+    db_session = SessionLocal()
+    try:
+        check_chat_rate_limit(db_session, user_id)
+    finally:
+        db_session.close()
 
     try:
         graph = build_agent(settings=settings)
@@ -156,6 +169,8 @@ async def aviation_agent_chat_stream(
         async def event_generator():
             final_state = None
             run_id = None
+            captured_input_tokens = 0
+            captured_output_tokens = 0
             try:
                 async for event in stream_aviation_agent(
                     messages,
@@ -170,10 +185,13 @@ async def aviation_agent_chat_stream(
                     # Capture final state when graph completes
                     if event_name == "final_answer":
                         final_state = event_data.get("state")
-                    
-                    # Capture run_id from done event for feedback tracking
+
+                    # Capture run_id and token counts from done event
                     if event_name == "done":
                         run_id = event_data.get("run_id")
+                        tokens = event_data.get("tokens", {})
+                        captured_input_tokens = tokens.get("input", 0)
+                        captured_output_tokens = tokens.get("output", 0)
 
                     yield f"event: {event_name}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
             finally:
@@ -197,6 +215,28 @@ async def aviation_agent_chat_stream(
                         logger.warning("Final state not captured during streaming, skipping conversation logging")
                 except Exception as e:
                     logger.error(f"Error in conversation logging: {e}", exc_info=True)
+
+                # Log chat usage and cost
+                try:
+                    usage_db = SessionLocal()
+                    try:
+                        log_chat_usage(
+                            usage_db,
+                            user_id,
+                            model=settings.model_name,
+                            input_tokens=captured_input_tokens,
+                            output_tokens=captured_output_tokens,
+                            thread_id=thread_id,
+                            persona_id=request.persona_id,
+                        )
+                        usage_db.commit()
+                    except Exception as e:
+                        usage_db.rollback()
+                        logger.error(f"Failed to log chat usage: {e}")
+                    finally:
+                        usage_db.close()
+                except Exception as e:
+                    logger.error(f"Error creating usage session: {e}")
         
         return StreamingResponse(
             event_generator(),
@@ -264,6 +304,7 @@ def get_quick_actions(
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(
     request: FeedbackRequest,
+    user_id: str = Depends(current_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
 ) -> FeedbackResponse:
     """

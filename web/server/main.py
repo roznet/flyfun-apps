@@ -17,18 +17,23 @@ load_component_env(component_dir)
 
 # Now continue with imports
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
 from datetime import datetime
 import time
+
+from flyfun_common.auth import create_auth_router, get_jwt_secret, is_dev_mode
+from flyfun_common.db import init_shared_db, ensure_dev_user, get_engine, SessionLocal
+from flyfun_common.db import current_user_id, get_db, UserRow
 
 from euro_aip.models.euro_aip_model import EuroAipModel
 
@@ -121,7 +126,19 @@ async def lifespan(app: FastAPI):
     
     # Startup
     logger.info("Starting up Euro AIP Airport Explorer...")
-    
+
+    # Initialize shared auth DB (users, api_tokens, chat_usage tables)
+    import db.models  # noqa: F401 – register ChatUsageRow on Base.metadata
+    engine = get_engine()
+    env = os.getenv("ENVIRONMENT", "development")
+    if env == "development":
+        init_shared_db(engine)
+        logger.info("Dev mode: shared DB tables created")
+    if is_dev_mode():
+        with SessionLocal() as session:
+            ensure_dev_user(session)
+        logger.info("Dev user ensured")
+
     try:
         # Create ToolContext with all services using centralized configuration
         logger.info("Initializing ToolContext with all services...")
@@ -264,6 +281,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# SessionMiddleware is required for OAuth state to survive the Google redirect roundtrip
+app.add_middleware(SessionMiddleware, secret_key=get_jwt_secret())
+
 # Add exception handler for validation errors to log details
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -281,6 +301,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         content={"detail": exc.errors(), "body": str(exc.body) if hasattr(exc, 'body') and exc.body else None}
     )
+
+# --- Auth routes ---
+# Custom /auth/me registered BEFORE common router so it takes priority,
+# returning app-specific fields (chat usage).
+@app.get("/auth/me", tags=["auth"])
+def auth_me(user_id: str = Depends(current_user_id), db=Depends(get_db)):
+    """Return current user info with chat usage."""
+    user = db.get(UserRow, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    from api.chat_usage import get_today_chat_count, DAILY_CHAT_LIMIT
+    chat_count = get_today_chat_count(db, user_id)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.display_name,
+        "approved": user.approved,
+        "chat_usage": {"used": chat_count, "limit": DAILY_CHAT_LIMIT},
+    }
+
+# Mount common auth router (login/google, callback/google, logout, providers)
+app.include_router(create_auth_router())
 
 # Include API routes
 app.include_router(airports.router, prefix="/api/airports", tags=["airports"])

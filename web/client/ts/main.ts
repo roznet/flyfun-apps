@@ -97,6 +97,9 @@ class Application {
     this.themeManager.init();
     this.initThemeToggle();
 
+    // Check auth state (non-blocking — chatbot reacts via store subscription)
+    this.checkAuth();
+
     // Initialize map
     this.initMap();
 
@@ -118,6 +121,67 @@ class Application {
     await this.loadInitialState();
 
     console.log('Application initialized successfully');
+  }
+
+  /**
+   * Check authentication state and update store.
+   * Also subscribes to auth changes to keep the header button in sync.
+   */
+  private async checkAuth(): Promise<void> {
+    try {
+      const response = await fetch('/auth/me', { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        this.store.getState().setAuth(
+          { id: data.id, email: data.email, name: data.name, approved: data.approved },
+          data.chat_usage,
+        );
+      } else {
+        this.store.getState().setAuth(null);
+      }
+    } catch {
+      this.store.getState().setAuth(null);
+    }
+    this.renderAuthButton();
+    // Re-render auth button whenever auth state changes
+    this.store.subscribe((state) => {
+      this.renderAuthButton();
+    });
+  }
+
+  /**
+   * Render login/logout button in header based on auth state.
+   */
+  private renderAuthButton(): void {
+    const container = document.getElementById('auth-button-container');
+    if (!container) return;
+
+    const { auth } = this.store.getState();
+    if (auth.isLoading) {
+      container.innerHTML = '';
+      return;
+    }
+
+    if (auth.isAuthenticated && auth.user) {
+      const displayName = auth.user.name || auth.user.email;
+      container.innerHTML = `
+        <div class="d-flex align-items-center gap-1">
+          <span class="text-muted small">${this.escapeHtml(displayName)}</span>
+          <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logout-btn" title="Sign out" style="font-size: 12px;">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </div>
+      `;
+      document.getElementById('logout-btn')?.addEventListener('click', () => {
+        window.location.href = '/auth/logout';
+      });
+    } else {
+      container.innerHTML = `
+        <a href="/auth/login/google" class="btn btn-outline-primary btn-sm py-0 px-2 d-flex align-items-center gap-1" style="font-size: 12px;">
+          <i class="fab fa-google"></i> <span>Sign in</span>
+        </a>
+      `;
+    }
   }
 
   /**

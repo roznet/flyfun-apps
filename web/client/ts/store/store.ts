@@ -3,7 +3,7 @@
  */
 import { create, StateCreator } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import type { 
+import type {
   AppState,
   FilterConfig,
   LegendMode,
@@ -18,7 +18,10 @@ import type {
   GAState,
   QuartileThresholds,
   CountryRules,
-  RulesState
+  RulesState,
+  AuthUser,
+  ChatUsageInfo,
+  AuthState
 } from './types';
 import { computeQuartileThresholds } from '../utils/relevance';
 
@@ -91,6 +94,13 @@ const initialState: AppState = {
     visualFilter: null,
     textFilter: '',
     sectionState: {}
+  },
+
+  auth: {
+    isAuthenticated: false,
+    isLoading: true,
+    user: null,
+    chatUsage: null,
   }
 };
 
@@ -183,6 +193,10 @@ interface StoreActions {
   setRulesTextFilter: (text: string) => void;
   setRuleSectionState: (sectionId: string, expanded: boolean) => void;
   clearRules: () => void;
+
+  // Auth actions
+  setAuth: (user: AuthUser | null, chatUsage?: ChatUsageInfo | null) => void;
+  setAuthLoading: (loading: boolean) => void;
 }
 
 /**
@@ -212,6 +226,9 @@ const createStore: StateCreator<StoreState, [], [["zustand/devtools", never]]> =
       },
       rules: {
         ...initialState.rules
+      },
+      auth: {
+        ...initialState.auth
       },
       
       // Set airports and auto-filter
@@ -605,7 +622,26 @@ const createStore: StateCreator<StoreState, [], [["zustand/devtools", never]]> =
             sectionState: {}
           }
         });
-      }
+      },
+
+      // --- Auth actions ---
+
+      setAuth: (user, chatUsage) => {
+        set({
+          auth: {
+            isAuthenticated: !!user,
+            isLoading: false,
+            user: user,
+            chatUsage: chatUsage ?? null,
+          }
+        });
+      },
+
+      setAuthLoading: (loading) => {
+        set((state) => ({
+          auth: { ...state.auth, isLoading: loading }
+        }));
+      },
 });
 
 // Export store with devtools

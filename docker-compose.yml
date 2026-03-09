@@ -38,6 +38,12 @@ services:
       - VECTOR_DB_PATH=/app/out/rules_vector_db
       - LOG_DIR=/app/logs
       - CONVERSATION_LOG_DIR=/app/logs/conversations
+      # Auth (shared with other flyfun services for SSO)
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - DATABASE_URL=${DATABASE_URL:-}
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro

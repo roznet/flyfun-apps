@@ -2,6 +2,19 @@
  * FlyFun Aviation Assistant Chatbot Styles
  */
 
+/* Auth overlay — shown when user is not signed in */
+.auth-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    color: var(--text-secondary, #6c757d);
+    padding: 2rem;
+    gap: 4px;
+}
+
 /* Chat Toggle Button (Floating) */
 #chat-toggle-btn {
     position: fixed;

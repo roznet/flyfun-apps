@@ -24,12 +24,35 @@ export class ChatbotManager {
   // Feedback tracking
   private currentRunId: string | null = null;
 
+  private authInitialized: boolean = false;
+
   constructor(llmIntegration: LLMIntegration) {
     this.llmIntegration = llmIntegration;
     this.initializeUI();
-    this.attachEventListeners();
-    this.loadQuickActions();
-    this.addWelcomeMessage();
+
+    // React to auth state changes
+    const checkAuthState = () => {
+      const { auth } = useStore.getState();
+      if (auth.isLoading) return; // Wait for auth check to complete
+
+      if (auth.isAuthenticated) {
+        this.hideSignInOverlay();
+        if (!this.authInitialized) {
+          this.authInitialized = true;
+          this.attachEventListeners();
+          this.loadQuickActions();
+          this.addWelcomeMessage();
+        }
+      } else {
+        this.showSignInOverlay();
+      }
+    };
+
+    // Check initial state
+    checkAuthState();
+
+    // Subscribe to future changes
+    useStore.subscribe(checkAuthState);
   }
 
   /**
@@ -46,6 +69,39 @@ export class ChatbotManager {
     if (!this.chatInput || !this.sendButton || !this.chatMessages) {
       console.error('ChatbotManager: Required UI elements not found');
     }
+  }
+
+  /**
+   * Show sign-in overlay when user is not authenticated.
+   */
+  private showSignInOverlay(): void {
+    if (!this.chatMessages) return;
+    // Only add overlay if not already present
+    if (this.chatMessages.querySelector('.auth-overlay')) return;
+    this.chatMessages.innerHTML = `
+      <div class="auth-overlay">
+        <i class="fas fa-lock" style="font-size: 2em; margin-bottom: 12px; opacity: 0.5;"></i>
+        <p style="margin-bottom: 16px;">Sign in to use the Aviation Assistant</p>
+        <a href="/auth/login/google" class="btn btn-outline-primary btn-sm d-flex align-items-center gap-1" style="font-size: 13px;">
+          <i class="fab fa-google"></i> Sign in with Google
+        </a>
+      </div>
+    `;
+    if (this.chatInput) this.chatInput.disabled = true;
+    if (this.sendButton) this.sendButton.disabled = true;
+    if (this.quickActionsContainer) this.quickActionsContainer.style.display = 'none';
+  }
+
+  /**
+   * Remove sign-in overlay and enable chat input.
+   */
+  private hideSignInOverlay(): void {
+    if (!this.chatMessages) return;
+    const overlay = this.chatMessages.querySelector('.auth-overlay');
+    if (overlay) overlay.remove();
+    if (this.chatInput) this.chatInput.disabled = false;
+    if (this.sendButton) this.sendButton.disabled = false;
+    if (this.quickActionsContainer) this.quickActionsContainer.style.display = '';
   }
 
   /**
@@ -178,6 +234,15 @@ export class ChatbotManager {
     }
 
     if (!response.ok) {
+      if (response.status === 401) {
+        useStore.getState().setAuth(null);
+        this.showSignInOverlay();
+        throw new Error('Session expired. Please sign in again.');
+      }
+      if (response.status === 429) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'Daily chat limit reached. Try again tomorrow.');
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
@@ -1022,6 +1087,7 @@ export class ChatbotManager {
       const response = await fetch('/api/aviation-agent/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           run_id: runId,
           score: score,
