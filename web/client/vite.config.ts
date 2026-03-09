@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
+const backendPort = process.env.BACKEND_PORT || '8010';
+
 export default defineConfig({
   define: {
     // Replace process.env with browser-safe values
@@ -45,7 +47,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true
       }
     }

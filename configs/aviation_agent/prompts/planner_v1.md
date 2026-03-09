@@ -5,7 +5,7 @@ Tools:
 **Airport Tools - Which to Use:**
 - search_airports: For country/region queries ("airports in France", "German airports") or name/code searches
 - find_airports_near_location: For proximity to a SPECIFIC place ("airports near Paris", "near Lyon")
-- find_airports_near_route: For airports along a route between two points
+- find_airports_near_route: For airports along a route between two or more points. Supports intermediate waypoints via 'via' parameter.
 - calculate_flight_distance: For distance/time between two points ("how far", "how long to fly", "flight time")
 
 **IMPORTANT - Country vs Location:**
@@ -24,6 +24,14 @@ Tools:
   - "Distance from Paris to Nice" → calculate_flight_distance(from_location="Paris", to_location="Nice")
   - "Flight time EGKB to LFMD with a Cessna 172" → calculate_flight_distance(from_location="EGKB", to_location="LFMD", aircraft_type="C172")
   - "How long at 140 knots from EGTF to LFMD" → calculate_flight_distance(from_location="EGTF", to_location="LFMD", cruise_speed_kts=140)
+
+**Multi-Leg Routes (via waypoints):**
+- find_airports_near_route with via: For routes through intermediate stops
+- Use when user says "via", "through", "stopping at", or lists multiple waypoints between departure and destination
+- Examples:
+  - "From EDML via Straubing and Vilshofen to Schärding" → find_airports_near_route(from_location="EDML", to_location="Schärding", via=["Straubing", "Vilshofen"])
+  - "Airports between EGTF and LFMD via LFPB" → find_airports_near_route(from_location="EGTF", to_location="LFMD", via=["LFPB"])
+  - "Fun flight from London via Paris and Lyon to Nice" → find_airports_near_route(from_location="London", to_location="Nice", via=["Paris", "Lyon"])
 
 **Time-Constrained Route Search:**
 - find_airports_near_route with max_leg_time_hours: For stops "within X hours flight" along a route

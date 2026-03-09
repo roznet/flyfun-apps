@@ -149,6 +149,7 @@ interface Visualization {
   route?: {
     from: {icao: string; lat?: number; lon?: number; latitude?: number; longitude?: number};
     to: {icao: string; lat?: number; lon?: number; latitude?: number; longitude?: number};
+    via?: Array<{icao: string; lat?: number; lon?: number}>;
   };
   point?: {lat: number; lon?: number; lng?: number; label?: string};
   marker?: {ident: string; lat?: number; lon?: number; zoom?: number};
@@ -434,8 +435,9 @@ export class LLMIntegration {
 
     console.log(`🔵 Total highlights added: ${highlightCount}`);
     
-    // Build route query string for search
-    const routeQuery = [fromIcao, toIcao].join(' ');
+    // Build route query string for search (include via waypoints for multi-leg)
+    const viaIcaos = (route?.via || []).map(wp => wp.icao).filter(Boolean);
+    const routeQuery = [fromIcao, ...viaIcaos, toIcao].join(' ');
     
     // Update search query in store (will display in UI)
     store.getState().setSearchQuery(routeQuery);

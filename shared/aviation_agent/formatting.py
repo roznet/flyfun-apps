@@ -134,6 +134,8 @@ def build_ui_payload(
             plan.arguments.get("to_icao") or
             plan.arguments.get("destination")
         )
+        if plan.arguments.get("via"):
+            base_payload["via"] = plan.arguments["via"]
         if plan.arguments.get("ifr") is not None:
             base_payload["ifr"] = plan.arguments.get("ifr")
 

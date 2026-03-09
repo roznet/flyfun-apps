@@ -746,5 +746,39 @@
       }
     },
     "description": "Time-constrained with AVGAS filter - no speed provided"
+  },
+
+  {
+    "_comment": "=== Multi-Leg Route Searches ==="
+  },
+  {
+    "question": "Create fun flight from EDML via Straubing and Vilshofen to Schärding",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EDML",
+      "to_location": "Schärding",
+      "via": ["Straubing", "Vilshofen"]
+    },
+    "description": "Multi-leg route with via waypoints using location names"
+  },
+  {
+    "question": "Airports between EGTF and LFMD via LFPB",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "EGTF",
+      "to_location": "LFMD",
+      "via": ["LFPB"]
+    },
+    "description": "Multi-leg route with single ICAO waypoint"
+  },
+  {
+    "question": "Fun flight from London through Paris and Lyon to Nice",
+    "expected_tool": "find_airports_near_route",
+    "expected_arguments": {
+      "from_location": "London",
+      "to_location": "Nice",
+      "via": ["Paris", "Lyon"]
+    },
+    "description": "Multi-leg route using 'through' keyword with city names"
   }
 ]

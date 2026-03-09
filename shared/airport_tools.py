@@ -736,6 +736,7 @@ def find_airports_near_route(
     ctx: ToolContext,
     from_location: str,
     to_location: str,
+    via: Optional[List[str]] = None,
     max_distance_nm: float = 50.0,
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
@@ -748,9 +749,9 @@ def find_airports_near_route(
     **kwargs: Any,  # Accept _persona_id injected by ToolRunner
 ) -> Dict[str, Any]:
     """
-    List airports within a specified distance from a direct route between two locations, with optional airport filters.
+    List airports within a specified distance from a route between two or more locations, with optional airport filters.
 
-    **USE THIS TOOL when user asks about airports "between" two locations.**
+    **USE THIS TOOL when user asks about airports "between" two or more locations.**
 
     **IMPORTANT - Pass location names exactly as user provides them, INCLUDING country/region context:**
     - Pass ICAO codes as-is (e.g., "LFPO", "EGKB", "EDDM")
@@ -762,6 +763,13 @@ def find_airports_near_route(
       - "Vik, Iceland" or "Vik in Iceland" → to_location="Vik, Iceland" (INCLUDE COUNTRY!)
       - "between LFPO and EDDM" → from_location="LFPO", to_location="EDDM"
       - "border entry between EGTF and LFMD with less than 24h notice" → use with point_of_entry=True, max_hours_notice=24
+
+    **Multi-leg routes (via waypoints):**
+    When user specifies intermediate stops or waypoints, use 'via' parameter:
+    - via: List of intermediate waypoints in order (ICAO codes or location names)
+    - Examples:
+      - "from EDML via Straubing and Vilshofen to Schärding" → from_location="EDML", to_location="Schärding", via=["Straubing", "Vilshofen"]
+      - "EGTF to LFMD via LFPB" → from_location="EGTF", to_location="LFMD", via=["LFPB"]
 
     **Time-based filtering:**
     When user asks for stops "within X hours flight", use max_leg_time_hours with speed:
@@ -850,8 +858,33 @@ def find_airports_near_route(
             f"Using nearest airport {to_airport.ident} ({to_airport.name}), {to_result['distance_nm']}nm away."
         )
 
+    # Resolve via waypoints for multi-leg routes
+    via_results = []
+    if via:
+        for wp in via:
+            wp_result = _find_nearest_airport_in_db(ctx, wp)
+            if not wp_result:
+                return {
+                    "found": False,
+                    "error": f"Could not find or geocode waypoint '{wp}'. Please verify the ICAO code or location name.",
+                    "pretty": f"Could not find airport or location '{wp}'.",
+                    "missing_info": [],
+                }
+            via_results.append(wp_result)
+            if wp_result["was_geocoded"]:
+                substitution_notes.append(
+                    f"Note: '{wp_result['original_query']}' was geocoded to {wp_result['geocoded_location']}. "
+                    f"Using nearest airport {wp_result['airport'].ident} ({wp_result['airport'].name}), {wp_result['distance_nm']}nm away."
+                )
+
+    # Build full route: from → via1 → via2 → ... → to
+    route_idents = [from_airport.ident]
+    for vr in via_results:
+        route_idents.append(vr["airport"].ident)
+    route_idents.append(to_airport.ident)
+
     results = ctx.model.find_airports_near_route(
-        [from_airport.ident, to_airport.ident],
+        route_idents,
         max_distance_nm
     )
 
@@ -949,6 +982,17 @@ def find_airports_near_route(
                 "geocoded_location": to_result.get("geocoded_location"),
                 "distance_nm": to_result.get("distance_nm", 0.0)
             } if to_result["was_geocoded"] else None,
+            "via": [
+                {
+                    "original": via[i] if via else vr["airport"].ident,
+                    "resolved": vr["airport"].ident,
+                    "was_geocoded": vr["was_geocoded"],
+                    "geocoded_location": vr.get("geocoded_location"),
+                    "distance_nm": vr.get("distance_nm", 0.0)
+                }
+                for i, vr in enumerate(via_results)
+                if vr["was_geocoded"]
+            ] if via_results else [],
         },
         "visualization": {
             "type": "route_with_markers",
@@ -966,7 +1010,17 @@ def find_airports_near_route(
                     "municipality": to_airport.municipality,
                     "lat": getattr(to_airport, "latitude_deg", None),
                     "lon": getattr(to_airport, "longitude_deg", None),
-                }
+                },
+                "via": [
+                    {
+                        "icao": vr["airport"].ident,
+                        "name": vr["airport"].name,
+                        "municipality": vr["airport"].municipality,
+                        "lat": getattr(vr["airport"], "latitude_deg", None),
+                        "lon": getattr(vr["airport"], "longitude_deg", None),
+                    }
+                    for vr in via_results
+                ] if via_results else [],
             },
             "markers": airports_for_llm,  # Only recommended airports for highlighting
             "radius_nm": max_distance_nm  # For UI to trigger search with same radius
@@ -1770,6 +1824,11 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         "to_location": {
                             "type": "string",
                             "description": "Destination location - pass EXACTLY as user provides it INCLUDING any country/region context. Can be ICAO code (e.g., 'EDDM') OR location name with country (e.g., 'Vik, Iceland', 'Nice, France'). DO NOT convert location names to ICAO codes. ALWAYS include country if user mentions it.",
+                        },
+                        "via": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Intermediate waypoints along the route, in order. Each can be an ICAO code or location name with country context. Use when user specifies 'via', 'through', or 'stopping at' waypoints (e.g., ['LFPB'] for 'via LFPB', ['Straubing', 'Vilshofen'] for 'via Straubing and Vilshofen').",
                         },
                         "max_distance_nm": {
                             "type": "number",
