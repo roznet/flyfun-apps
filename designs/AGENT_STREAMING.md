@@ -86,10 +86,13 @@ data: {"session_id": "abc123", "tokens": {"input": 1500, "output": 300}}
 
 ### Streaming Endpoint
 
+**Auth required** — see `AUTH_USAGE.md`. Per-user rate limit checked before streaming starts. Usage logged (tokens, cost) after stream completes.
+
 ```python
 @router.post("/chat/stream")
 async def aviation_agent_chat_stream(
     request: ChatRequest,
+    user_id: str = Depends(current_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
     session_id: Optional[str] = None,
 ) -> StreamingResponse:
@@ -114,10 +117,13 @@ async def aviation_agent_chat_stream(
 
 ### Non-Streaming Endpoint
 
+**Auth required** — see `AUTH_USAGE.md`.
+
 ```python
 @router.post("/chat")
 async def aviation_agent_chat(
     request: ChatRequest,
+    user_id: str = Depends(current_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
 ) -> ChatResponse:
     """Non-streaming endpoint for simple requests."""

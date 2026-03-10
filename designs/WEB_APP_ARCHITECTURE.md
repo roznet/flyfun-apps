@@ -22,6 +22,7 @@
 - `WEB_APP_LEGENDS.md` - Legend modes and configuration
 - `WEB_APP_CHAT.md` - Chatbot integration, SSE streaming
 - `WEB_APP_FILTERS.md` - Filter system, AIP filtering
+- `AUTH_USAGE.md` - Authentication, chatbot gating, usage tracking
 
 ---
 
@@ -157,11 +158,15 @@ async function init() {
   const uiManager = new UIManager(apiAdapter, visualizationEngine);
   const llmIntegration = new LLMIntegration(uiManager);
   const chatbotManager = new ChatbotManager(llmIntegration);
+  // ChatbotManager subscribes to auth state — shows sign-in overlay or chat UI
 
-  // 2. Initialize map
+  // 2. Check auth (non-blocking, chatbot reacts via store subscription)
+  checkAuth(); // fetch /auth/me → setAuth() → renderAuthButton()
+
+  // 3. Initialize map
   visualizationEngine.initMap('map');
 
-  // 3. Wire up store subscriptions
+  // 4. Wire up store subscriptions
   store.subscribe((state, prevState) => {
     // Debounced updates to prevent rapid-fire renders
     if (state.filteredAirports !== prevState.filteredAirports) {

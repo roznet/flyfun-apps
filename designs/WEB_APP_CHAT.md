@@ -66,6 +66,19 @@ Events are received in order during a chat request:
 
 ---
 
+## Authentication Gating
+
+The chatbot requires authentication. See `AUTH_USAGE.md` for full details.
+
+- **Not signed in**: Chat panel shows sign-in overlay (lock icon + Google sign-in button). Input/send disabled, quick actions hidden.
+- **Signed in**: Normal chat UI. `attachEventListeners()`, `loadQuickActions()`, `addWelcomeMessage()` called once via `authInitialized` flag.
+- **401 from `/chat/stream`**: Resets auth state → shows sign-in overlay.
+- **429 from `/chat/stream`**: Displays daily rate limit message.
+
+Backend: `/api/aviation-agent/chat` and `/chat/stream` require `Depends(current_user_id)`. `/quick-actions` remains public.
+
+---
+
 ## ChatbotManager Responsibilities
 
 ### Message Rendering

@@ -54,7 +54,15 @@ nano .env
 ```bash
 OPENAI_API_KEY=your-openai-api-key-here
 ENVIRONMENT=production  # or 'development'
+
+# Auth (shared with other flyfun services for SSO)
+JWT_SECRET=your-shared-jwt-secret     # Must match flyfun-weather
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+DATABASE_URL=mysql+pymysql://user:pass@shared-mysql:3306/flyfun  # Shared DB
 ```
+
+**Note:** `JWT_SECRET` must be the same across all flyfun services for cross-subdomain SSO to work. See `AUTH_USAGE.md` for details.
 
 **Note:** Paths are automatically set by `docker-compose.yml` - you don't need to configure them in `.env` for Docker.
 

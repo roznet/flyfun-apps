@@ -11,7 +11,7 @@ Key exports: `store`, `AppState`, `VisualizationEngine`, `UIManager`, `ChatbotMa
 
 ### Web App State
 Zustand store design: state structure, actions, filtering logic, subscriptions, data flow patterns.
-Key exports: `store`, `FilterConfig`, `GAState`, `RulesState`
+Key exports: `store`, `FilterConfig`, `GAState`, `RulesState`, `AuthState`
 → Full doc: WEB_APP_STATE.md
 
 ### Web App Map
@@ -141,7 +141,12 @@ Tile caching (CachedTileOverlay, OfflineTileManager), bundled data (airports.db,
 
 ---
 
-## Deployment
+## Auth & Deployment
+
+### Auth & Usage Tracking
+Google OAuth SSO via flyfun-common, chatbot gating behind login, per-user daily rate limiting, cost tracking via shared ledger. Public endpoints stay open, only LLM chat requires auth.
+Key exports: `ChatUsageRow`, `check_chat_rate_limit`, `log_chat_usage`, `AuthState`
+→ Full doc: AUTH_USAGE.md
 
 ### Docker Deployment
 Container deployment setup for web server and services.

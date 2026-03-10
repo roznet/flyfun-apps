@@ -54,6 +54,9 @@ interface AppState {
   // Feature-specific state
   ga: GAState;                      // GA Friendliness
   rules: RulesState;                // Rules/Regulations
+
+  // Authentication
+  auth: AuthState;                  // Login state, user info, chat usage
 }
 ```
 
@@ -158,6 +161,19 @@ interface RulesVisualFilter {
 }
 ```
 
+### AuthState
+
+```typescript
+interface AuthState {
+  isAuthenticated: boolean;
+  isLoading: boolean;              // true until /auth/me resolves
+  user: AuthUser | null;           // { id, email, name, approved }
+  chatUsage: ChatUsageInfo | null; // { used, limit } for daily rate limit
+}
+```
+
+See `AUTH_USAGE.md` for full auth architecture.
+
 ---
 
 ## Store Actions
@@ -213,6 +229,13 @@ setRulesSelection(countries: string[], visualFilter?: RulesVisualFilter): void
 setRulesTextFilter(text: string): void
 setRuleSectionState(sectionId: string, expanded: boolean): void
 clearRules(): void
+```
+
+### Auth Actions
+
+```typescript
+setAuth(user: AuthUser | null, chatUsage?: ChatUsageInfo): void  // Set after /auth/me
+setAuthLoading(loading: boolean): void
 ```
 
 ---
