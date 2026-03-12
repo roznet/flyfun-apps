@@ -973,10 +973,15 @@ export class UIManager {
       const alertDiv = document.createElement('div');
       alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
       alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-      alertDiv.innerHTML = `
-        <i class="fas fa-exclamation-triangle"></i> ${error}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      `;
+      const icon = document.createElement('i');
+      icon.className = 'fas fa-exclamation-triangle';
+      alertDiv.appendChild(icon);
+      alertDiv.appendChild(document.createTextNode(' ' + error));
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'btn-close';
+      closeBtn.setAttribute('data-bs-dismiss', 'alert');
+      alertDiv.appendChild(closeBtn);
 
       document.body.appendChild(alertDiv);
 
@@ -1458,10 +1463,15 @@ export class UIManager {
     const alertDiv = document.createElement('div');
     alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
     alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    alertDiv.innerHTML = `
-      <i class="fas fa-check-circle"></i> ${message}
-      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    const icon = document.createElement('i');
+    icon.className = 'fas fa-check-circle';
+    alertDiv.appendChild(icon);
+    alertDiv.appendChild(document.createTextNode(' ' + message));
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn-close';
+    closeBtn.setAttribute('data-bs-dismiss', 'alert');
+    alertDiv.appendChild(closeBtn);
 
     document.body.appendChild(alertDiv);
 

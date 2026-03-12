@@ -53,7 +53,7 @@ def _get_langsmith_client():
 
 def _generate_thread_id() -> str:
     """Generate a unique thread ID for a new conversation."""
-    return f"thread_{uuid.uuid4().hex[:12]}"
+    return f"thread_{uuid.uuid4().hex}"
 
 
 class QuickAction(BaseModel):
@@ -276,7 +276,7 @@ async def aviation_agent_chat_stream(
             streaming_response.set_cookie(
                 ANON_COOKIE_NAME,
                 anon_id,
-                max_age=365 * 24 * 3600,
+                max_age=90 * 24 * 3600,  # 90 days
                 httponly=True,
                 samesite="lax",
             )

@@ -1075,12 +1075,12 @@ class Application {
 
     // Add links section
     const links: string[] = [];
-    if (airport.home_link) {
+    if (airport.home_link && this.isSafeUrl(airport.home_link)) {
       links.push(`<a href="${this.escapeAttribute(airport.home_link)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm me-2">
         <i class="fas fa-home"></i> Home Page
       </a>`);
     }
-    if (airport.wikipedia_link) {
+    if (airport.wikipedia_link && this.isSafeUrl(airport.wikipedia_link)) {
       links.push(`<a href="${this.escapeAttribute(airport.wikipedia_link)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-info btn-sm me-2">
         <i class="fab fa-wikipedia-w"></i> Wikipedia
       </a>`);
@@ -1544,6 +1544,15 @@ class Application {
 
   private escapeAttribute(value: any): string {
     return this.escapeHtml(value);
+  }
+
+  private isSafeUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url, window.location.origin);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
   }
 
   private stripHtml(html: any): string {

@@ -298,7 +298,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
 )
 
 # SessionMiddleware is required for OAuth state to survive the Google redirect roundtrip
@@ -308,14 +308,7 @@ app.add_middleware(SessionMiddleware, secret_key=get_jwt_secret())
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Log validation errors for debugging."""
-    logger.warning(f"Validation error on {request.url.path}: {exc.errors()}")
-    # Log the body if available
-    if hasattr(exc, 'body') and exc.body:
-        try:
-            body_str = exc.body.decode('utf-8') if isinstance(exc.body, bytes) else str(exc.body)
-            logger.debug(f"Request body: {body_str}")
-        except Exception:
-            pass
+    logger.warning(f"Validation error on {request.url.path}: {len(exc.errors())} error(s)")
     # Return validation errors without echoing back the request body
     return JSONResponse(
         status_code=422,

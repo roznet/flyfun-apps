@@ -129,7 +129,7 @@ services:
       # External port mapping: host:container
       # Host port 8001 maps to container port 8000 (for external access/debugging)
       # Internal services use "chromadb:8000" (service name + container port) - no host port conflict
-      - "${CHROMADB_PORT:-8001}:8000"
+      - "127.0.0.1:${CHROMADB_PORT:-8001}:8000"
     environment:
       - IS_PERSISTENT=TRUE
       - PERSIST_DIRECTORY=/chroma/chroma

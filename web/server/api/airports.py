@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 
+from enum import Enum
+
 from fastapi import APIRouter, Query, HTTPException, Request, Path, Body
 from typing import List, Optional, Dict, Any, Union, TypeAlias
 import logging
+
+
+class AIPOperator(str, Enum):
+    contains = "contains"
+    equals = "equals"
+    not_empty = "not_empty"
+    starts_with = "starts_with"
+    ends_with = "ends_with"
 
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.airport import Airport
@@ -128,7 +138,7 @@ async def get_airports(
     # New AIP field filters
     aip_field: Optional[str] = Query(None, description="AIP standardized field name to filter by", max_length=100),
     aip_value: Optional[str] = Query(None, description="Value to search for in the AIP field", max_length=200),
-    aip_operator: str = Query("contains", description="Operator for AIP field filtering: contains, equals, not_empty, starts_with, ends_with", max_length=20),
+    aip_operator: AIPOperator = Query(AIPOperator.contains, description="Operator for AIP field filtering"),
     limit: int = Query(1000, description="Maximum number of airports to return", ge=1, le=10000),
     offset: int = Query(0, description="Number of airports to skip", ge=0, le=100000),
     # GA Friendliness integration
@@ -273,7 +283,7 @@ async def get_airports_near_route(
     # New AIP field filters
     aip_field: Optional[str] = Query(None, description="AIP standardized field name to filter by", max_length=100),
     aip_value: Optional[str] = Query(None, description="Value to search for in the AIP field", max_length=200),
-    aip_operator: str = Query("contains", description="Operator for AIP field filtering: contains, equals, not_empty, starts_with, ends_with", max_length=20),
+    aip_operator: AIPOperator = Query(AIPOperator.contains, description="Operator for AIP field filtering"),
     # Hospitality filters
     hotel: Optional[str] = Query(None, description="Filter by hotel availability: at_airport or vicinity", max_length=20),
     restaurant: Optional[str] = Query(None, description="Filter by restaurant availability: at_airport or vicinity", max_length=20),
