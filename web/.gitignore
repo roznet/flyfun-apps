@@ -3,4 +3,5 @@ security_config.py
 
 # prevent accidental commit of the database and rules file
 airports.db
+flyfun.db
 rules.json
