@@ -21,7 +21,8 @@ import type {
   RulesState,
   AuthUser,
   ChatUsageInfo,
-  AuthState
+  AuthState,
+  TrialInfo
 } from './types';
 import { computeQuartileThresholds } from '../utils/relevance';
 
@@ -101,6 +102,7 @@ const initialState: AppState = {
     isLoading: true,
     user: null,
     chatUsage: null,
+    trialInfo: null,
   }
 };
 
@@ -197,6 +199,7 @@ interface StoreActions {
   // Auth actions
   setAuth: (user: AuthUser | null, chatUsage?: ChatUsageInfo | null) => void;
   setAuthLoading: (loading: boolean) => void;
+  setTrialInfo: (info: TrialInfo | null) => void;
 }
 
 /**
@@ -627,19 +630,26 @@ const createStore: StateCreator<StoreState, [], [["zustand/devtools", never]]> =
       // --- Auth actions ---
 
       setAuth: (user, chatUsage) => {
-        set({
+        set((state) => ({
           auth: {
             isAuthenticated: !!user,
             isLoading: false,
             user: user,
             chatUsage: chatUsage ?? null,
+            trialInfo: user ? null : state.auth.trialInfo,
           }
-        });
+        }));
       },
 
       setAuthLoading: (loading) => {
         set((state) => ({
           auth: { ...state.auth, isLoading: loading }
+        }));
+      },
+
+      setTrialInfo: (info) => {
+        set((state) => ({
+          auth: { ...state.auth, trialInfo: info }
         }));
       },
 });

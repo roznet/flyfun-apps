@@ -429,11 +429,17 @@ export interface ChatUsageInfo {
   limit: number;
 }
 
+export interface TrialInfo {
+  used: number;
+  limit: number;
+}
+
 export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   user: AuthUser | null;
   chatUsage: ChatUsageInfo | null;
+  trialInfo: TrialInfo | null;
 }
 
 /**

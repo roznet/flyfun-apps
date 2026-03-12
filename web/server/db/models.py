@@ -12,6 +12,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 from flyfun_common.db.models import Base  # noqa: F401 – re-export
 
 
+class AnonChatUsageRow(Base):
+    """Track anonymous (unauthenticated) trial chat usage."""
+
+    __tablename__ = "anon_chat_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    anon_id: Mapped[str] = mapped_column(String(64), index=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class ChatUsageRow(Base):
     __tablename__ = "chat_usage"
 

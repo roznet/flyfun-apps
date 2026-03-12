@@ -15,6 +15,26 @@
     gap: 4px;
 }
 
+/* Trial banner — soft nudge for anonymous users */
+.trial-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-secondary, #6c757d);
+    background: var(--bg-subtle, #f8f9fa);
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+}
+.trial-banner a {
+    color: var(--bs-primary, #0d6efd);
+    text-decoration: none;
+    font-weight: 500;
+}
+.trial-banner a:hover {
+    text-decoration: underline;
+}
+
 /* Chat Toggle Button (Floating) */
 #chat-toggle-btn {
     position: fixed;

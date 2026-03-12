@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 
 from flyfun_common.costs import record_cost
 
-from db.models import ChatUsageRow
+from db.models import AnonChatUsageRow, ChatUsageRow
 
 logger = logging.getLogger(__name__)
 
 DAILY_CHAT_LIMIT = 20  # messages per day (free tier)
+ANON_DAILY_LIMIT = 3   # anonymous trial queries per day
+ANON_COOKIE_NAME = "flyfun_anon"
 
 
 def _today_start() -> datetime:
@@ -89,3 +91,35 @@ def log_chat_usage(
         )
 
     return row.id
+
+
+# --- Anonymous trial usage ---
+
+
+def get_today_anon_count(db: Session, anon_id: str) -> int:
+    """Count anonymous chat messages sent today."""
+    return (
+        db.query(func.count())
+        .select_from(AnonChatUsageRow)
+        .filter(
+            AnonChatUsageRow.anon_id == anon_id,
+            AnonChatUsageRow.timestamp >= _today_start(),
+        )
+        .scalar()
+    ) or 0
+
+
+def check_anon_rate_limit(db: Session, anon_id: str) -> None:
+    """Raise 403 if anonymous daily trial limit is exceeded."""
+    count = get_today_anon_count(db, anon_id)
+    if count >= ANON_DAILY_LIMIT:
+        raise HTTPException(
+            status_code=403,
+            detail="trial_exhausted",
+        )
+
+
+def log_anon_usage(db: Session, anon_id: str) -> None:
+    """Log an anonymous chat interaction."""
+    db.add(AnonChatUsageRow(anon_id=anon_id))
+    db.flush()

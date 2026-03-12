@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from flyfun_common.db import current_user_id, SessionLocal
+from fastapi import Request as FastAPIRequest
+from flyfun_common.db import current_user_id, optional_user_id, SessionLocal
 
 from shared.aviation_agent.adapters import (
     ChatRequest,
@@ -125,17 +126,16 @@ def aviation_agent_chat(
 @router.post("/chat/stream")
 async def aviation_agent_chat_stream(
     request: ChatRequest,
-    user_id: str = Depends(current_user_id),
+    http_request: FastAPIRequest,
+    user_id: str | None = Depends(optional_user_id),
     settings: AviationAgentSettings = Depends(get_settings),
     session_id: Optional[str] = None,  # Extract from header if available
 ) -> StreamingResponse:
     """
     SSE streaming chat endpoint.
 
-    Args:
-        request: ChatRequest with messages, persona_id, and optional thread_id.
-            If thread_id is provided, continues an existing conversation.
-            If thread_id is None, starts a new conversation.
+    Authenticated users get 20 queries/day. Anonymous users get 3 trial
+    queries/day tracked via a ``flyfun_anon`` cookie.
 
     Returns:
         StreamingResponse with SSE events including thread_id in the 'done' event.
@@ -143,13 +143,27 @@ async def aviation_agent_chat_stream(
     if not settings.enabled:
         raise HTTPException(status_code=404, detail="Aviation agent is disabled.")
 
-    # Check per-user daily rate limit before starting the expensive LLM call
-    from api.chat_usage import check_chat_rate_limit, log_chat_usage
-    db_session = SessionLocal()
-    try:
-        check_chat_rate_limit(db_session, user_id)
-    finally:
-        db_session.close()
+    # Rate-limit: authenticated vs anonymous trial
+    from api.chat_usage import (
+        check_chat_rate_limit, log_chat_usage,
+        check_anon_rate_limit, log_anon_usage,
+        ANON_COOKIE_NAME,
+    )
+
+    anon_id: str | None = None
+    if user_id:
+        db_session = SessionLocal()
+        try:
+            check_chat_rate_limit(db_session, user_id)
+        finally:
+            db_session.close()
+    else:
+        anon_id = http_request.cookies.get(ANON_COOKIE_NAME) or uuid.uuid4().hex
+        db_session = SessionLocal()
+        try:
+            check_anon_rate_limit(db_session, anon_id)
+        finally:
+            db_session.close()
 
     try:
         graph = build_agent(settings=settings)
@@ -226,15 +240,18 @@ async def aviation_agent_chat_stream(
                 try:
                     usage_db = SessionLocal()
                     try:
-                        log_chat_usage(
-                            usage_db,
-                            user_id,
-                            model=settings.model_name,
-                            input_tokens=captured_input_tokens,
-                            output_tokens=captured_output_tokens,
-                            thread_id=thread_id,
-                            persona_id=request.persona_id,
-                        )
+                        if user_id:
+                            log_chat_usage(
+                                usage_db,
+                                user_id,
+                                model=settings.model_name,
+                                input_tokens=captured_input_tokens,
+                                output_tokens=captured_output_tokens,
+                                thread_id=thread_id,
+                                persona_id=request.persona_id,
+                            )
+                        elif anon_id:
+                            log_anon_usage(usage_db, anon_id)
                         usage_db.commit()
                     except Exception as e:
                         usage_db.rollback()
@@ -243,8 +260,8 @@ async def aviation_agent_chat_stream(
                         usage_db.close()
                 except Exception as e:
                     logger.error(f"Error creating usage session: {e}")
-        
-        return StreamingResponse(
+
+        streaming_response = StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
             headers={
@@ -253,6 +270,18 @@ async def aviation_agent_chat_stream(
                 "X-Accel-Buffering": "no"
             }
         )
+
+        # Set anonymous tracking cookie if this is an anonymous request
+        if anon_id:
+            streaming_response.set_cookie(
+                ANON_COOKIE_NAME,
+                anon_id,
+                max_age=365 * 24 * 3600,
+                httponly=True,
+                samesite="lax",
+            )
+
+        return streaming_response
     except Exception as exc:
         logger.exception("Aviation agent streaming failed")
         raise HTTPException(status_code=503, detail=str(exc)) from exc

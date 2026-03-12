@@ -37,6 +37,7 @@ export class ChatbotManager {
 
       if (auth.isAuthenticated) {
         this.hideSignInOverlay();
+        this.hideTrialBanner();
         if (!this.authInitialized) {
           this.authInitialized = true;
           this.attachEventListeners();
@@ -44,7 +45,25 @@ export class ChatbotManager {
           this.addWelcomeMessage();
         }
       } else {
-        this.showSignInOverlay();
+        const trial = auth.trialInfo;
+        if (trial && trial.used < trial.limit) {
+          // Trials remaining — allow chat with soft banner
+          this.hideSignInOverlay();
+          this.showTrialBanner(trial.limit - trial.used);
+          if (!this.authInitialized) {
+            this.authInitialized = true;
+            this.attachEventListeners();
+            this.loadQuickActions();
+            this.addWelcomeMessage();
+          }
+        } else if (trial && trial.used >= trial.limit) {
+          // Trials exhausted — show sign-in overlay
+          this.hideTrialBanner();
+          this.showSignInOverlay();
+        } else {
+          // No trial info yet — show sign-in overlay as fallback
+          this.showSignInOverlay();
+        }
       }
     };
 
@@ -102,6 +121,31 @@ export class ChatbotManager {
     if (this.chatInput) this.chatInput.disabled = false;
     if (this.sendButton) this.sendButton.disabled = false;
     if (this.quickActionsContainer) this.quickActionsContainer.style.display = '';
+  }
+
+  /**
+   * Show a soft banner indicating remaining trial queries.
+   */
+  private showTrialBanner(remaining: number): void {
+    if (!this.chatMessages) return;
+    // Remove existing banner if any
+    this.hideTrialBanner();
+    const banner = document.createElement('div');
+    banner.className = 'trial-banner';
+    banner.innerHTML = `
+      <i class="fas fa-info-circle"></i>
+      <span>${remaining} free quer${remaining === 1 ? 'y' : 'ies'} remaining.</span>
+      <a href="/auth/login/google">Sign in</a> for unlimited access.
+    `;
+    this.chatMessages.parentElement?.insertBefore(banner, this.chatMessages);
+  }
+
+  /**
+   * Remove the trial banner.
+   */
+  private hideTrialBanner(): void {
+    const banner = this.chatMessages?.parentElement?.querySelector('.trial-banner');
+    if (banner) banner.remove();
   }
 
   /**
@@ -238,6 +282,18 @@ export class ChatbotManager {
         useStore.getState().setAuth(null);
         this.showSignInOverlay();
         throw new Error('Session expired. Please sign in again.');
+      }
+      if (response.status === 403) {
+        const data = await response.json().catch(() => ({}));
+        if (data.detail === 'trial_exhausted') {
+          const { auth } = useStore.getState();
+          const limit = auth.trialInfo?.limit ?? 3;
+          useStore.getState().setTrialInfo({ used: limit, limit });
+          this.hideTrialBanner();
+          this.showSignInOverlay();
+          throw new Error('Free trial queries used. Sign in to continue using the Aviation Assistant.');
+        }
+        throw new Error(data.detail || 'Access denied');
       }
       if (response.status === 429) {
         const data = await response.json().catch(() => ({}));
@@ -559,6 +615,18 @@ export class ChatbotManager {
               if (visualization && visualization.filter_profile && !filterProfileApplied) {
                 this.llmIntegration.applyFilterProfile(visualization.filter_profile);
                 filterProfileApplied = true;
+              }
+
+              // Update anonymous trial counter after successful query
+              {
+                const currentAuth = useStore.getState().auth;
+                if (!currentAuth.isAuthenticated && currentAuth.trialInfo) {
+                  const newUsed = currentAuth.trialInfo.used + 1;
+                  useStore.getState().setTrialInfo({
+                    used: newUsed,
+                    limit: currentAuth.trialInfo.limit,
+                  });
+                }
               }
 
               // Add feedback buttons if we have a run_id

@@ -138,15 +138,32 @@ class Application {
         );
       } else {
         this.store.getState().setAuth(null);
+        await this.fetchTrialStatus();
       }
     } catch {
       this.store.getState().setAuth(null);
+      await this.fetchTrialStatus();
     }
     this.renderAuthButton();
     // Re-render auth button whenever auth state changes
     this.store.subscribe((state) => {
       this.renderAuthButton();
     });
+  }
+
+  /**
+   * Fetch anonymous trial status when user is not authenticated.
+   */
+  private async fetchTrialStatus(): Promise<void> {
+    try {
+      const resp = await fetch('/auth/trial-status', { credentials: 'include' });
+      if (resp.ok) {
+        const data = await resp.json();
+        this.store.getState().setTrialInfo(data);
+      }
+    } catch {
+      // Ignore - trial info is optional
+    }
   }
 
   /**

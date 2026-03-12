@@ -341,6 +341,20 @@ def auth_me(user_id: str = Depends(current_user_id), db=Depends(get_db)):
         "chat_usage": {"used": chat_count, "limit": DAILY_CHAT_LIMIT},
     }
 
+@app.get("/auth/trial-status", tags=["auth"])
+def trial_status(request: Request):
+    """Return anonymous trial usage for unauthenticated users."""
+    from api.chat_usage import ANON_COOKIE_NAME, ANON_DAILY_LIMIT, get_today_anon_count
+    anon_id = request.cookies.get(ANON_COOKIE_NAME)
+    if not anon_id:
+        return {"used": 0, "limit": ANON_DAILY_LIMIT}
+    db = SessionLocal()
+    try:
+        count = get_today_anon_count(db, anon_id)
+        return {"used": count, "limit": ANON_DAILY_LIMIT}
+    finally:
+        db.close()
+
 # Mount common auth router (login/google, callback/google, logout, providers)
 app.include_router(create_auth_router())
 
