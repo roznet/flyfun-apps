@@ -5,20 +5,9 @@ FROM python:3.13-slim
 # Set working directory
 WORKDIR /app
 
-# Install common system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy requirements first for better caching
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install euro_aip from GitHub (latest version)
-RUN pip install "git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip"
-
-# Install flyfun-common (shared auth, DB, cost tracking)
-RUN pip install "git+https://github.com/roznet/flyfun-common@main"
 
 # Create directories for logs and data (ownership set by child images)
 RUN mkdir -p /app/data /app/out /app/logs

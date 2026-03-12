@@ -92,7 +92,6 @@ git lfs pull  # Download LFS files
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -e git+https://github.com/roznet/rzflight@main#egg=euro_aip&subdirectory=euro_aip
 
 # Configure environment
 cp env.sample .env && ${EDITOR:-vi} .env
