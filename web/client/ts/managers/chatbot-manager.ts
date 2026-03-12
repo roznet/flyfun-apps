@@ -57,9 +57,11 @@ export class ChatbotManager {
             this.addWelcomeMessage();
           }
         } else if (trial && trial.used >= trial.limit) {
-          // Trials exhausted — show sign-in overlay
+          // Trials exhausted — show friendly sign-in overlay
           this.hideTrialBanner();
-          this.showSignInOverlay();
+          this.showSignInOverlay(
+            'Thank you for trying our Aviation Assistant!<br>To continue using it, please sign in — it\'s free.'
+          );
         } else {
           // No trial info yet — show sign-in overlay as fallback
           this.showSignInOverlay();
@@ -93,14 +95,15 @@ export class ChatbotManager {
   /**
    * Show sign-in overlay when user is not authenticated.
    */
-  private showSignInOverlay(): void {
+  private showSignInOverlay(message?: string): void {
     if (!this.chatMessages) return;
     // Only add overlay if not already present
     if (this.chatMessages.querySelector('.auth-overlay')) return;
+    const text = message || 'Sign in to use the Aviation Assistant';
     this.chatMessages.innerHTML = `
       <div class="auth-overlay">
-        <i class="fas fa-lock" style="font-size: 2em; margin-bottom: 12px; opacity: 0.5;"></i>
-        <p style="margin-bottom: 16px;">Sign in to use the Aviation Assistant</p>
+        <i class="fas fa-plane" style="font-size: 2em; margin-bottom: 12px; opacity: 0.5;"></i>
+        <p style="margin-bottom: 16px;">${text}</p>
         <a href="/auth/login/google" class="btn btn-outline-primary btn-sm d-flex align-items-center gap-1" style="font-size: 13px;">
           <i class="fab fa-google"></i> Sign in with Google
         </a>
@@ -290,8 +293,14 @@ export class ChatbotManager {
           const limit = auth.trialInfo?.limit ?? 3;
           useStore.getState().setTrialInfo({ used: limit, limit });
           this.hideTrialBanner();
-          this.showSignInOverlay();
-          throw new Error('Free trial queries used. Sign in to continue using the Aviation Assistant.');
+          this.showSignInOverlay(
+            'Thank you for trying our Aviation Assistant!<br>To continue using it, please sign in — it\'s free.'
+          );
+          // Remove loading indicator without adding an error message
+          this.removeLoadingIndicator(loadingId);
+          this.isProcessing = false;
+          this.updateSendButton(false);
+          return;
         }
         throw new Error(data.detail || 'Access denied');
       }
