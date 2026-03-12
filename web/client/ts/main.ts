@@ -189,8 +189,11 @@ class Application {
           </button>
         </div>
       `;
-      document.getElementById('logout-btn')?.addEventListener('click', () => {
-        window.location.href = '/auth/logout';
+      document.getElementById('logout-btn')?.addEventListener('click', async () => {
+        await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+        this.store.getState().setAuth(null);
+        await this.fetchTrialStatus();
+        window.location.reload();
       });
     } else {
       container.innerHTML = `
