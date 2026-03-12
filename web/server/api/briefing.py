@@ -328,10 +328,16 @@ async def parse_briefing(
     # Save uploaded file to temp location
     temp_path = None
     try:
-        # Create temp file
+        # Create temp file with size limit (20 MB)
+        max_size = 20 * 1024 * 1024
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
             temp_path = tmp.name
-            content = await file.read()
+            content = await file.read(max_size + 1)
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Maximum size is {max_size // (1024 * 1024)} MB"
+                )
             tmp.write(content)
 
         logger.info(f"Parsing briefing from {file.filename} (source={source})")

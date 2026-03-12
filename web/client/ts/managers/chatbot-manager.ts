@@ -464,7 +464,7 @@ export class ChatbotManager {
                   // Add rules indicator
                   const rulesDiv = document.createElement('div');
                   rulesDiv.className = 'message-rules-indicator';
-                  rulesDiv.innerHTML = `<small><i class="fas fa-gavel"></i> Showing rules for ${countries.join(', ')}</small>`;
+                  rulesDiv.innerHTML = `<small><i class="fas fa-gavel"></i> Showing rules for ${this.escapeHtml(countries.join(', '))}</small>`;
                   messageDiv.appendChild(rulesDiv);
 
                   // Dispatch event to display country rules with tag filter
@@ -491,7 +491,7 @@ export class ChatbotManager {
               // Add tool indicator
               const toolsDiv = document.createElement('div');
               toolsDiv.className = 'message-tools';
-              toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${eventData.name || 'tool'}</small>`;
+              toolsDiv.innerHTML = `<small><i class="fas fa-tools"></i> Used: ${this.escapeHtml(eventData.name || 'tool')}</small>`;
               messageDiv.appendChild(toolsDiv);
               break;
 

@@ -91,31 +91,51 @@ if log_to_stderr:
 # Global ToolContext (created at startup)
 _tool_context: Optional[ToolContext] = None
 
-# Simple rate limiting storage
+# Simple rate limiting storage (LRU-capped)
+MAX_RATE_LIMIT_ENTRIES = 10000
 request_counts = {}
+
+
+def get_client_ip(request: Request) -> str:
+    """Extract real client IP, accounting for reverse proxy headers."""
+    x_forwarded_for = request.headers.get("X-Forwarded-For")
+    if x_forwarded_for:
+        # First IP in the chain is the original client
+        return x_forwarded_for.split(",")[0].strip()
+    x_real_ip = request.headers.get("X-Real-IP")
+    if x_real_ip:
+        return x_real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
 
 def check_rate_limit(client_ip: str) -> bool:
     """Simple rate limiting implementation."""
     global request_counts
     current_time = time.time()
-    
+
     # Clean old entries
-    request_counts = {ip: (count, timestamp) for ip, (count, timestamp) in request_counts.items() 
+    request_counts = {ip: (count, timestamp) for ip, (count, timestamp) in request_counts.items()
                      if current_time - timestamp < RATE_LIMIT_WINDOW}
-    
+
+    # Evict oldest entries if too many tracked IPs
+    if len(request_counts) >= MAX_RATE_LIMIT_ENTRIES:
+        oldest = sorted(request_counts.items(), key=lambda x: x[1][1])[:len(request_counts) // 2]
+        for ip, _ in oldest:
+            del request_counts[ip]
+
     if client_ip not in request_counts:
         request_counts[client_ip] = (1, current_time)
         return True
-    
+
     count, timestamp = request_counts[client_ip]
-    
+
     if current_time - timestamp > RATE_LIMIT_WINDOW:
         request_counts[client_ip] = (1, current_time)
         return True
-    
+
     if count >= RATE_LIMIT_MAX_REQUESTS:
         return False
-    
+
     request_counts[client_ip] = (count + 1, timestamp)
     return True
 
@@ -238,7 +258,7 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     process_time = time.time() - start_time
     
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     logger.info(
         f"{request.method} {request.url.path} - "
         f"{response.status_code} - {process_time:.3f}s - {client_ip}"
@@ -248,8 +268,8 @@ async def log_requests(request: Request, call_next):
 # Add rate limiting middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    client_ip = request.client.host if request.client else "unknown"
-    
+    client_ip = get_client_ip(request)
+
     if not check_rate_limit(client_ip):
         logger.warning(f"Rate limit exceeded for IP: {client_ip}")
         return JSONResponse(
@@ -296,10 +316,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             logger.debug(f"Request body: {body_str}")
         except Exception:
             pass
-    # Return the default FastAPI validation error response
+    # Return validation errors without echoing back the request body
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": str(exc.body) if hasattr(exc, 'body') and exc.body else None}
+        content={"detail": exc.errors()}
     )
 
 # --- Auth routes ---

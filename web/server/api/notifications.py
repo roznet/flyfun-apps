@@ -4,7 +4,7 @@ Notification Query API Endpoints.
 Provides REST API endpoints for querying customs/immigration notification requirements.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -87,9 +87,10 @@ class NotificationStatsResponse(BaseModel):
 
 @router.get("/{icao}", response_model=AirportNotificationResponse)
 async def get_airport_notification(
-    icao: str,
+    icao: str = Path(..., min_length=4, max_length=4, description="ICAO code"),
     day_of_week: Optional[str] = Query(
         None,
+        max_length=10,
         description="Day of week to get specific rules (e.g., Saturday, Monday)"
     )
 ):

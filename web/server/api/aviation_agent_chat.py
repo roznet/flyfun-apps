@@ -172,6 +172,8 @@ async def aviation_agent_chat_stream(
             captured_input_tokens = 0
             captured_output_tokens = 0
             try:
+                stream_timeout = 300  # 5 minute max for a single chat response
+                stream_start = time.time()
                 async for event in stream_aviation_agent(
                     messages,
                     graph,
@@ -194,6 +196,10 @@ async def aviation_agent_chat_stream(
                         captured_output_tokens = tokens.get("output", 0)
 
                     yield f"event: {event_name}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                    if time.time() - stream_start > stream_timeout:
+                        yield f"event: error\ndata: {json.dumps({'detail': 'Stream timeout exceeded'})}\n\n"
+                        break
             finally:
                 # After streaming completes, log conversation using captured state
                 try:

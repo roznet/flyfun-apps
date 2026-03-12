@@ -384,6 +384,9 @@ def attach_euro_aip(
     if not euro_aip_path.exists():
         raise StorageError(f"euro_aip database not found: {euro_aip_path}")
 
+    # Validate alias to prevent SQL injection (only alphanumeric + underscore)
+    if not alias.isidentifier():
+        raise StorageError(f"Invalid database alias: {alias}")
     try:
         conn.execute(f"ATTACH DATABASE ? AS {alias}", (str(euro_aip_path),))
     except sqlite3.Error as e:

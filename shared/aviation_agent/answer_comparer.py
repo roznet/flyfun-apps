@@ -557,9 +557,14 @@ def create_answer_comparer(
             parsed_url = urlparse(vector_db_url)
             host = parsed_url.hostname or "localhost"
             port = parsed_url.port or (8000 if parsed_url.scheme == "http" else 443)
+            headers = {}
+            auth_token = os.environ.get("CHROMADB_AUTH_TOKEN")
+            if auth_token:
+                headers["X-Chroma-Token"] = auth_token
             client = chromadb.HttpClient(
                 host=host,
                 port=port,
+                headers=headers,
                 settings=Settings(anonymized_telemetry=False)
             )
         elif vector_db_path:

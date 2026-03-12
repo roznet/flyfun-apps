@@ -463,11 +463,15 @@ class RulesRAG:
             host = parsed_url.hostname or "localhost"
             port = parsed_url.port or (8000 if parsed_url.scheme == "http" else 443)
             
-            # Initialize HttpClient with basic settings
-            # Note: Auth token support can be added later if needed via headers or Settings
+            # Initialize HttpClient with auth token if available
+            headers = {}
+            auth_token = os.environ.get("CHROMADB_AUTH_TOKEN")
+            if auth_token:
+                headers["X-Chroma-Token"] = auth_token
             self.client = chromadb.HttpClient(
                 host=host,
                 port=port,
+                headers=headers,
                 settings=Settings(anonymized_telemetry=False)
             )
         elif self.vector_db_path:
@@ -859,11 +863,15 @@ def build_vector_db(
         host = parsed_url.hostname or "localhost"
         port = parsed_url.port or (8000 if parsed_url.scheme == "http" else 443)
         
-        # Initialize HttpClient with basic settings
-        # Note: Auth token support can be added later if needed
+        # Initialize HttpClient with auth token if available
+        headers = {}
+        auth_token = os.environ.get("CHROMADB_AUTH_TOKEN")
+        if auth_token:
+            headers["X-Chroma-Token"] = auth_token
         client = chromadb.HttpClient(
             host=host,
             port=port,
+            headers=headers,
             settings=Settings(anonymized_telemetry=False)
         )
     elif vector_db_path:

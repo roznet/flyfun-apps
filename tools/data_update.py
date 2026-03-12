@@ -294,13 +294,14 @@ def run_autorouter(prefixes: list[str]) -> None:
     if not AIRPORTS_DB.exists():
         raise RuntimeError(f"airports.db not found: {AIRPORTS_DB}")
 
-    # Build SQL query for all prefixes
-    conditions = " OR ".join(f"airport_icao LIKE '{p}%'" for p in prefixes)
-    query = f"SELECT DISTINCT airport_icao FROM aip_entries WHERE {conditions} ORDER BY airport_icao"
+    # Build SQL query for all prefixes using parameterized queries
+    placeholders = " OR ".join("airport_icao LIKE ?" for _ in prefixes)
+    params = [f"{p}%" for p in prefixes]
+    query = f"SELECT DISTINCT airport_icao FROM aip_entries WHERE {placeholders} ORDER BY airport_icao"
 
     # Query airports
     with sqlite3.connect(AIRPORTS_DB) as conn:
-        cursor = conn.execute(query)
+        cursor = conn.execute(query, params)
         airports = [row[0] for row in cursor.fetchall()]
 
     if not airports:

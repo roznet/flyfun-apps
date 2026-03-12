@@ -10,7 +10,7 @@ from ..state import AgentState
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str = Field(..., max_length=10000)
 
     def to_langchain(self) -> BaseMessage:
         if self.role == "system":
@@ -21,7 +21,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage] = Field(default_factory=list)
+    messages: List[ChatMessage] = Field(default_factory=list, max_length=50)
     persona_id: Optional[str] = Field(
         default="ifr_touring_sr22",
         description="Persona ID for airport prioritization"

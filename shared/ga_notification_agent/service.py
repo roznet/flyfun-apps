@@ -253,7 +253,7 @@ class NotificationService:
 
             if country and airports_db and os.path.exists(airports_db):
                 # Join with airports DB to filter by country
-                conn.execute(f"ATTACH DATABASE '{airports_db}' AS airports_db")
+                conn.execute("ATTACH DATABASE ? AS airports_db", (str(airports_db),))
                 cursor = conn.execute('''
                     SELECT n.icao
                     FROM ga_notification_requirements n
@@ -459,7 +459,7 @@ class NotificationService:
             # Attach airports database for country lookup
             has_airports_db = False
             if airports_db and os.path.exists(airports_db):
-                conn.execute(f"ATTACH DATABASE '{airports_db}' AS airports_db")
+                conn.execute("ATTACH DATABASE ? AS airports_db", (str(airports_db),))
                 has_airports_db = True
             
             # Build query
