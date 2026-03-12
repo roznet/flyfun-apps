@@ -220,7 +220,7 @@ _PROVIDER_REGISTRY = {
     "anthropic": {
         "class_path": "langchain_anthropic.ChatAnthropic",
         "api_key_env": "ANTHROPIC_API_KEY",
-        "extra_kwargs": lambda streaming: {},
+        "extra_kwargs": lambda streaming: {"cache_control": {"type": "ephemeral"}},
     },
     "google": {
         "class_path": "langchain_google_genai.ChatGoogleGenerativeAI",
