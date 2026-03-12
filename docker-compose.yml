@@ -43,6 +43,11 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - APPLE_CLIENT_ID=${APPLE_CLIENT_ID:-}
+      - APPLE_TEAM_ID=${APPLE_TEAM_ID:-}
+      - APPLE_KEY_ID=${APPLE_KEY_ID:-}
+      - APPLE_PRIVATE_KEY=${APPLE_PRIVATE_KEY:-}
+      - APPLE_APP_IDS=${APPLE_APP_IDS:-}
       - DATABASE_URL=${DATABASE_URL:-}
     volumes:
       # Data files (read-only)
@@ -59,6 +64,7 @@ services:
     restart: unless-stopped
     networks:
       - flyfun-network
+      - shared-services
     depends_on:
       chromadb:
         condition: service_healthy
@@ -149,3 +155,5 @@ services:
 networks:
   flyfun-network:
     driver: bridge
+  shared-services:
+    external: true
