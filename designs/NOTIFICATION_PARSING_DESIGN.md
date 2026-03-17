@@ -213,9 +213,15 @@ python tools/build_ga_notifications.py --incremental
 # Regex-only (no LLM)
 python tools/build_ga_notifications.py --no-llm
 
-# Use via data_update.py
+# Use via data_update.py (preferred — handles --changed mode)
 python tools/data_update.py notifications
 python tools/data_update.py notifications LF EG  # French and UK only
+
+# Only reprocess airports where AIP text changed (default in data_update.py)
+python tools/build_ga_notifications.py --changed
+
+# Filter by multiple prefixes
+python tools/build_ga_notifications.py --prefixes LF,EG,ED
 ```
 
 ## Database Schema
@@ -238,6 +244,16 @@ CREATE TABLE ga_notification_requirements (
     created_utc TEXT
 );
 ```
+
+### ga_notifications.db Metadata
+
+```sql
+-- Created by data_update.py after sync; tracks which AIRAC cycle was last applied
+CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);
+-- Key: "last_airac_date", Value: "2026-02-19"
+```
+
+See [Data Update Pipeline](./DATA_UPDATE_PIPELINE.md) for AIRAC tracking details.
 
 ### ga_persona.db (Subjective)
 

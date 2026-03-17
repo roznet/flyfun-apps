@@ -77,6 +77,11 @@ Key exports: `aviation_agent_chat_stream()`, `stream_agent_response()`
 
 ## Data & Scoring
 
+### Data Update Pipeline
+Orchestrates AIP data fetching (web + autorouter), AIRAC cycle tracking, change history, and derived database sync. Main tool: `data_update.py`.
+Key exports: `data_update.py`, `aipexport.py`, `aipchange.py`, `DatabaseStorage.airac_date`
+→ Full doc: DATA_UPDATE_PIPELINE.md
+
 ### GA Friendliness System
 Persona-based airport scoring using reviews, fees, and AIP data. Separate enrichment database (`ga_persona.db`), LLM-extracted features, configurable personas.
 Key exports: `GAFriendlinessService`, `PersonaManager`, `AirportFeatureScores`
