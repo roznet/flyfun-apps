@@ -335,10 +335,13 @@ class AIPExporter:
         
         # Initialize exporters based on output format
         if self.args.database_storage is not None:
-            self.exporters['database_storage'] = DatabaseStorage(
+            storage = DatabaseStorage(
                 _database_path(self.args.database_storage),
                 save_only_std_fields=not getattr(self.args, 'save_all_fields', False)
             )
+            if getattr(self.args, 'airac_date', None):
+                storage.airac_date = self.args.airac_date
+            self.exporters['database_storage'] = storage
         
         if self.args.json:
             self.exporters['json'] = JSONExporter(self.args.json)

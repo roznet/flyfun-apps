@@ -158,6 +158,11 @@ def _resolve_db_path(path: Optional[str]) -> str:
             return env_path
         if os.path.exists('airports.db'):
             return 'airports.db'
+        # Check relative to script directory (project_root/data/airports.db)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_db = os.path.join(script_dir, '..', 'data', 'airports.db')
+        if os.path.exists(project_db):
+            return project_db
         raise ValueError("No database file found (set AIRPORTS_DB or provide --database)")
     return path
 
@@ -222,7 +227,8 @@ def _build_where_clauses(
     since: Optional[str],
     until: Optional[str],
     fields: Optional[Sequence[str]],
-    type_key: str
+    type_key: str,
+    airac_date: Optional[str] = None,
 ) -> Tuple[str, List[Any]]:
     clauses: List[str] = []
     params: List[Any] = []
@@ -255,6 +261,10 @@ def _build_where_clauses(
             clauses.append(f"(field_name IN ({placeholders}))")
             params.extend(fields)
 
+    if airac_date:
+        clauses.append("airac_date = ?")
+        params.append(airac_date)
+
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return where, params
 
@@ -269,13 +279,14 @@ def _query_changes(
     std_field_ids: Optional[Sequence[int]] = None,
     country_filter: Optional[Sequence[str]] = None,
     skip_std_field_ids: Optional[Sequence[int]] = None,
+    airac_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     all_rows: List[Dict[str, Any]] = []
     for t in types:
         meta = CHANGE_TABLES[t]
         # Normalize date expression to a DATE() string for grouping/printing
         select_sql = meta['select'].format(date_expr=f"DATE({meta['date_col']})")
-        where, params = _build_where_clauses(airports, since, until, fields, t)
+        where, params = _build_where_clauses(airports, since, until, fields, t, airac_date=airac_date)
         extra_clauses: List[str] = []
         extra_params: List[Any] = []
         # std_field_id filter (only for AIP changes)
@@ -454,6 +465,7 @@ def main():
     parser.add_argument('--summary', help='Show summary counts instead of detailed rows (table format only)', action='store_true')
     parser.add_argument('--plain-text', help='Disable ANSI colors/styles in table output', action='store_true')
     parser.add_argument('--all-fields', help='Include all fields (do not skip low-value fields like magnetic variation)', action='store_true')
+    parser.add_argument('--airac', help='Filter by AIRAC cycle date (YYYY-MM-DD). Also accepts "list" to show all recorded AIRAC updates.')
     parser.add_argument('-v', '--verbose', help='Verbose output', action='store_true')
 
     args = parser.parse_args()
@@ -464,6 +476,25 @@ def main():
     # Resolve DB
     db_path = _resolve_db_path(args.database)
     conn = _connect(db_path)
+
+    # Handle --airac list
+    if args.airac and args.airac.strip().lower() == 'list':
+        try:
+            rows = conn.execute('''
+                SELECT airac_date, source, fetched_at, airports_updated, changes_count, status
+                FROM airac_updates ORDER BY airac_date DESC, source
+            ''').fetchall()
+            if not rows:
+                print("No AIRAC updates recorded.")
+            else:
+                print(f"{'AIRAC Date':<14} {'Source':<24} {'Fetched':<22} {'Airports':<10} {'Changes':<10} {'Status'}")
+                print('-' * 100)
+                for r in rows:
+                    print(f"{r['airac_date']:<14} {r['source']:<24} {r['fetched_at'][:19]:<22} {r['airports_updated']:<10} {r['changes_count']:<10} {r['status']}")
+        except sqlite3.OperationalError:
+            print("No airac_updates table found. Run an AIRAC update with the latest euro_aip to create it.")
+        conn.close()
+        return
 
     # Determine which types to include
     selected_types: List[str] = []
@@ -532,6 +563,7 @@ def main():
             until = (d + timedelta(days=1)).date().isoformat()
 
     # Query
+    airac_filter = args.airac if args.airac and args.airac.strip().lower() != 'list' else None
     skip_ids = None if args.all_fields else SKIP_STD_FIELD_IDS
     rows = _query_changes(
         conn=conn,
@@ -543,6 +575,7 @@ def main():
         std_field_ids=std_field_ids,
         country_filter=country_filter,
         skip_std_field_ids=skip_ids,
+        airac_date=airac_filter,
     )
 
     # Output

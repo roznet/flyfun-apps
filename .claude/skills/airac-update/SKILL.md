@@ -11,11 +11,15 @@ Run this after each AIRAC cycle to update all AIP data, verify the results, and 
 
 1. Activate the venv: `source venv/bin/activate`
 2. Ensure working tree is clean for data files (`git status data/`)
-3. Show the last update date by checking what's in the database:
+3. Show which AIRAC cycles have been applied:
+   ```
+   python tools/aipchange.py --airac list
+   ```
+   If no airac_updates table exists yet, fall back to checking update dates:
    ```
    python -c "import sqlite3; conn=sqlite3.connect('data/airports.db'); print(conn.execute('SELECT DISTINCT date(updated_at) as d FROM aip_entries ORDER BY d DESC LIMIT 5').fetchall())"
    ```
-4. Tell the user the last update date, compute the current effective AIRAC cycle, and confirm before proceeding. If multiple cycles need catching up, offer to run them sequentially.
+4. Tell the user the latest AIRAC cycle in the database, compute the current effective AIRAC cycle, and confirm before proceeding. If multiple cycles need catching up, offer to run them sequentially.
 
 ## Step 1: Fetch web sources (France, UK, Norway)
 

@@ -251,6 +251,58 @@ def update_aip_fields_only() -> None:
     logger.info("AIP fields update complete")
 
 
+def _get_latest_airac_date() -> str | None:
+    """Read the latest AIRAC date from airports.db airac_updates table."""
+    if not AIRPORTS_DB.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(AIRPORTS_DB))
+        row = conn.execute(
+            "SELECT airac_date FROM airac_updates ORDER BY airac_date DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        return row[0] if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def _stamp_airac_metadata(airac_date: str) -> None:
+    """Write last_airac_date to derived database metadata tables."""
+    # ga_persona.db uses ga_meta_info key-value table
+    if GA_PERSONA_DB.exists():
+        try:
+            conn = sqlite3.connect(str(GA_PERSONA_DB))
+            conn.execute(
+                "INSERT OR REPLACE INTO ga_meta_info (key, value) VALUES (?, ?)",
+                ("last_airac_date", airac_date),
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Stamped ga_persona.db with AIRAC {airac_date}")
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Could not stamp ga_persona.db: {e}")
+
+    # ga_notifications.db — create metadata table if needed
+    if GA_NOTIFICATIONS_DB.exists():
+        try:
+            conn = sqlite3.connect(str(GA_NOTIFICATIONS_DB))
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                ("last_airac_date", airac_date),
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Stamped ga_notifications.db with AIRAC {airac_date}")
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Could not stamp ga_notifications.db: {e}")
+
+
 def sync_aip_derived(prefixes: list[str] = None, full: bool = False) -> None:
     """Sync all AIP-derived data: notifications and hospitality fields.
 
@@ -271,6 +323,11 @@ def sync_aip_derived(prefixes: list[str] = None, full: bool = False) -> None:
     # 2. Update AIP-derived fields in ga_persona.db (hospitality, etc.)
     if GA_PERSONA_DB.exists():
         update_aip_fields_only()
+
+    # 3. Stamp derived databases with AIRAC date
+    airac_date = _get_latest_airac_date()
+    if airac_date:
+        _stamp_airac_metadata(airac_date)
 
     logger.info("AIP-derived data sync complete")
 
