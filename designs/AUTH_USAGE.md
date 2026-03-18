@@ -93,6 +93,13 @@ After each chat stream completes:
 2. `ChatUsageRow` written (user_id, model, tokens, thread_id, persona_id)
 3. `record_cost()` called on shared `CostLedgerRow` (service=`flyfun-maps`, action=`chat`)
 
+### Security Headers
+
+`security_config.py` controls CORS and CSP:
+- CORS `allow_headers` restricted to `["Content-Type", "Authorization", "Accept"]` (not `["*"]`)
+- CSP policy set via `Content-Security-Policy` header
+- `/auth/logout` requires POST (matches flyfun-common router)
+
 ### Custom `/auth/me`
 
 Registered **before** the common auth router to take priority. Returns app-specific `chat_usage`:

@@ -181,11 +181,11 @@ CREATE TABLE ga_airfield_stats (
     -- ============================================
     -- IFR capabilities
     aip_ifr_available        INTEGER,   -- 0=no IFR, 1=IFR permitted (no procedures), 2=non-precision (VOR/NDB), 3=RNP/RNAV, 4=ILS
-    aip_night_available     INTEGER,   -- 0/1
-    
+    aip_night_available     INTEGER,   -- 0=unavailable/unknown, 1=available
+
     -- Hospitality (encoded from AIP)
-    aip_hotel_info          INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
-    aip_restaurant_info     INTEGER,   -- 0=unknown, 1=vicinity, 2=at_airport
+    aip_hotel_info          INTEGER,   -- -1=unknown, 0=none, 1=vicinity, 2=at_airport
+    aip_restaurant_info     INTEGER,   -- -1=unknown, 0=none, 1=vicinity, 2=at_airport
 
     -- ============================================
     -- REVIEW-DERIVED FEATURE SCORES (0.0–1.0)
@@ -221,7 +221,7 @@ CREATE TABLE ga_airfield_stats (
 2. **Fee Info** - Landing/parking fees by MTOW bands (from review sources)
 3. **AIP Raw Data** - Structured data extracted from AIP/airports.db:
    - IFR capabilities (IFR available, night ops)
-   - Hospitality encoding (hotel, restaurant: 0=unknown, 1=vicinity, 2=at_airport)
+   - Hospitality encoding (hotel, restaurant: -1=unknown, 0=none, 1=vicinity, 2=at_airport)
 4. **Review-Derived Feature Scores** - Normalized [0, 1] scores computed from review tag distributions
 5. **AIP-Derived Feature Scores** - Normalized [0, 1] scores computed from AIP raw data
 
@@ -315,15 +315,16 @@ CREATE TABLE ga_meta_info (
 );
 ```
 
-Example keys:
+Keys:
 
-- `build_timestamp`
-- `source_version` - Source snapshot identifier
-- `ontology_version`
-- `personas_version`
-- `scoring_version`
-- `last_processed_{icao}` - Per-airport processing timestamps (for incremental updates)
+- `schema_version` - Database schema version (e.g., "2.0")
+- `source_version` - Build identifier (e.g., "build-20260317")
+- `scoring_version` - Scoring algorithm version
+- `last_airac_date` - Most recent AIRAC cycle applied (e.g., "2026-02-19"), stamped by `data_update.py`
+- `last_processed_{icao}` - Per-airport review processing timestamps (for incremental updates)
 - `last_aip_processed_{icao}` - Per-airport AIP processing timestamps
+- `last_successful_icao` - Resume point for interrupted builds
+- `global_priors` - JSON-encoded global average scores (for Bayesian smoothing)
 
 ### 3.3 Indexing Strategy
 
@@ -860,25 +861,19 @@ For each airport (`icao`):
 
 3. **Store** in `ga_review_summary`.
 
-### 4.7 AIP Notification Score Integration (Future Work)
+### 4.7 AIP Notification Score Integration
 
-**Status:** The notification parsing system is being developed separately and is **not part of this migration**.
+**Status:** Implemented. The notification parsing system runs separately and populates:
 
-**What's included in this migration:**
-- ✅ Ensure persona scoring can handle missing notification data
-- ✅ Don't break if notification features are added later
+- `ga_notification_requirements` table — per-rule notification data (weekday ranges, hours, schengen flags)
+- `ga_aip_rule_summary` table — aggregated hassle level and notification score per airport
 
-**What's NOT included:**
-- ❌ Creating `ga_aip_rule_summary` table (will be added in future migration)
-- ❌ Populating notification data
-- ❌ Using `--parse-notifications` flag
-- ❌ Integrating notification scores into hassle scoring
+**Integration:**
+- `NotificationScorer.write_to_ga_meta()` writes hassle scores and summaries to ga_persona.db
+- Personas weight `review_hassle_score` for bureaucracy assessment
+- `--parse-notifications` flag in build_ga_friendliness.py triggers notification parsing
 
-**Future integration (after this migration):**
-- A separate notification parsing system will create its own table structure
-- Notification scores may be added as a new feature (e.g., `aip_notification_score`)
-- Personas can then weight notification scores independently
-- For now, personas should only weight `review_hassle_score` for bureaucracy assessment
+See [Notification Parsing Design](./NOTIFICATION_PARSING_DESIGN.md) and [Data Update Pipeline](./DATA_UPDATE_PIPELINE.md) for details.
 
 ### 4.8 Incremental Updates
 
@@ -1407,8 +1402,10 @@ Exact protocol (HTTP/MCP/etc.) is outside this design; this only defines **what 
   - Timestamp-based change detection
 - **CLI Tool:** `tools/build_ga_friendliness.py` for rebuilding database
   - Multiple source options (--export, --csv, --json-dir, --airports-db)
-  - Incremental and resume modes
+  - `--aip-only` — fast update of AIP-derived fields only (IFR, night, hotel, restaurant), no review processing
+  - `--incremental` / `--resume` modes for partial rebuilds
   - Comprehensive metrics output
+  - Orchestrated by `data_update.py` (see [Data Update Pipeline](./DATA_UPDATE_PIPELINE.md))
 
 ### 7.3 Design Decisions
 
@@ -1431,7 +1428,8 @@ Exact protocol (HTTP/MCP/etc.) is outside this design; this only defines **what 
 - **Runtime consumers:** ATTACH both databases, LEFT JOIN for GA data
 - **Web API:** Optional endpoints for GA friendliness queries
 - **Route-based search:** Extend existing tools to include GA scores
-- **Backward compatible:** Existing tools work without ga_meta.sqlite
+- **Data pipeline:** `data_update.py` orchestrates AIP-only updates via `sync_aip_derived()` and stamps `last_airac_date` into `ga_meta_info`
+- See [Data Update Pipeline](./DATA_UPDATE_PIPELINE.md) for the full update workflow
 
 ---
 

@@ -7,7 +7,7 @@ This document describes the Docker deployment setup for the Euro AIP application
 **Services:**
 - **Web Server**: FastAPI application (port 8000)
 - **MCP Server**: Model Context Protocol server for LLM integration
-- **ChromaDB**: Vector database for RAG (port 8001)
+- **ChromaDB**: Vector database for RAG (port 8001, localhost-only)
 
 ---
 
@@ -38,7 +38,8 @@ chmod 777 out logs out/chromadb_data
 - `data/rules.json` - Aviation rules JSON (generate from Excel if needed)
 
 **Optional:**
-- `data/ga_persona.db` - GA friendliness persona database (build if you have export data)
+- `data/ga_persona.db` - GA friendliness persona database (copied into `/app/data_builtin/` during Docker build)
+- `data/ga_notifications.db` - GA notification requirements database
 
 ### 4. Configure Environment
 
@@ -60,6 +61,9 @@ JWT_SECRET=your-shared-jwt-secret     # Must match flyfun-weather
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 DATABASE_URL=mysql+pymysql://user:pass@shared-mysql:3306/flyfun  # Shared DB
+
+# ChromaDB authentication
+CHROMADB_AUTH_TOKEN=your-chromadb-auth-token  # Required for ChromaDB auth
 ```
 
 **Note:** `JWT_SECRET` must be the same across all flyfun services for cross-subdomain SSO to work. See `AUTH_USAGE.md` for details.
@@ -194,52 +198,44 @@ docker compose logs web-server --tail=20
 
 **Note:** Only the `base` service needs `--no-cache`. The `web-server` and `mcp-server` builds will pick up the new base image automatically since their `FROM flyfun-base:latest` references the just-rebuilt image.
 
-### Update airports.db
+### Update AIP Data (AIRAC Cycle)
 
-**Replace the database file:**
+**Preferred method** — run the data update pipeline on the host (not in Docker):
 
 ```bash
-# Stop services (optional, but safer)
-docker-compose stop web-server mcp-server
+# Activate venv, fetch latest AIP data + sync derived databases
+source venv/bin/activate
+python tools/data_update.py web                  # France, UK, Norway
+python tools/data_update.py autorouter ED EB LO  # Germany, Belgium, Austria
+```
 
-# Replace the file on host
+This updates `data/airports.db`, `data/ga_notifications.db`, and `data/ga_persona.db` on the host. Then rebuild the web-server to pick up `ga_persona.db` (baked into image via `data_builtin/`):
+
+```bash
+docker compose build web-server && docker compose up -d web-server
+```
+
+`airports.db` and `ga_notifications.db` are volume-mounted, so they're available immediately. See [Data Update Pipeline](./DATA_UPDATE_PIPELINE.md) for details and AIRAC tracking.
+
+### Update airports.db (Manual)
+
+```bash
+# Replace the file on host (volume-mounted, available immediately)
 cp /path/to/new/airports.db data/airports.db
 
-# Restart services
-docker-compose start web-server mcp-server
-
-# Verify
-docker exec flyfun-web-server ls -la /app/data/airports.db
-curl http://localhost:8000/api/airports/EGLL
+# Restart to reload
+docker compose restart web-server
 ```
 
-**Note:** The `data/` directory is mounted as a volume, so file changes are immediately available in containers.
-
-### Update GA persona database
-
-**Option 1: Build from export data (recommended)**
+### Update GA persona database (Manual)
 
 ```bash
-# If you have airfield.directory export JSON
-docker exec -it flyfun-web-server python /app/tools/build_ga_friendliness.py \
-    --export /path/to/export.json \
-    --output /app/data/ga_persona.db
-```
-
-**Option 2: Replace existing file**
-
-```bash
-# Stop web-server (if GA_META_READONLY=false, otherwise optional)
-docker-compose stop web-server
-
-# Replace file on host
+# Replace file on host then rebuild (ga_persona.db is baked into image)
 cp /path/to/new/ga_persona.db data/ga_persona.db
-
-# Restart
-docker-compose start web-server
+docker compose build web-server && docker compose up -d web-server
 ```
 
-**Note:** The file is in `data/ga_persona.db` on the host, mounted into containers.
+**Note:** `ga_persona.db` is copied to `/app/data_builtin/` during Docker build, so replacing the host file requires a rebuild.
 
 ### Rebuild RAG (Vector Database)
 

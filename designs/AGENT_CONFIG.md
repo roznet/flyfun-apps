@@ -286,11 +286,11 @@ export AVIATION_AGENT_CONFIG=experiment
   "llms": {
     "planner": {
       "provider": "anthropic",
-      "model": "claude-sonnet-4-5-20250929"
+      "model": "claude-sonnet-4-6"
     },
     "formatter": {
       "provider": "anthropic",
-      "model": "claude-sonnet-4-5-20250929",
+      "model": "claude-sonnet-4-6",
       "streaming": true
     }
   }
