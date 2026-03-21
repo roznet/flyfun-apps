@@ -47,6 +47,7 @@ class AirportNotificationResponse(BaseModel):
     hours_notice: Optional[int] = None
     operating_hours: Optional[str] = None
     summary: Optional[str] = None
+    raw_text: Optional[str] = None
     confidence: Optional[float] = None
     phone: Optional[str] = None
     email: Optional[str] = None

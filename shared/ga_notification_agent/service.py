@@ -302,25 +302,25 @@ class NotificationService:
             conn.row_factory = sqlite3.Row
             
             cursor = conn.execute('''
-                SELECT 
+                SELECT
                     icao, rule_type, notification_type, hours_notice,
                     operating_hours_start, operating_hours_end,
                     weekday_rules, schengen_rules, contact_info,
-                    summary, confidence
+                    summary, raw_text, confidence
                 FROM ga_notification_requirements
                 WHERE icao = ?
             ''', (icao.upper(),))
-            
+
             row = cursor.fetchone()
             conn.close()
-            
+
             if not row:
                 return {
                     "found": False,
                     "icao": icao.upper(),
                     "pretty": f"No parsed notification data for {icao.upper()}. This airport may not have customs/immigration requirements parsed yet."
                 }
-            
+
             result = {
                 "found": True,
                 "icao": row["icao"],
@@ -329,6 +329,7 @@ class NotificationService:
                 "hours_notice": row["hours_notice"],
                 "operating_hours": f"{row['operating_hours_start']}-{row['operating_hours_end']}" if row["operating_hours_start"] else None,
                 "summary": row["summary"],
+                "raw_text": row["raw_text"],
                 "confidence": row["confidence"],
             }
             
