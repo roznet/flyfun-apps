@@ -159,6 +159,57 @@ final class BriefingDomain {
         Logger.app.info("Loaded briefing from Core Data with \(briefing.notams.count) NOTAMs")
     }
 
+    /// Fetch live NOTAMs for a flight route from the Autorouter API (via server)
+    ///
+    /// Uses the flight context to determine departure, destination, and time window.
+    /// Results flow through the same callback chain as PDF briefing imports.
+    func fetchLiveNotams(context: FlightContext) async {
+        guard let departure = context.departureICAO,
+              let destination = context.destinationICAO else {
+            Logger.app.warning("Cannot fetch live NOTAMs: no departure/destination in flight context")
+            lastError = BriefingServiceError.parseError("No departure or destination set for this flight")
+            return
+        }
+
+        Logger.app.info("Fetching live NOTAMs for \(departure)→\(destination)")
+
+        isLoading = true
+        importProgress = 0
+        lastError = nil
+
+        defer {
+            isLoading = false
+            importProgress = 1
+        }
+
+        do {
+            importProgress = 0.3
+            let briefing = try await service.fetchRouteNotams(
+                departure: departure,
+                destination: destination,
+                waypoints: context.alternateICAOs,
+                departureTime: context.departureTime,
+                arrivalTime: context.arrivalTime
+            )
+
+            // Store in Core Data if handler is set
+            importProgress = 0.7
+            if let onParsed = onBriefingParsed {
+                currentCDBriefing = await onParsed(briefing)
+            }
+
+            importProgress = 0.9
+            currentBriefing = briefing
+            onBriefingLoaded?(briefing)
+
+            Logger.app.info("Successfully fetched \(briefing.notams.count) live NOTAMs")
+
+        } catch {
+            Logger.app.error("Failed to fetch live NOTAMs: \(error.localizedDescription)")
+            lastError = error
+        }
+    }
+
     /// Clear the current briefing
     func clearBriefing() {
         currentBriefing = nil

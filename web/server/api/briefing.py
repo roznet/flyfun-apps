@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 
 """
-Briefing API endpoint for parsing ForeFlight PDFs and other briefing sources.
+Briefing API endpoints for NOTAM data.
 
 POST /api/briefing/parse - Parse a briefing file and return structured NOTAM data.
+GET  /api/briefing/notams - Fetch live NOTAMs for a flight route via Autorouter API.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
-from datetime import datetime, timezone
+from sqlalchemy.orm import Session
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import json
 import tempfile
 import logging
 import os
@@ -25,19 +29,119 @@ def serialize_datetime(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 from euro_aip.briefing import ForeFlightSource, CategorizationPipeline
+from euro_aip.briefing.sources import AutorouterNotamSource
+from euro_aip.briefing.models.briefing import Briefing
+from euro_aip.briefing.models.route import Route
 from euro_aip.briefing.categorization import parse_q_code
+from euro_aip.utils.autorouter_credentials import AutorouterCredentialManager
 from euro_aip.models.euro_aip_model import EuroAipModel
+from flyfun_common.credentials import load_encrypted_creds
+from flyfun_common.db import current_user_id, get_db
 
 logger = logging.getLogger(__name__)
 
 # Global model reference (set by main.py during startup)
 model: Optional[EuroAipModel] = None
 
+# FIR mapping loaded from config
+_fir_mapping: Optional[Dict[str, List[str]]] = None
+
+
 def set_model(m: EuroAipModel):
     """Set the global model reference for geocoding."""
     global model
     model = m
     logger.info(f"Briefing API: model set with {m.airports.count()} airports")
+
+
+def _get_fir_mapping() -> Dict[str, List[str]]:
+    """Load FIR mapping from config, cached after first load."""
+    global _fir_mapping
+    if _fir_mapping is None:
+        config_path = Path(__file__).parent.parent.parent.parent / "configs" / "fir_mapping.json"
+        try:
+            with open(config_path) as f:
+                data = json.load(f)
+            _fir_mapping = data.get("prefix_to_firs", {})
+            logger.info("Loaded FIR mapping with %d prefixes", len(_fir_mapping))
+        except FileNotFoundError:
+            logger.warning("FIR mapping config not found at %s", config_path)
+            _fir_mapping = {}
+    return _fir_mapping
+
+
+def _get_notam_source_for_user(db: Session, user_id: str) -> AutorouterNotamSource:
+    """Create an AutorouterNotamSource using the authenticated user's stored credentials.
+
+    Autorouter requires per-user credentials. Users store their credentials
+    via flyfun-weather's preferences UI (or any service sharing flyfun-common's DB).
+    Credentials are encrypted at rest and never returned to the client.
+    """
+    creds = load_encrypted_creds(db, user_id)
+    if not creds:
+        raise HTTPException(
+            status_code=403,
+            detail="No autorouter credentials configured. Please set up your autorouter "
+                   "credentials in the WeatherBrief app settings."
+        )
+
+    username = creds.get("username")
+    password = creds.get("password")
+    if not username or not password:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid autorouter credentials format. Please re-enter your "
+                   "credentials in the WeatherBrief app settings."
+        )
+
+    cache_dir = os.environ.get("CACHE_DIR", "/tmp/flyfun-cache")
+    # Per-user token cache to avoid OAuth token conflicts between users
+    user_cache_dir = os.path.join(cache_dir, "autorouter", user_id)
+    cred_mgr = AutorouterCredentialManager(user_cache_dir)
+    cred_mgr.set_credentials(username, password)
+
+    return AutorouterNotamSource(cred_mgr)
+
+
+def _resolve_route_icaos(
+    departure: str,
+    destination: str,
+    waypoints: List[str],
+    corridor_nm: float = 25.0,
+) -> tuple[List[str], List[str]]:
+    """
+    Resolve a flight route to airport ICAOs and FIR codes for NOTAM queries.
+
+    Uses the model's near-route airport lookup to find airports within the
+    corridor, then maps ICAO prefixes to FIR codes.
+
+    Returns:
+        (airport_icaos, fir_codes) - deduplicated lists
+    """
+    # Start with explicit route airports
+    airports = {departure.upper(), destination.upper()}
+    for wp in waypoints:
+        airports.add(wp.upper())
+
+    # Find nearby airports using model
+    if model is not None:
+        route_points = [departure] + waypoints + [destination]
+        try:
+            nearby = model.find_airports_near_route(route_points, distance_nm=corridor_nm)
+            for entry in nearby:
+                airports.add(entry["airport"].ident)
+            logger.info("Found %d airports near route (corridor=%dnm)", len(nearby), corridor_nm)
+        except Exception as e:
+            logger.warning("Near-route lookup failed: %s", e)
+
+    # Extract unique ICAO prefixes and map to FIRs
+    fir_mapping = _get_fir_mapping()
+    prefixes = {icao[:2].upper() for icao in airports if len(icao) >= 2}
+    firs: set[str] = set()
+    for prefix in prefixes:
+        firs.update(fir_mapping.get(prefix, []))
+
+    return sorted(airports), sorted(firs)
 
 def geocode_route(route) -> None:
     """Geocode route departure/destination using airport coordinates."""
@@ -384,3 +488,90 @@ async def list_sources():
         "sources": list(SOURCES.keys()),
         "default": "foreflight",
     }
+
+
+@router.get("/notams", response_model=BriefingResponse)
+async def fetch_route_notams(
+    departure: str = Query(..., description="Departure airport ICAO code"),
+    destination: str = Query(..., description="Destination airport ICAO code"),
+    waypoints: Optional[str] = Query(None, description="Comma-separated intermediate waypoint ICAOs"),
+    departure_time: Optional[str] = Query(None, description="Departure time (ISO8601)"),
+    arrival_time: Optional[str] = Query(None, description="Arrival time (ISO8601)"),
+    corridor_nm: float = Query(25.0, description="Route corridor width in NM for near-route airports"),
+    user_id: str = Depends(current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch live NOTAMs for a flight route from the Autorouter API.
+
+    Requires authentication. Uses the authenticated user's stored autorouter
+    credentials (set via WeatherBrief preferences). Resolves the route to
+    nearby airports and FIR areas, then queries the Autorouter NOTAM API.
+    Returns results in the same BriefingResponse format as the /parse endpoint.
+    """
+    # Parse waypoints
+    wp_list = [w.strip().upper() for w in waypoints.split(",") if w.strip()] if waypoints else []
+
+    # Parse time window with ±2h buffer
+    start_validity = None
+    end_validity = None
+    try:
+        if departure_time:
+            dt = datetime.fromisoformat(departure_time.replace("Z", "+00:00"))
+            start_validity = dt - timedelta(hours=2)
+        if arrival_time:
+            dt = datetime.fromisoformat(arrival_time.replace("Z", "+00:00"))
+            end_validity = dt + timedelta(hours=2)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+
+    # Resolve route to ICAO + FIR query list
+    airport_icaos, fir_codes = _resolve_route_icaos(
+        departure, destination, wp_list, corridor_nm
+    )
+    query_icaos = sorted(set(airport_icaos + fir_codes))
+
+    logger.info(
+        "Fetching NOTAMs for user %s, route %s→%s: %d airports, %d FIRs, %d total query codes",
+        user_id, departure, destination, len(airport_icaos), len(fir_codes), len(query_icaos),
+    )
+
+    try:
+        notam_source = _get_notam_source_for_user(db, user_id)
+        notams = notam_source.fetch_notams(
+            icaos=query_icaos,
+            start_validity=start_validity,
+            end_validity=end_validity,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to fetch NOTAMs from Autorouter: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Autorouter API error: {e}")
+
+    # Apply categorization pipeline
+    pipeline = CategorizationPipeline()
+    pipeline.categorize_all(notams)
+
+    # Build briefing with route info
+    route = Route(departure=departure.upper(), destination=destination.upper(), waypoints=wp_list)
+    geocode_route(route)
+
+    # Parse departure/arrival times for the route object
+    try:
+        if departure_time:
+            route.departure_time = datetime.fromisoformat(departure_time.replace("Z", "+00:00"))
+        if arrival_time:
+            route.arrival_time = datetime.fromisoformat(arrival_time.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+
+    briefing = Briefing(
+        source="autorouter",
+        route=route,
+        notams=notams,
+    )
+
+    logger.info("Returning %d NOTAMs for route %s→%s", len(notams), departure, destination)
+
+    return _briefing_to_response(briefing)

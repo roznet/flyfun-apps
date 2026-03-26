@@ -1,0 +1,30 @@
+{
+  "description": "Maps 2-letter ICAO prefixes to FIR codes for NOTAM queries. Used by the briefing NOTAM endpoint to determine which FIR-level NOTAMs to fetch for a route.",
+  "prefix_to_firs": {
+    "LF": ["LFFF", "LFBB", "LFEE", "LFMM", "LFRR"],
+    "EG": ["EGTT", "EGPX"],
+    "ED": ["EDGG", "EDMM", "EDWW"],
+    "EB": ["EBBU"],
+    "EH": ["EHAA"],
+    "EI": ["EISN"],
+    "EL": ["ELLX"],
+    "LI": ["LIMM", "LIRR"],
+    "LS": ["LSAG", "LSAZ"],
+    "LO": ["LOVV"],
+    "LE": ["LECM", "LECB"],
+    "LP": ["LPPC"],
+    "LK": ["LKAA"],
+    "ES": ["ESAA"],
+    "EN": ["ENOR", "ENBD"],
+    "EK": ["EKDK"],
+    "EF": ["EFIN"],
+    "EP": ["EPWW"],
+    "LG": ["LGGG"],
+    "LH": ["LHCC"],
+    "LJ": ["LJLA"],
+    "LR": ["LRBB"],
+    "LB": ["LBSR"],
+    "LC": ["LCCC"],
+    "LT": ["LTAA", "LTBB"]
+  }
+}

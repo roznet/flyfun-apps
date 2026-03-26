@@ -66,6 +66,9 @@ final class AppState {
     /// Airport database for coordinate lookups
     let knownAirports: KnownAirports?
 
+    /// Authentication service (Apple Sign-In)
+    let auth: AuthenticationService
+
     // MARK: - Pending Import State
 
     /// Briefing waiting to be assigned to a flight (from share extension)
@@ -99,6 +102,9 @@ final class AppState {
             Logger.app.warning("airports.db not found in bundle - route display will be limited")
         }
 
+        // Initialize authentication
+        self.auth = AuthenticationService()
+
         // Initialize domains
         self.flights = FlightDomain(repository: flightRepository)
         self.briefing = BriefingDomain(service: briefingService)
@@ -113,9 +119,21 @@ final class AppState {
         syncResurfaceSettings()
         syncPriorityProfile()
 
-        // Configure service URLs from secrets
+        // Wire auth token to BriefingService
+        auth.onAuthChanged = { [weak self] token in
+            guard let self = self else { return }
+            Task {
+                await self.briefingService.setAuthToken(token)
+            }
+        }
+
+        // Configure service URLs and restore auth token
         Task {
             await briefingService.configure(baseURL: SecretsManager.shared.apiBaseURL)
+            // If already authenticated from Keychain, set the token now
+            if let token = auth.sessionToken {
+                await briefingService.setAuthToken(token)
+            }
         }
     }
 
@@ -354,6 +372,20 @@ final class AppState {
             departureTime: departureTime,
             arrivalTime: arrivalTime
         )
+    }
+
+    /// Whether the user can fetch live NOTAMs (requires authentication)
+    var canFetchLiveNotams: Bool {
+        auth.isAuthenticated
+    }
+
+    /// Fetch live NOTAMs for the current flight route from the Autorouter API.
+    ///
+    /// Requires authentication — the server uses the user's stored autorouter
+    /// credentials to call the Autorouter API.
+    func fetchLiveNotams() async {
+        let context = buildFlightContext()
+        await briefing.fetchLiveNotams(context: context)
     }
 
     /// Update the flight context for NOTAM priority evaluation.

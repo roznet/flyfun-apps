@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AuthenticationServices
 
 /// Settings view for app preferences
 struct SettingsView: View {
@@ -13,6 +14,53 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // Account
+            Section("Account") {
+                if let auth = appState?.auth, auth.isAuthenticated {
+                    HStack {
+                        Image(systemName: "person.crop.circle.fill")
+                            .foregroundStyle(.green)
+                        VStack(alignment: .leading) {
+                            Text(auth.currentUser?.displayName ?? "Signed In")
+                                .font(.body)
+                            if let email = auth.currentUser?.email {
+                                Text(email)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        auth.signOut()
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } else {
+                    Text("Sign in to fetch live NOTAMs for your route via the Autorouter API.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        Task {
+                            if case .success(let authorization) = result {
+                                try? await appState?.auth.handleAuthorization(authorization)
+                            }
+                        }
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 44)
+
+                    if let error = appState?.auth.authError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+
             // Priority Profile
             Section("Priority Profile") {
                 Picker("Profile", selection: profileBinding) {
