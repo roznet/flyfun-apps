@@ -67,6 +67,8 @@ from euro_aip.sources import (
 from euro_aip.sources.france_eaip_web import FranceEAIPWebSource
 from euro_aip.sources.uk_eaip_web import UKEAIPWebSource
 from euro_aip.sources.norway_eaip_web import NorwayEAIPWebSource
+from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
+from euro_aip.sources.opennav import OpenNavSource
 from euro_aip.models import EuroAipModel, Airport
 from euro_aip.sources.base import SourceInterface
 from euro_aip.utils.field_standardization_service import FieldStandardizationService
@@ -171,6 +173,16 @@ class ModelBuilder:
                 inputs=inputs if inputs else None
             )
         
+        if getattr(self.args, 'eurocontrol_fra', False):
+            self.sources['eurocontrol_fra'] = EurocontrolFRASource(
+                cache_dir=str(self.cache_dir)
+            )
+
+        if getattr(self.args, 'opennav', False):
+            self.sources['opennav'] = OpenNavSource(
+                cache_dir=str(self.cache_dir)
+            )
+
         # Configure refresh behavior
         if self.args.force_refresh:
             for source in self.sources.values():
@@ -225,6 +237,9 @@ class ModelBuilder:
             if airports_to_add:
                 result = filtered_model.bulk_add_airports(airports_to_add)
                 logger.info(f"Filtered model created: {result['added']} airports added")
+                # Carry waypoints over — they're global navigation data, not airport-specific
+                if model.waypoints.count() > 0:
+                    filtered_model.bulk_add_waypoints(model.waypoints.all())
                 model = filtered_model
             else:
                 logger.warning("No airports found to add to filtered model, using original model")
@@ -235,7 +250,7 @@ class ModelBuilder:
         logger.info(f"Field mapping statistics: {mapping_stats['mapped_fields']}/{mapping_stats['total_fields']} fields mapped ({mapping_stats['mapping_rate']:.1%})")
         logger.info(f"Average mapping score: {mapping_stats['average_mapping_score']:.2f}")
         
-        logger.info(f"Final model contains {model.airports.count()} airports")
+        logger.info(f"Final model contains {model.airports.count()} airports, {model.waypoints.count()} waypoints")
         return model
 
     def _update_model_with_worldairports(self, source, model, airports):
@@ -418,6 +433,9 @@ def main():
     parser.add_argument('--pointdepassage', help='Enable Point de Passage source', action='store_true')
     parser.add_argument('--pointdepassage-journal', help='Point de Passage journal PDF path')
     parser.add_argument('--pointdepassage-db', help='Point de Passage database file', default='airports.db')
+
+    parser.add_argument('--eurocontrol-fra', help='Enable Eurocontrol FRA waypoint source', action='store_true')
+    parser.add_argument('--opennav', help='Enable OpenNav waypoint source', action='store_true')
     
     # Output configuration
     parser.add_argument(
@@ -445,7 +463,8 @@ def main():
     sources_enabled = any([
         args.database is not None, args.worldairports, args.france_eaip, getattr(args, 'france_web', False),
         args.uk_eaip, getattr(args, 'uk_web', False), getattr(args, 'norway_web', False),
-        args.autorouter, args.pointdepassage
+        args.autorouter, args.pointdepassage,
+        getattr(args, 'eurocontrol_fra', False), getattr(args, 'opennav', False)
     ])
     
     outputs_enabled = bool(args.json) or args.database_storage is not None

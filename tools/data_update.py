@@ -199,6 +199,26 @@ def fetch_web_sources() -> None:
         logger.info("No changes to display")
 
 
+def fetch_waypoints() -> None:
+    """Fetch waypoints from Eurocontrol FRA and OpenNav sources."""
+    log_section("Fetching Waypoints (FRA + OpenNav)")
+
+    if not AIRPORTS_DB.exists():
+        raise RuntimeError(f"airports.db not found: {AIRPORTS_DB}")
+
+    args = [
+        "python", "tools/aipexport.py",
+        "--database", str(AIRPORTS_DB),
+        "--eurocontrol-fra",
+        "--opennav",
+        "--database-storage", str(AIRPORTS_DB),
+        "-c", str(CACHE_DIR),
+    ]
+
+    run_command(args)
+    logger.info("Waypoint fetch complete")
+
+
 def update_reviews() -> None:
     """Update GA friendliness from reviews."""
     log_section("Updating GA Friendliness / Reviews")
@@ -432,6 +452,9 @@ def initial_build() -> None:
     # Step 1: Fetch AIP data from web sources
     fetch_web_sources()
 
+    # Step 1b: Fetch waypoints
+    fetch_waypoints()
+
     # Step 2: Sync all AIP-derived data (notifications, hospitality fields)
     sync_aip_derived(full=True)
 
@@ -462,6 +485,7 @@ Modes:
   aip           Sync all AIP-derived data (notifications, hospitality fields)
   reviews       Update GA friendliness/reviews (run weekly/monthly)
   notifications Update notification requirements only (subset of 'aip')
+  waypoints     Fetch waypoints from Eurocontrol FRA + OpenNav
 
 Examples:
   python tools/data_update.py initial
@@ -476,7 +500,7 @@ Examples:
 
     parser.add_argument(
         "mode",
-        choices=["initial", "web", "autorouter", "aip", "reviews", "notifications"],
+        choices=["initial", "web", "autorouter", "aip", "reviews", "notifications", "waypoints"],
         help="Update mode to run",
     )
     parser.add_argument(
@@ -493,7 +517,10 @@ Examples:
         initial_build()
     elif args.mode == "web":
         fetch_web_sources()
+        fetch_waypoints()
         sync_aip_derived()
+    elif args.mode == "waypoints":
+        fetch_waypoints()
     elif args.mode == "autorouter":
         run_autorouter(args.args)
         # Sync derived data for the same prefixes
