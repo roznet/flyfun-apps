@@ -211,6 +211,7 @@ def fetch_waypoints() -> None:
         "--database", str(AIRPORTS_DB),
         "--eurocontrol-fra",
         "--opennav",
+        "--ourairports-navaids",
         "--database-storage", str(AIRPORTS_DB),
         "-c", str(CACHE_DIR),
     ]

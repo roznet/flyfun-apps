@@ -1262,11 +1262,12 @@ export class UIManager {
    */
   private parseRouteFromQuery(query: string): string[] | null {
     const parts = query.trim().split(/\s+/).filter(part => part.length > 0);
-    const icaoPattern = /^[A-Za-z]{4}$/;
+    // Accept route tokens: 2-5 letter codes (ICAO airports, 5LNC waypoints, VOR/NDB navaids)
+    const routeTokenPattern = /^[A-Za-z]{2,5}$/;
 
-    const allIcaoCodes = parts.every(part => icaoPattern.test(part));
+    const allRouteCodes = parts.every(part => routeTokenPattern.test(part));
 
-    if (allIcaoCodes && parts.length >= 1) {
+    if (allRouteCodes && parts.length >= 2) {
       return parts.map(part => part.toUpperCase());
     }
 
@@ -1276,7 +1277,7 @@ export class UIManager {
   /**
    * Handle route search
    */
-  private async handleRouteSearch(routeAirports: string[]): Promise<void> {
+  private async handleRouteSearch(routeTokens: string[]): Promise<void> {
     // Clear locate state when starting a new route search
     this.store.getState().setLocate(null);
 
@@ -1288,65 +1289,55 @@ export class UIManager {
       // Read distance from store (single source of truth)
       const distanceNm = state.filters.search_radius_nm;
 
-      // Get original route airport coordinates for route line
-      const originalRouteAirports = await this.getRouteAirportCoordinates(routeAirports);
+      // Step 1: Resolve full route (airports + waypoints) via API
+      const routeString = routeTokens.join(' ');
+      const resolved = await this.apiAdapter.resolveRoute(routeString);
 
-      const response = await this.apiAdapter.searchAirportsNearRoute(
-        routeAirports,
-        distanceNm,
-        state.filters
-      );
-
-      // Extract airports
-      const airports = response.airports.map(item => ({
-        ...item.airport,
-        _routeSegmentDistance: item.segment_distance_nm,
-        _routeEnrouteDistance: item.enroute_distance_nm,
-        _closestSegment: item.closest_segment
+      // Step 2: Get route point coordinates for route line (all points including waypoints)
+      const originalRouteAirports = resolved.points.map(p => ({
+        icao: p.name,
+        lat: p.lat,
+        lng: p.lon,
       }));
 
-      this.store.getState().setAirports(airports);
+      // Step 3: Search corridor using airport idents + full route geometry
+      const airportIdents = resolved.airport_idents;
+      const routeGeometry = resolved.points.map(p => ({ lat: p.lat, lon: p.lon }));
+      if (airportIdents.length >= 1) {
+        const response = await this.apiAdapter.searchAirportsNearRoute(
+          airportIdents,
+          distanceNm,
+          state.filters,
+          routeGeometry
+        );
 
-      // Set route state
+        // Extract airports
+        const airports = response.airports.map(item => ({
+          ...item.airport,
+          _routeSegmentDistance: item.segment_distance_nm,
+          _routeEnrouteDistance: item.enroute_distance_nm,
+          _closestSegment: item.closest_segment
+        }));
+
+        this.store.getState().setAirports(airports);
+      }
+
+      // Step 4: Set route state with full coordinates (including waypoints)
       this.store.getState().setRoute({
-        airports: routeAirports,
+        airports: routeTokens,
         distance_nm: distanceNm,
         originalRouteAirports,
         isChatbotSelection: false,
         chatbotAirports: null
       });
 
-      this.showSuccess(`Route search: ${response.airports_found} airports within ${distanceNm}nm of route ${routeAirports.join(' → ')}`);
+      this.showSuccess(`Route: ${resolved.points.length} points resolved, airports within ${distanceNm}nm`);
       this.store.getState().setLoading(false);
     } catch (error: any) {
       console.error('Error in route search:', error);
       this.store.getState().setError('Error searching route: ' + (error.message || 'Unknown error'));
       this.store.getState().setLoading(false);
     }
-  }
-
-  /**
-   * Get route airport coordinates
-   */
-  private async getRouteAirportCoordinates(routeAirports: string[]): Promise<Array<{ icao: string; lat: number; lng: number }>> {
-    const coordinates: Array<{ icao: string; lat: number; lng: number }> = [];
-
-    for (const icao of routeAirports) {
-      try {
-        const airport = await this.apiAdapter.getAirportDetail(icao);
-        if (airport.latitude_deg && airport.longitude_deg) {
-          coordinates.push({
-            icao,
-            lat: airport.latitude_deg,
-            lng: airport.longitude_deg
-          });
-        }
-      } catch (error) {
-        console.error(`Error getting coordinates for ${icao}:`, error);
-      }
-    }
-
-    return coordinates;
   }
 
   /**

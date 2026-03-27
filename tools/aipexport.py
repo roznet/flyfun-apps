@@ -69,6 +69,7 @@ from euro_aip.sources.uk_eaip_web import UKEAIPWebSource
 from euro_aip.sources.norway_eaip_web import NorwayEAIPWebSource
 from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
 from euro_aip.sources.opennav import OpenNavSource
+from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 from euro_aip.models import EuroAipModel, Airport
 from euro_aip.sources.base import SourceInterface
 from euro_aip.utils.field_standardization_service import FieldStandardizationService
@@ -180,6 +181,11 @@ class ModelBuilder:
 
         if getattr(self.args, 'opennav', False):
             self.sources['opennav'] = OpenNavSource(
+                cache_dir=str(self.cache_dir)
+            )
+
+        if getattr(self.args, 'ourairports_navaids', False):
+            self.sources['ourairports_navaids'] = OurAirportsNavaidSource(
                 cache_dir=str(self.cache_dir)
             )
 
@@ -436,6 +442,7 @@ def main():
 
     parser.add_argument('--eurocontrol-fra', help='Enable Eurocontrol FRA waypoint source', action='store_true')
     parser.add_argument('--opennav', help='Enable OpenNav waypoint source', action='store_true')
+    parser.add_argument('--ourairports-navaids', help='Enable OurAirports NAVAID source (gap-filler, run last)', action='store_true')
     
     # Output configuration
     parser.add_argument(
@@ -464,7 +471,8 @@ def main():
         args.database is not None, args.worldairports, args.france_eaip, getattr(args, 'france_web', False),
         args.uk_eaip, getattr(args, 'uk_web', False), getattr(args, 'norway_web', False),
         args.autorouter, args.pointdepassage,
-        getattr(args, 'eurocontrol_fra', False), getattr(args, 'opennav', False)
+        getattr(args, 'eurocontrol_fra', False), getattr(args, 'opennav', False),
+        getattr(args, 'ourairports_navaids', False)
     ])
     
     outputs_enabled = bool(args.json) or args.database_storage is not None

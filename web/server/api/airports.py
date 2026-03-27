@@ -262,10 +262,61 @@ async def get_airports(
         for airport in airports
     ]
 
+@router.get("/route-resolve")
+async def resolve_route(
+    route: str = Query(..., description="Space-separated route string, e.g. 'EGTF BILGO LSGS'", max_length=200),
+):
+    """Resolve a route string with mixed airports and waypoints to coordinates."""
+    if not model:
+        raise HTTPException(status_code=500, detail="Model not loaded")
+
+    from euro_aip.models.route_resolver import RouteResolver
+
+    try:
+        resolver = RouteResolver(model)
+        resolved = resolver.resolve(route)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Build response with all resolved points and their coordinates
+    points = []
+
+    # Departure
+    dep_point = resolver.resolve_point(resolved.departure)
+    if resolved.departure_coords:
+        points.append({"name": resolved.departure, "lat": resolved.departure_coords[0],
+                       "lon": resolved.departure_coords[1],
+                       "type": dep_point.point_type if dep_point else "unknown"})
+
+    # Intermediate waypoints
+    for i, wp_name in enumerate(resolved.waypoints):
+        coord = resolved.waypoint_coords[i] if i < len(resolved.waypoint_coords) else None
+        if coord:
+            points.append({"name": wp_name, "lat": coord.latitude, "lon": coord.longitude,
+                          "type": coord.point_type or "waypoint"})
+
+    # Destination
+    dest_point = resolver.resolve_point(resolved.destination)
+    if resolved.destination_coords:
+        points.append({"name": resolved.destination, "lat": resolved.destination_coords[0],
+                       "lon": resolved.destination_coords[1],
+                       "type": dest_point.point_type if dest_point else "unknown"})
+
+    return {
+        "route_string": route,
+        "departure": resolved.departure,
+        "destination": resolved.destination,
+        "points": points,
+        "waypoints": resolved.waypoints,
+        "airport_idents": [p["name"] for p in points if p["type"] == "airport"],
+    }
+
+
 @router.get("/route-search")
 async def get_airports_near_route(
     request: Request,
     airports: str = Query(..., description="Comma-separated list of ICAO airport codes defining the route", max_length=200),
+    route_points: Optional[str] = Query(None, description="Resolved route geometry as 'lat,lon;lat,lon;...' (overrides airports for corridor shape)"),
     segment_distance_nm: float = Query(50.0, description="Max perpendicular distance from route (NM)", ge=0.1, le=500.0),
     # Backward compatibility: accept legacy distance_nm if provided
     legacy_distance_nm: Optional[float] = Query(None, alias="distance_nm", description="Deprecated: use segment_distance_nm"),
@@ -295,32 +346,42 @@ async def get_airports_near_route(
     """Find airports within a specified distance from a route defined by airport ICAO codes, with optional filtering."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    # Parse airport codes
+
+    from euro_aip.models.navpoint import NavPoint
+
+    # Parse airport codes (used for response metadata and fallback)
     try:
-        route_airports: Route = [code.strip().upper() for code in airports.split(',') if code.strip()]
+        route_airports = [code.strip().upper() for code in airports.split(',') if code.strip()]
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid airport codes format: {str(e)}")
-    
+
     if len(route_airports) < 1:
         raise HTTPException(status_code=400, detail="Route must contain at least 1 airport")
-    
-    # Validate airport codes
-    # Type narrowing: we know all elements are strings since we just created them
-    for item in route_airports:
-        if not isinstance(item, str):
-            raise HTTPException(status_code=400, detail=f"Invalid route item type: expected str, got {type(item)}")
-        icao = item
-        if len(icao) != 4:
-            raise HTTPException(status_code=400, detail=f"Invalid ICAO code: {icao}")
-        if not model.airports.where(ident=icao).first():
-            raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
-    
+
     # Resolve effective segment distance (support legacy query param)
     effective_segment_distance_nm = legacy_distance_nm if legacy_distance_nm is not None else segment_distance_nm
-    
-    # Find airports near the route
-    nearby_airports = model.find_airports_near_route(route_airports, effective_segment_distance_nm)
+
+    # Use resolved route geometry if provided (includes waypoint coordinates)
+    if route_points:
+        nav_points = []
+        for pt_str in route_points.split(';'):
+            parts = pt_str.strip().split(',')
+            if len(parts) == 2:
+                try:
+                    nav_points.append(NavPoint(latitude=float(parts[0]), longitude=float(parts[1])))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"Invalid route point: {pt_str}")
+        if len(nav_points) < 1:
+            raise HTTPException(status_code=400, detail="route_points must contain at least 1 point")
+        nearby_airports = model.find_airports_near_route(nav_points, effective_segment_distance_nm)
+    else:
+        # Fallback: validate and use ICAO codes directly
+        for icao in route_airports:
+            if len(icao) != 4:
+                raise HTTPException(status_code=400, detail=f"Invalid ICAO code: {icao}")
+            if not model.airports.where(ident=icao).first():
+                raise HTTPException(status_code=404, detail=f"Airport {icao} not found")
+        nearby_airports = model.find_airports_near_route(route_airports, effective_segment_distance_nm)
 
     # Build filters dict for FilterEngine
     filters: Dict[str, Any] = {}

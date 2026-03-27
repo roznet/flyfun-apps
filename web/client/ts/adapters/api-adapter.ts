@@ -162,11 +162,17 @@ export class APIAdapter {
   async searchAirportsNearRoute(
     routeAirports: string[],
     distanceNm: number = 50.0,
-    filters: Partial<FilterConfig> = {}
+    filters: Partial<FilterConfig> = {},
+    routeGeometry?: Array<{ lat: number; lon: number }>
   ): Promise<RouteSearchResponse> {
     const params = new URLSearchParams();
     params.set('airports', routeAirports.join(','));
     params.set('segment_distance_nm', String(distanceNm));
+
+    // Pass resolved route geometry (includes waypoint coordinates for corridor shape)
+    if (routeGeometry && routeGeometry.length > 0) {
+      params.set('route_points', routeGeometry.map(p => `${p.lat},${p.lon}`).join(';'));
+    }
     
     // Add filter parameters
     const filterParams = this.transformFiltersToParams(filters);
@@ -183,6 +189,22 @@ export class APIAdapter {
     return await this.request<RouteSearchResponse>(endpoint);
   }
   
+  /**
+   * Resolve a route string with mixed airports and waypoints to coordinates
+   */
+  async resolveRoute(routeString: string): Promise<{
+    route_string: string;
+    departure: string;
+    destination: string;
+    points: Array<{ name: string; lat: number; lon: number; type: string }>;
+    waypoints: string[];
+    airport_idents: string[];
+  }> {
+    const params = new URLSearchParams({ route: routeString });
+    const endpoint = `/api/airports/route-resolve?${params.toString()}`;
+    return await this.request(endpoint);
+  }
+
   /**
    * Locate airports near a location
    */

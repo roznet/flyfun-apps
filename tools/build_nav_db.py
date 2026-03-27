@@ -43,6 +43,7 @@ from euro_aip.models.runway import Runway
 from euro_aip.storage import DatabaseStorage
 from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
 from euro_aip.sources.opennav import OpenNavSource
+from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 
 logging.basicConfig(
     level=logging.INFO,
@@ -205,6 +206,10 @@ def main():
     opennav_source = OpenNavSource(cache_dir=str(cache_dir_path))
     opennav_source.update_model(model)
     logger.info(f"After OpenNav: {model.waypoints.count()} waypoints")
+
+    ourairports_source = OurAirportsNavaidSource(cache_dir=str(cache_dir_path))
+    ourairports_source.update_model(model)
+    logger.info(f"After OurAirports NAVAIDs: {model.waypoints.count()} waypoints")
 
     storage = DatabaseStorage(args.output)
     storage.save_model(model)
