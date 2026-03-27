@@ -859,32 +859,58 @@ def find_airports_near_route(
         )
 
     # Resolve via waypoints for multi-leg routes
+    # Try RouteResolver first (handles both airports and nav waypoints like BILGO),
+    # then fall back to airport lookup / geocoding for location names
+    from euro_aip.models.route_resolver import RouteResolver
+    from euro_aip.models.navpoint import NavPoint
+
     via_results = []
     if via:
+        resolver = RouteResolver(ctx.model)
         for wp in via:
-            wp_result = _find_nearest_airport_in_db(ctx, wp)
-            if not wp_result:
-                return {
-                    "found": False,
-                    "error": f"Could not find or geocode waypoint '{wp}'. Please verify the ICAO code or location name.",
-                    "pretty": f"Could not find airport or location '{wp}'.",
-                    "missing_info": [],
-                }
-            via_results.append(wp_result)
-            if wp_result["was_geocoded"]:
-                substitution_notes.append(
-                    f"Note: '{wp_result['original_query']}' was geocoded to {wp_result['geocoded_location']}. "
-                    f"Using nearest airport {wp_result['airport'].ident} ({wp_result['airport'].name}), {wp_result['distance_nm']}nm away."
-                )
+            # Try RouteResolver first (airports + waypoints)
+            resolved_point = resolver.resolve_point(wp.strip().upper())
+            if resolved_point:
+                via_results.append({
+                    "resolved_point": resolved_point,
+                    "airport": None,
+                    "original_query": wp,
+                    "was_geocoded": False,
+                })
+            else:
+                # Fall back to geocoding for location names
+                wp_result = _find_nearest_airport_in_db(ctx, wp)
+                if not wp_result:
+                    return {
+                        "found": False,
+                        "error": f"Could not find or geocode waypoint '{wp}'. Please verify the ICAO code or location name.",
+                        "pretty": f"Could not find airport or location '{wp}'.",
+                        "missing_info": [],
+                    }
+                via_results.append({
+                    "resolved_point": None,
+                    "airport": wp_result["airport"],
+                    "original_query": wp,
+                    "was_geocoded": wp_result["was_geocoded"],
+                })
+                if wp_result["was_geocoded"]:
+                    substitution_notes.append(
+                        f"Note: '{wp_result['original_query']}' was geocoded to {wp_result['geocoded_location']}. "
+                        f"Using nearest airport {wp_result['airport'].ident} ({wp_result['airport'].name}), {wp_result['distance_nm']}nm away."
+                    )
 
-    # Build full route: from → via1 → via2 → ... → to
-    route_idents = [from_airport.ident]
+    # Build full route using NavPoints for waypoints, ICAO strings for airports
+    route_points: list = [from_airport.ident]
     for vr in via_results:
-        route_idents.append(vr["airport"].ident)
-    route_idents.append(to_airport.ident)
+        if vr["resolved_point"]:
+            rp = vr["resolved_point"]
+            route_points.append(NavPoint(latitude=rp.latitude, longitude=rp.longitude, name=rp.name))
+        else:
+            route_points.append(vr["airport"].ident)
+    route_points.append(to_airport.ident)
 
     results = ctx.model.find_airports_near_route(
-        route_idents,
+        route_points,
         max_distance_nm
     )
 
@@ -984,8 +1010,8 @@ def find_airports_near_route(
             } if to_result["was_geocoded"] else None,
             "via": [
                 {
-                    "original": via[i] if via else vr["airport"].ident,
-                    "resolved": vr["airport"].ident,
+                    "original": via[i] if via else (vr["resolved_point"].name if vr["resolved_point"] else vr["airport"].ident),
+                    "resolved": vr["resolved_point"].name if vr["resolved_point"] else vr["airport"].ident,
                     "was_geocoded": vr["was_geocoded"],
                     "geocoded_location": vr.get("geocoded_location"),
                     "distance_nm": vr.get("distance_nm", 0.0)
@@ -1013,11 +1039,12 @@ def find_airports_near_route(
                 },
                 "via": [
                     {
-                        "icao": vr["airport"].ident,
-                        "name": vr["airport"].name,
-                        "municipality": vr["airport"].municipality,
-                        "lat": getattr(vr["airport"], "latitude_deg", None),
-                        "lon": getattr(vr["airport"], "longitude_deg", None),
+                        "icao": vr["resolved_point"].name if vr["resolved_point"] else vr["airport"].ident,
+                        "name": vr["resolved_point"].name if vr["resolved_point"] else vr["airport"].name,
+                        "municipality": None if vr["resolved_point"] else getattr(vr["airport"], "municipality", None),
+                        "lat": vr["resolved_point"].latitude if vr["resolved_point"] else getattr(vr["airport"], "latitude_deg", None),
+                        "lon": vr["resolved_point"].longitude if vr["resolved_point"] else getattr(vr["airport"], "longitude_deg", None),
+                        "type": vr["resolved_point"].point_type if vr["resolved_point"] else "airport",
                     }
                     for vr in via_results
                 ] if via_results else [],

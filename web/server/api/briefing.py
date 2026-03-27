@@ -123,9 +123,24 @@ def _resolve_route_icaos(
     for wp in waypoints:
         airports.add(wp.upper())
 
-    # Find nearby airports using model
+    # Find nearby airports using model, resolving waypoints to NavPoints
     if model is not None:
-        route_points = [departure] + waypoints + [destination]
+        from euro_aip.models.route_resolver import RouteResolver
+        from euro_aip.models.navpoint import NavPoint
+
+        resolver = RouteResolver(model)
+        route_points: list = []
+        for token in [departure] + waypoints + [destination]:
+            point = resolver.resolve_point(token.strip().upper())
+            if point:
+                # Use NavPoint for waypoints, ICAO string for airports
+                if point.point_type == "airport":
+                    route_points.append(token.upper())
+                else:
+                    route_points.append(NavPoint(latitude=point.latitude, longitude=point.longitude, name=point.name))
+            else:
+                route_points.append(token.upper())  # fallback to string
+
         try:
             nearby = model.find_airports_near_route(route_points, distance_nm=corridor_nm)
             for entry in nearby:
@@ -144,7 +159,7 @@ def _resolve_route_icaos(
     return sorted(airports), sorted(firs)
 
 def geocode_route(route) -> None:
-    """Geocode route departure/destination using airport coordinates."""
+    """Geocode route departure/destination using airport or waypoint coordinates."""
     if route is None:
         return
 
@@ -152,18 +167,21 @@ def geocode_route(route) -> None:
         logger.warning("No model available for geocoding")
         return
 
-    # Geocode departure
+    from euro_aip.models.route_resolver import RouteResolver
+    resolver = RouteResolver(model)
+
+    # Geocode departure (try airport first, then waypoint)
     if route.departure and not route.departure_coords:
-        airport = model.airports.get(route.departure)
-        if airport and airport.latitude_deg is not None:
-            route.departure_coords = (airport.latitude_deg, airport.longitude_deg)
+        point = resolver.resolve_point(route.departure)
+        if point:
+            route.departure_coords = (point.latitude, point.longitude)
             logger.info(f"Geocoded departure {route.departure}: {route.departure_coords}")
 
     # Geocode destination
     if route.destination and not route.destination_coords:
-        airport = model.airports.get(route.destination)
-        if airport and airport.latitude_deg is not None:
-            route.destination_coords = (airport.latitude_deg, airport.longitude_deg)
+        point = resolver.resolve_point(route.destination)
+        if point:
+            route.destination_coords = (point.latitude, point.longitude)
             logger.info(f"Geocoded destination {route.destination}: {route.destination_coords}")
 
 router = APIRouter()
