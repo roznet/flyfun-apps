@@ -15,7 +15,9 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+from pydantic import Field
 
 # Add the flyfun-apps package to the path (before importing shared)
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -90,6 +92,17 @@ mcp = FastMCP(
 )
 
 
+# ---- Shared filter description -----------------------------------------------
+_FILTERS_DESC = (
+    "Optional filter dict. Keys: "
+    "country (ISO-2 code, e.g. 'FR'), "
+    "has_avgas (bool), has_jet_a (bool), "
+    "has_hard_runway (bool), has_procedures (bool — IFR capable), "
+    "point_of_entry (bool — customs/border crossing), "
+    "min_runway_length_ft (int), max_runway_length_ft (int), "
+    "restaurant (bool), hotel (bool)"
+)
+
 # ---- Tools -------------------------------------------------------------------
 
 @mcp.tool(
@@ -113,19 +126,15 @@ def get_data_coverage() -> Dict[str, Any]:
     ),
 )
 def search_airports(
-    query: str,
-    max_results: int = 10,
-    include_large_airports: bool = False,
-    filters: Optional[Dict[str, Any]] = None,
+    query: Annotated[str, Field(
+        description="ICAO code, IATA code, airport name, or city (e.g. 'LFPG', 'CDG', 'Nice')")],
+    max_results: Annotated[int, Field(
+        description="Maximum number of results")] = 10,
+    include_large_airports: Annotated[bool, Field(
+        description="Include large commercial airports (excluded by default for GA)")] = False,
+    filters: Annotated[Optional[Dict[str, Any]], Field(
+        description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    """
-    Args:
-        query: ICAO code, IATA code, airport name, or city (e.g. "LFPG", "CDG", "Nice")
-        max_results: Maximum number of results (default 10)
-        include_large_airports: Include large commercial airports (excluded by default for GA)
-        filters: Optional dict with keys: country (ISO-2), has_avgas (bool), has_jet_a (bool),
-                 has_hard_runway (bool), has_procedures (bool), point_of_entry (bool)
-    """
     return shared_search_airports(
         _require_tool_context(), query, max_results, filters,
         include_large_airports=include_large_airports,
@@ -141,23 +150,19 @@ def search_airports(
     ),
 )
 def find_airports_near_location(
-    location_query: str,
-    max_distance_nm: float = 50.0,
-    max_results: int = 10,
-    include_large_airports: bool = False,
-    max_hours_notice: Optional[int] = None,
-    filters: Optional[Dict[str, Any]] = None,
+    location_query: Annotated[str, Field(
+        description="ICAO code, city, landmark, or 'lat, lon' (e.g. 'EGTF', 'Zurich', '48.85, 2.29')")],
+    max_distance_nm: Annotated[float, Field(
+        description="Search radius in nautical miles")] = 50.0,
+    max_results: Annotated[int, Field(
+        description="Maximum number of results")] = 10,
+    include_large_airports: Annotated[bool, Field(
+        description="Include large commercial airports (excluded by default for GA)")] = False,
+    max_hours_notice: Annotated[Optional[int], Field(
+        description="Only return airports requiring at most this many hours customs notice (e.g. 24)")] = None,
+    filters: Annotated[Optional[Dict[str, Any]], Field(
+        description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    """
-    Args:
-        location_query: ICAO code, city, landmark, or "lat, lon" (e.g. "EGTF", "Zurich", "48.85, 2.29")
-        max_distance_nm: Search radius in nautical miles (default 50)
-        max_results: Maximum number of results (default 10)
-        include_large_airports: Include large commercial airports (excluded by default for GA)
-        max_hours_notice: Only return airports requiring at most this many hours customs notice (e.g. 24)
-        filters: Optional dict with keys: country (ISO-2), has_avgas (bool), has_jet_a (bool),
-                 has_hard_runway (bool), has_procedures (bool), point_of_entry (bool)
-    """
     return shared_find_airports_near_location(
         _require_tool_context(),
         location_query,
@@ -179,33 +184,29 @@ def find_airports_near_location(
     ),
 )
 def find_airports_near_route(
-    from_location: str,
-    to_location: str,
-    via: Optional[List[str]] = None,
-    max_distance_nm: float = 50.0,
-    max_results: int = 10,
-    include_large_airports: bool = False,
-    max_hours_notice: Optional[int] = None,
-    max_leg_time_hours: Optional[float] = None,
-    cruise_speed_kts: Optional[float] = None,
-    aircraft_type: Optional[str] = None,
-    filters: Optional[Dict[str, Any]] = None,
+    from_location: Annotated[str, Field(
+        description="Departure — ICAO code or location name, include country if ambiguous (e.g. 'LFPO', 'Vik, Iceland')")],
+    to_location: Annotated[str, Field(
+        description="Destination — ICAO code or location name, include country if ambiguous")],
+    via: Annotated[Optional[List[str]], Field(
+        description="Intermediate waypoints in order (e.g. ['LFPB', 'Straubing'])")] = None,
+    max_distance_nm: Annotated[float, Field(
+        description="Search radius from route centerline in NM")] = 50.0,
+    max_results: Annotated[int, Field(
+        description="Maximum number of results")] = 10,
+    include_large_airports: Annotated[bool, Field(
+        description="Include large commercial airports (excluded by default for GA)")] = False,
+    max_hours_notice: Annotated[Optional[int], Field(
+        description="Only return airports requiring at most this many hours customs notice")] = None,
+    max_leg_time_hours: Annotated[Optional[float], Field(
+        description="Max flight time from departure in hours for time-based filtering (e.g. 3.0)")] = None,
+    cruise_speed_kts: Annotated[Optional[float], Field(
+        description="Cruise speed in knots for time calculation (e.g. 140)")] = None,
+    aircraft_type: Annotated[Optional[str], Field(
+        description="Aircraft type for speed lookup (e.g. 'C172', 'SR22', 'PA28')")] = None,
+    filters: Annotated[Optional[Dict[str, Any]], Field(
+        description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    """
-    Args:
-        from_location: Departure — ICAO code or location name with country context (e.g. "LFPO", "Vik, Iceland")
-        to_location: Destination — ICAO code or location name with country context
-        via: Intermediate waypoints in order (e.g. ["LFPB", "Straubing"])
-        max_distance_nm: Search radius from route centerline in NM (default 50)
-        max_results: Maximum number of results (default 10)
-        include_large_airports: Include large commercial airports (excluded by default for GA)
-        max_hours_notice: Only return airports requiring at most this many hours customs notice
-        max_leg_time_hours: Maximum flight time from departure for time-based filtering (e.g. 3.0)
-        cruise_speed_kts: Cruise speed in knots for time calculation (e.g. 140)
-        aircraft_type: Aircraft type for speed lookup (e.g. "C172", "SR22", "PA28")
-        filters: Optional dict with keys: country (ISO-2), has_avgas (bool), has_jet_a (bool),
-                 has_hard_runway (bool), has_procedures (bool), point_of_entry (bool)
-    """
     return shared_find_airports_near_route(
         _require_tool_context(),
         from_location,
@@ -229,11 +230,10 @@ def find_airports_near_route(
         "fuel, opening hours, and other AIP information."
     ),
 )
-def get_airport_details(icao_code: str) -> Dict[str, Any]:
-    """
-    Args:
-        icao_code: Airport ICAO code (e.g. "LFPG", "EGLL", "EDDM")
-    """
+def get_airport_details(
+    icao_code: Annotated[str, Field(
+        description="Airport ICAO code (e.g. 'LFPG', 'EGLL', 'EDDM')")],
+) -> Dict[str, Any]:
     return shared_get_airport_details(_require_tool_context(), icao_code)
 
 
@@ -245,14 +245,11 @@ def get_airport_details(icao_code: str) -> Dict[str, Any]:
     ),
 )
 def get_notification_for_airport(
-    icao: str,
-    day_of_week: Optional[str] = None,
+    icao: Annotated[str, Field(
+        description="Airport ICAO code (e.g. 'LFRG', 'LFPT')")],
+    day_of_week: Annotated[Optional[str], Field(
+        description="Specific day for day-dependent rules (e.g. 'Saturday')")] = None,
 ) -> Dict[str, Any]:
-    """
-    Args:
-        icao: Airport ICAO code (e.g. "LFRG", "LFPT")
-        day_of_week: Optional specific day for day-dependent rules (e.g. "Saturday")
-    """
     return shared_get_notification_for_airport(_require_tool_context(), icao, day_of_week)
 
 
@@ -264,18 +261,15 @@ def get_notification_for_airport(
     ),
 )
 def calculate_flight_distance(
-    from_location: str,
-    to_location: str,
-    cruise_speed_kts: Optional[float] = None,
-    aircraft_type: Optional[str] = None,
+    from_location: Annotated[str, Field(
+        description="Departure — ICAO code or location name (e.g. 'EGTF', 'Paris')")],
+    to_location: Annotated[str, Field(
+        description="Destination — ICAO code or location name (e.g. 'LFMD', 'Nice, France')")],
+    cruise_speed_kts: Annotated[Optional[float], Field(
+        description="Cruise speed in knots (e.g. 140)")] = None,
+    aircraft_type: Annotated[Optional[str], Field(
+        description="Aircraft type for speed lookup (e.g. 'C172', 'SR22')")] = None,
 ) -> Dict[str, Any]:
-    """
-    Args:
-        from_location: Departure — ICAO code or location name (e.g. "EGTF", "Paris")
-        to_location: Destination — ICAO code or location name (e.g. "LFMD", "Nice, France")
-        cruise_speed_kts: Cruise speed in knots (e.g. 140)
-        aircraft_type: Aircraft type for speed lookup (e.g. "C172", "SR22")
-    """
     return shared_calculate_flight_distance(
         _require_tool_context(), from_location, to_location,
         cruise_speed_kts=cruise_speed_kts,
