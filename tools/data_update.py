@@ -169,7 +169,7 @@ def fetch_web_sources() -> None:
         args.extend(["--database", str(AIRPORTS_DB)])
 
     # Enable web sources
-    args.extend(["--france-web", "--uk-web", "--norway-web", "--slovenia-web"])
+    args.extend(["--france-web", "--uk-web", "--norway-web", "--slovenia-web", "--austria-web"])
 
     # WorldAirports for metadata enrichment
     if WORLDAIRPORTS_DB.exists():
