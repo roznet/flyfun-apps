@@ -84,6 +84,7 @@ class ToolContext:
     """
 
     model: EuroAipModel
+    storage: Optional[DatabaseStorage] = None
     notification_service: Optional[Any] = None  # NotificationService (lazy import to avoid circular deps)
     ga_friendliness_service: Optional[Any] = None  # GAFriendlinessService (lazy import)
     rules_manager: Optional[RulesManager] = None
@@ -208,6 +209,7 @@ class ToolContext:
 
         return cls(
             model=model,
+            storage=storage,
             notification_service=notification_service,
             ga_friendliness_service=ga_friendliness_service,
             rules_manager=rules_manager,

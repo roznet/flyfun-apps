@@ -1303,7 +1303,72 @@ def calculate_flight_distance(
 
 
 # =============================================================================
-# SECTION 6: RULES TOOLS
+# SECTION 6: DATA COVERAGE
+# =============================================================================
+
+def get_data_coverage(
+    ctx: ToolContext,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Get AIP data coverage and freshness per country.
+
+    Returns which countries have AIP data (procedures, frequencies, etc.),
+    when it was last updated (AIRAC cycle), and how many airports are covered.
+    Also lists countries that only have basic airport metadata (no AIP data).
+
+    Use this to assess data reliability before flight planning. Countries with
+    recent AIRAC dates have current information. Countries with older dates or
+    no AIP data should be cross-checked with official sources.
+    """
+    if not ctx.storage:
+        return {
+            "available": False,
+            "message": "Data coverage information not available (no database storage).",
+        }
+
+    coverage_rows = ctx.storage.get_country_coverage()
+
+    if not coverage_rows:
+        return {
+            "available": True,
+            "countries_with_aip_data": [],
+            "countries_metadata_only": [],
+            "message": "No per-country coverage recorded yet. Run a data update to populate.",
+        }
+
+    # Build set of countries that have AIP coverage
+    countries_with_aip = []
+    covered_isos = set()
+    for row in coverage_rows:
+        covered_isos.add(row["country_iso"])
+        countries_with_aip.append({
+            "country_iso": row["country_iso"],
+            "airac_date": row["airac_date"],
+            "updated_at": row["updated_at"],
+            "airports_with_aip_data": row["airports_count"],
+        })
+
+    # Find countries that have airports but no AIP data
+    all_countries = ctx.model.airports.group_by(lambda a: a.iso_country or 'unknown')
+    metadata_only = []
+    for country_iso in sorted(all_countries.keys()):
+        if country_iso == 'unknown' or country_iso in covered_isos:
+            continue
+        metadata_only.append({
+            "country_iso": country_iso,
+            "airports_count": len(all_countries[country_iso]),
+        })
+
+    return {
+        "available": True,
+        "countries_with_aip_data": countries_with_aip,
+        "countries_metadata_only": metadata_only,
+    }
+
+
+# =============================================================================
+# SECTION 7: RULES TOOLS
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -1978,6 +2043,22 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                         },
                     },
                     "required": ["from_location", "to_location"],
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        # -----------------------------------------------------------------
+        # DATA COVERAGE
+        # -----------------------------------------------------------------
+        (
+            "get_data_coverage",
+            {
+                "name": "get_data_coverage",
+                "handler": get_data_coverage,
+                "description": _get_tool_description(get_data_coverage, "get_data_coverage"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
                 },
                 "expose_to_llm": True,
             },
