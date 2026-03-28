@@ -67,6 +67,7 @@ from euro_aip.sources import (
 from euro_aip.sources.france_eaip_web import FranceEAIPWebSource
 from euro_aip.sources.uk_eaip_web import UKEAIPWebSource
 from euro_aip.sources.norway_eaip_web import NorwayEAIPWebSource
+from euro_aip.sources.slovenia_eaip_web import SloveniaEAIPWebSource
 from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
 from euro_aip.sources.opennav import OpenNavSource
 from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
@@ -146,6 +147,12 @@ class ModelBuilder:
 
         if getattr(self.args, 'norway_web', False):
             self.sources['norway_eaip_web'] = NorwayEAIPWebSource(
+                cache_dir=str(self.cache_dir),
+                airac_date=self.args.airac_date
+            )
+
+        if getattr(self.args, 'slovenia_web', False):
+            self.sources['slovenia_eaip_web'] = SloveniaEAIPWebSource(
                 cache_dir=str(self.cache_dir),
                 airac_date=self.args.airac_date
             )
@@ -430,6 +437,7 @@ def main():
     parser.add_argument('--uk-eaip', help='UK eAIP root directory')
     parser.add_argument('--uk-web', help='Enable UK eAIP web source (HTML index)', action='store_true')
     parser.add_argument('--norway-web', help='Enable Norway eAIP web source (HTML index)', action='store_true')
+    parser.add_argument('--slovenia-web', help='Enable Slovenia eAIP web source (HTML index)', action='store_true')
     parser.add_argument('--airac-date', help='AIRAC effective date (YYYY-MM-DD) for web sources', required=False)
     
     parser.add_argument('--autorouter', help='Enable Autorouter source', action='store_true')
@@ -469,7 +477,7 @@ def main():
     # Validate that at least one source and one output format are specified
     sources_enabled = any([
         args.database is not None, args.worldairports, args.france_eaip, getattr(args, 'france_web', False),
-        args.uk_eaip, getattr(args, 'uk_web', False), getattr(args, 'norway_web', False),
+        args.uk_eaip, getattr(args, 'uk_web', False), getattr(args, 'norway_web', False), getattr(args, 'slovenia_web', False),
         args.autorouter, args.pointdepassage,
         getattr(args, 'eurocontrol_fra', False), getattr(args, 'opennav', False),
         getattr(args, 'ourairports_navaids', False)
@@ -486,7 +494,7 @@ def main():
         return
     
     # Handle AIRAC date for web sources
-    web_sources_enabled = getattr(args, 'france_web', False) or getattr(args, 'uk_web', False) or getattr(args, 'norway_web', False)
+    web_sources_enabled = getattr(args, 'france_web', False) or getattr(args, 'uk_web', False) or getattr(args, 'norway_web', False) or getattr(args, 'slovenia_web', False)
     if web_sources_enabled and not args.airac_date:
         # Calculate the current effective AIRAC date
         calculator = AIRACDateCalculator()

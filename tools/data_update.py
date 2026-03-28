@@ -158,7 +158,7 @@ def download_reviews() -> bool:
 
 
 def fetch_web_sources() -> None:
-    """Fetch AIP data from web sources (France, UK, Norway)."""
+    """Fetch AIP data from web sources (France, UK, Norway, Slovenia)."""
     log_section("Fetching AIP from Web Sources")
 
     args = ["python", "tools/aipexport.py"]
@@ -168,8 +168,8 @@ def fetch_web_sources() -> None:
         logger.info(f"Using existing database as base: {AIRPORTS_DB}")
         args.extend(["--database", str(AIRPORTS_DB)])
 
-    # Enable web sources (France, UK, Norway)
-    args.extend(["--france-web", "--uk-web", "--norway-web"])
+    # Enable web sources
+    args.extend(["--france-web", "--uk-web", "--norway-web", "--slovenia-web"])
 
     # WorldAirports for metadata enrichment
     if WORLDAIRPORTS_DB.exists():
