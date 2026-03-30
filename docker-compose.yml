@@ -95,6 +95,7 @@ services:
       - AIRPORTS_DB=/app/data/airports.db
       - RULES_JSON=/app/data/rules.json
       - GA_NOTIFICATIONS_DB=/app/data/ga_notifications.db
+      - GA_PERSONA_DB=/app/data/ga_persona.db
       # Vector DB for RAG (AviationAgentSettings)
       # Note: "chromadb:8000" uses Docker's internal network (service name + container port)
       - VECTOR_DB_URL=${VECTOR_DB_URL:-http://chromadb:8000}
