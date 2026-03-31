@@ -900,6 +900,31 @@ class Application {
       }
     }
 
+    // Handle deep-link visualization (?viz= base64url-encoded JSON payload)
+    if (urlParams.has('viz')) {
+      try {
+        const vizParam = urlParams.get('viz')!;
+        // Re-add base64 padding if stripped
+        const padded = vizParam + '='.repeat((4 - vizParam.length % 4) % 4);
+        const json = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+        const payload = JSON.parse(json);
+        console.log('Deep-link visualization payload:', payload);
+
+        // Apply after a short delay to let map fully initialize
+        setTimeout(() => {
+          this.llmIntegration.applyVizPayload(payload);
+        }, 300);
+
+        // Clean the URL (remove ?viz= to avoid re-triggering on refresh)
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('viz');
+        window.history.replaceState({}, '', cleanUrl.toString());
+        return; // Skip default airport loading
+      } catch (e) {
+        console.error('Failed to decode viz parameter:', e);
+      }
+    }
+
     // Load initial airports if no search/route
     if (!urlParams.has('search') && !urlParams.has('route')) {
       await this.loadInitialAirports();

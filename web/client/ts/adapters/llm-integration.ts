@@ -720,5 +720,60 @@ export class LLMIntegration {
       }
     }
   }
+
+  /**
+   * Apply a visualization payload from a deep-link URL (?viz= parameter).
+   *
+   * Mirrors the ui_payload handling in chatbot-manager:
+   *  1. Apply suggested legend based on tool name
+   *  2. Merge filters into visualization
+   *  3. Inject highlights as markers/data for the visualization handlers
+   *  4. Delegate to handleVisualization() / applyFilterProfile()
+   */
+  applyVizPayload(payload: {
+    tool?: string;
+    visualization?: Visualization;
+    filters?: Record<string, unknown>;
+    highlights?: Array<{ident: string; name?: string; latitude_deg: number; longitude_deg: number; iso_country?: string}>;
+  }): void {
+    if (!payload.visualization) {
+      console.warn('applyVizPayload: no visualization in payload');
+      return;
+    }
+
+    console.log('applyVizPayload: applying deep-link visualization', payload);
+
+    // 1. Apply suggested legend
+    if (payload.tool) {
+      this.applySuggestedLegend(payload.tool, payload.filters);
+    }
+
+    // 2. Build visualization object with highlights injected as markers/data
+    const viz: Visualization = { ...payload.visualization };
+    const highlights = payload.highlights ? normalizeAirports(payload.highlights) : [];
+
+    if (highlights.length > 0) {
+      if (viz.type === 'markers') {
+        // markers handler reads from data or markers
+        viz.data = highlights;
+      } else if (viz.type === 'route_with_markers' || viz.type === 'point_with_markers') {
+        // route/point handlers read from markers
+        viz.markers = highlights;
+      }
+    }
+
+    // 3. Merge filters into visualization for unified handling
+    if (payload.filters) {
+      viz.filter_profile = payload.filters as Partial<FilterConfig>;
+    }
+
+    // 4. Apply visualization (same path as chatbot)
+    this.handleVisualization(viz);
+
+    // 5. Apply filters for non-markers types (markers handler applies filters internally)
+    if (payload.filters && viz.type !== 'markers') {
+      this.applyFilterProfile(payload.filters);
+    }
+  }
 }
 

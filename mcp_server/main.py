@@ -40,12 +40,24 @@ from shared.airport_tools import (
     search_airports as shared_search_airports,
 )
 from shared.tool_context import ToolContext
+from shared.viz_url import build_viz_url
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
 logger = logging.getLogger(__name__)
+
+# Web app URL for deep-link visualizations
+MAPS_BASE_URL = os.getenv("MAPS_BASE_URL", "https://maps.flyfun.aero")
+
+
+def _attach_viz_url(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a ``map_url`` field to the tool result if it contains a visualization."""
+    url = build_viz_url(tool_name, result, base_url=MAPS_BASE_URL)
+    if url:
+        result["map_url"] = url
+    return result
 
 # ---- Global context ----------------------------------------------------------
 _tool_context: Optional[ToolContext] = None
@@ -86,7 +98,12 @@ mcp = FastMCP(
         "European AIP airport data for GA flight planning. "
         "Covers airports, runways, procedures, frequencies, customs notifications, "
         "and route planning across Europe. Data freshness varies by country — "
-        "call get_data_coverage first to check which countries have current AIRAC data."
+        "call get_data_coverage first to check which countries have current AIRAC data.\n\n"
+        "Most tools return a `map_url` field — a deep link that opens an interactive map "
+        "with the results visualized (route, airports, highlights). When the user would "
+        "benefit from visually exploring the results (e.g. seeing a route, comparing "
+        "airport locations), include this link in your response. Skip it when the tool "
+        "call is just an intermediate step in a larger flow."
     ),
     lifespan=lifespan,
 )
@@ -135,10 +152,11 @@ def search_airports(
     filters: Annotated[Optional[Dict[str, Any]], Field(
         description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    return shared_search_airports(
+    result = shared_search_airports(
         _require_tool_context(), query, max_results, filters,
         include_large_airports=include_large_airports,
     )
+    return _attach_viz_url("search_airports", result)
 
 
 @mcp.tool(
@@ -163,7 +181,7 @@ def find_airports_near_location(
     filters: Annotated[Optional[Dict[str, Any]], Field(
         description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    return shared_find_airports_near_location(
+    result = shared_find_airports_near_location(
         _require_tool_context(),
         location_query,
         max_distance_nm=max_distance_nm,
@@ -172,6 +190,7 @@ def find_airports_near_location(
         include_large_airports=include_large_airports,
         max_hours_notice=max_hours_notice,
     )
+    return _attach_viz_url("find_airports_near_location", result)
 
 
 @mcp.tool(
@@ -207,7 +226,7 @@ def find_airports_near_route(
     filters: Annotated[Optional[Dict[str, Any]], Field(
         description=_FILTERS_DESC)] = None,
 ) -> Dict[str, Any]:
-    return shared_find_airports_near_route(
+    result = shared_find_airports_near_route(
         _require_tool_context(),
         from_location,
         to_location,
@@ -221,6 +240,7 @@ def find_airports_near_route(
         cruise_speed_kts=cruise_speed_kts,
         aircraft_type=aircraft_type,
     )
+    return _attach_viz_url("find_airports_near_route", result)
 
 
 @mcp.tool(
@@ -234,7 +254,8 @@ def get_airport_details(
     icao_code: Annotated[str, Field(
         description="Airport ICAO code (e.g. 'LFPG', 'EGLL', 'EDDM')")],
 ) -> Dict[str, Any]:
-    return shared_get_airport_details(_require_tool_context(), icao_code)
+    result = shared_get_airport_details(_require_tool_context(), icao_code)
+    return _attach_viz_url("get_airport_details", result)
 
 
 @mcp.tool(
@@ -250,7 +271,8 @@ def get_notification_for_airport(
     day_of_week: Annotated[Optional[str], Field(
         description="Specific day for day-dependent rules (e.g. 'Saturday')")] = None,
 ) -> Dict[str, Any]:
-    return shared_get_notification_for_airport(_require_tool_context(), icao, day_of_week)
+    result = shared_get_notification_for_airport(_require_tool_context(), icao, day_of_week)
+    return _attach_viz_url("get_notification_for_airport", result)
 
 
 @mcp.tool(
@@ -270,11 +292,12 @@ def calculate_flight_distance(
     aircraft_type: Annotated[Optional[str], Field(
         description="Aircraft type for speed lookup (e.g. 'C172', 'SR22')")] = None,
 ) -> Dict[str, Any]:
-    return shared_calculate_flight_distance(
+    result = shared_calculate_flight_distance(
         _require_tool_context(), from_location, to_location,
         cruise_speed_kts=cruise_speed_kts,
         aircraft_type=aircraft_type,
     )
+    return _attach_viz_url("calculate_flight_distance", result)
 
 
 # ---- CLI entry point ---------------------------------------------------------
