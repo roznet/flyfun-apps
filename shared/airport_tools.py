@@ -1703,13 +1703,14 @@ def query_aip_fields(
 
         # Also include the current value for context
         if changes:
+            changed_icaos = {c["icao"] for c in changes}
             current_lookup = {
                 a.ident: next(
                     (e.value for e in a.aip_entries if getattr(e, "std_field_id", None) == std_field_id),
                     None,
                 )
                 for a in ctx.model.airports.with_aip_data()
-                if a.ident in {c["icao"] for c in changes}
+                if a.ident in changed_icaos
             }
             for change in changes:
                 change["current_value"] = current_lookup.get(change["icao"])
