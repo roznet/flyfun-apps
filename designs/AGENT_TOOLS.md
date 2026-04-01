@@ -34,6 +34,15 @@ All tools are defined in `shared/airport_tools.py` as the **single source of tru
 | `get_notification_for_airport` | `icao` | `day_of_week` | PPR/notification info |
 | `calculate_flight_distance` | `from_location`, `to_location` | `cruise_speed_kts`, `aircraft_type` | Distance and time |
 
+### AIP Field Tools
+
+| Tool | Required Args | Optional Args | Returns |
+|------|--------------|---------------|---------|
+| `list_aip_fields` | – | – | Available fields with airport counts |
+| `query_aip_fields` | `field` | `country`, `icao_codes`, `changed_since`, `max_results` | Field values + staleness |
+
+See `AIP_FIELD_TOOLS_DESIGN.md` for full details.
+
 ### Rules Tools
 
 | Tool | Required Args | Optional Args | Returns |
@@ -54,6 +63,8 @@ All tools are defined in `shared/airport_tools.py` as the **single source of tru
 | `get_airport_details` | `airport` | `marker_with_details` |
 | `get_notification_for_airport` | `airport` | `marker_with_details` |
 | `calculate_flight_distance` | `route` | `route` |
+| `list_aip_fields` | `data` | – |
+| `query_aip_fields` | `data` | – |
 | `answer_rules_question` | `rules` | – |
 | `browse_rules` | `rules` | – |
 | `compare_rules_between_countries` | `rules` | – |
@@ -286,6 +297,13 @@ All tools return consistent structure:
         "type": "route_with_markers",
         "route": {...},
         "markers": [...]
+    },
+
+    # Map deep-link (added by MCP server via /api/viz store)
+    "action": {
+        "type": "present_link",
+        "url": "https://maps.flyfun.aero/v/{key}",
+        "label": "View on FlyFun Maps",
     },
 
     # Conversational support

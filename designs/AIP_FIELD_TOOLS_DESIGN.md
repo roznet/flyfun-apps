@@ -3,7 +3,7 @@
 > Tools for querying raw AIP field values and change history across airports.
 
 **Issue:** #33 — Extra tools for AIP field  
-**Status:** Implementation
+**Status:** Complete
 
 ---
 
@@ -117,6 +117,7 @@ Two new tools for the MCP server and aviation chatbot to let users query **raw A
 **Response (normal query):**
 ```python
 {
+    "found": True,
     "field": {"std_field": "Customs and immigration", "std_field_id": 302},
     "airports": [
         {
@@ -139,14 +140,16 @@ Two new tools for the MCP server and aviation chatbot to let users query **raw A
 **Response (with `changed_since`):**
 ```python
 {
+    "found": True,
     "field": {"std_field": "Restaurants", "std_field_id": 502},
     "airports": [
         {
             "icao": "LFAT",
             "name": "Le Touquet",
             "country": "FR",
-            "value": "Restaurant at airport",
+            "current_value": "Restaurant at airport",
             "previous_value": "Restaurant in vicinity",
+            "new_value": "Restaurant at airport",
             "changed_at": "2026-02-15T10:30:00",
         },
     ],
@@ -165,55 +168,24 @@ Two new tools for the MCP server and aviation chatbot to let users query **raw A
 
 ### Field Resolution
 
-The `field` parameter accepts either a field name or numeric ID:
-```python
-def _resolve_field(field: str, known_fields: dict) -> tuple[str, int] | None:
-    """Resolve field name or ID to (std_field, std_field_id)."""
-    # Try numeric ID first
-    if field.isdigit():
-        field_id = int(field)
-        match = known_fields.get(field_id)
-        if match:
-            return (match["std_field"], field_id)
-    # Try name match (case-insensitive, partial)
-    field_lower = field.lower()
-    for fid, info in known_fields.items():
-        if field_lower in info["std_field"].lower():
-            return (info["std_field"], fid)
-    return None
-```
+The `field` parameter accepts either a field name or numeric ID. Resolution order:
+1. Exact numeric ID
+2. Case-insensitive exact name match
+3. Case-insensitive substring match (first hit)
+
+Unknown fields return `found: False` with an error message and hint to use `list_aip_fields`.
 
 ### Airport Selection
 
-```python
-def _select_airports(model, country=None, icao_codes=None):
-    """Select airports using euro_aip collection API."""
-    airports = model.airports.with_aip_data()
-    if country:
-        airports = airports.by_country(country.upper())
-    if icao_codes:
-        icao_set = {c.upper() for c in icao_codes}
-        airports = airports.filter(lambda a: a.ident in icao_set)
-    return airports
-```
+Uses `model.airports.with_aip_data()`, chained with `.by_country()` and/or `.filter()` for ICAO list. See `_aip_get_field_values()`.
 
-### Change History Query
+### Change History
 
-Requires raw SQL on `aip_entries_changes` table (not yet exposed by euro_aip):
-```python
-def _query_field_changes(db_path, std_field_id, since_date, country=None):
-    """Query aip_entries_changes for field modifications.
-    
-    NOTE: This is a local helper that should be moved to 
-    euro_aip DatabaseStorage. See future-euroaip-update.md.
-    """
-    conn = sqlite3.connect(db_path)
-    # ... SQL query on aip_entries_changes ...
-```
+Raw SQL on `aip_entries_changes` table via `storage.database_path` (not yet exposed by euro_aip). See `_aip_get_field_changes()` and `future-euroaip-update.md` for planned upstream API.
 
 ### Staleness Info
 
-Uses existing `storage.get_country_coverage()` to add per-country AIRAC dates, filtered to countries present in the result set.
+Uses `storage.get_country_coverage()` for per-country AIRAC dates, filtered to countries in the result set.
 
 ---
 
