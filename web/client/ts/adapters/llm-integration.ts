@@ -741,6 +741,12 @@ export class LLMIntegration {
       return;
     }
 
+    const validTypes = new Set(['markers', 'route_with_markers', 'marker_with_details', 'point_with_markers']);
+    if (!validTypes.has(payload.visualization.type)) {
+      console.warn('applyVizPayload: unknown visualization type:', payload.visualization.type);
+      return;
+    }
+
     console.log('applyVizPayload: applying deep-link visualization', payload);
 
     // 1. Apply suggested legend

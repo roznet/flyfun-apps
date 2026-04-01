@@ -1,10 +1,9 @@
 """
-Build deep-link URLs that open the web app with a specific visualization.
+Build compact visualization payloads for the web app.
 
-The URL carries a compact JSON payload (base64url-encoded) in the ``?viz=``
-query parameter.  The frontend decodes it and feeds it through the same
-``LLMIntegration`` pipeline used by the chatbot, so the user sees the exact
-same map view.
+The payload is a small JSON dict describing the map view (tool, visualization
+type, route/point, filters, and highlighted airports).  It is POSTed to the
+web server's ``/api/viz`` store and accessed via a short ``/v/{key}`` link.
 
 Payload is kept small by stripping full airport objects and keeping only the
 fields needed for highlights (ident, name, lat, lon, country).
@@ -12,31 +11,47 @@ fields needed for highlights (ident, name, lat, lon, country).
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Any, Dict, List, Optional
 
-# Default base URL for the web app (overridable via env)
-DEFAULT_BASE_URL = "https://maps.flyfun.aero"
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
-def build_viz_url(
+def build_compact_payload(
     tool_name: str,
     tool_result: Dict[str, Any],
-    *,
-    base_url: str = DEFAULT_BASE_URL,
     filters: Optional[Dict[str, Any]] = None,
-) -> Optional[str]:
-    """Return a deep-link URL embedding the visualization, or None if no viz."""
-    payload = _build_compact_payload(tool_name, tool_result, filters)
-    if payload is None:
+) -> Optional[Dict[str, Any]]:
+    """Build a compact visualization payload from a tool result.
+
+    Returns None if the tool result contains no visualization data.
+    """
+    viz = tool_result.get("visualization")
+    if not viz or "type" not in viz:
         return None
 
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
-    ).decode().rstrip("=")  # strip padding for shorter URLs
+    payload: Dict[str, Any] = {
+        "tool": tool_name,
+        "visualization": _strip_visualization(viz),
+    }
 
-    return f"{base_url}?viz={encoded}"
+    # Filters — use explicit arg, fall back to tool_result's filter_profile
+    effective_filters = filters or tool_result.get("filter_profile")
+    if effective_filters:
+        # Strip keys that are empty/None to save bytes
+        compact = {k: v for k, v in effective_filters.items() if v is not None and v != ""}
+        if compact:
+            payload["filters"] = compact
+
+    # Highlights — compact airport summaries for blue markers
+    airports: List[Dict[str, Any]] = tool_result.get("airports", [])
+    if isinstance(airports, list) and airports:
+        highlights = [h for a in airports if (h := _compact_airport(a)) is not None]
+        if highlights:
+            payload["highlights"] = highlights
+
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -89,35 +104,3 @@ def _strip_visualization(viz: Dict[str, Any]) -> Dict[str, Any]:
         stripped["radius_nm"] = viz["radius_nm"]
 
     return stripped
-
-
-def _build_compact_payload(
-    tool_name: str,
-    tool_result: Dict[str, Any],
-    filters: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    viz = tool_result.get("visualization")
-    if not viz or "type" not in viz:
-        return None
-
-    payload: Dict[str, Any] = {
-        "tool": tool_name,
-        "visualization": _strip_visualization(viz),
-    }
-
-    # Filters — use explicit arg, fall back to tool_result's filter_profile
-    effective_filters = filters or tool_result.get("filter_profile")
-    if effective_filters:
-        # Strip keys that are empty/None to save bytes
-        compact = {k: v for k, v in effective_filters.items() if v is not None and v != ""}
-        if compact:
-            payload["filters"] = compact
-
-    # Highlights — compact airport summaries for blue markers
-    airports: List[Dict[str, Any]] = tool_result.get("airports", [])
-    if isinstance(airports, list) and airports:
-        highlights = [h for a in airports if (h := _compact_airport(a)) is not None]
-        if highlights:
-            payload["highlights"] = highlights
-
-    return payload
