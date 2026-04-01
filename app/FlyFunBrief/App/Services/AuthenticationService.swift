@@ -187,7 +187,7 @@ final class AuthenticationService: NSObject {
                 self.authSession = session
                 session.start()
             }
-        } catch is ASWebAuthenticationSessionError {
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             // User cancelled the browser — not an error
             return
         } catch {
@@ -304,7 +304,9 @@ final class AuthenticationService: NSObject {
             throw AuthError.invalidResponse
         }
 
-        let userId = json["id"] as? String ?? ""
+        guard let userId = json["id"] as? String, !userId.isEmpty else {
+            throw AuthError.invalidResponse
+        }
         let email = json["email"] as? String
         let name = json["name"] as? String
 
@@ -421,11 +423,13 @@ final class AuthenticationService: NSObject {
 
 extension AuthenticationService: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = scene.keyWindow else {
-            return ASPresentationAnchor()
+        MainActor.assumeIsolated {
+            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = scene.windows.first(where: \.isKeyWindow) else {
+                return ASPresentationAnchor()
+            }
+            return window
         }
-        return window
     }
 }
 
