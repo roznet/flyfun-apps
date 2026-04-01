@@ -154,7 +154,10 @@ final class AuthenticationService: NSObject {
             authSession = nil
         }
 
-        var components = URLComponents(string: "\(authURL)/auth/login/google")!
+        guard var components = URLComponents(string: "\(authURL)/auth/login/google") else {
+            authError = AuthError.invalidURL.localizedDescription
+            return
+        }
         components.queryItems = [
             URLQueryItem(name: "platform", value: "ios"),
             URLQueryItem(name: "scheme", value: callbackScheme)
@@ -336,7 +339,7 @@ final class AuthenticationService: NSObject {
         // Split name into first/last
         let nameParts = meResponse.name?.split(separator: " ", maxSplits: 1)
         let firstName = nameParts?.first.map(String.init)
-        let lastName = nameParts?.count ?? 0 > 1 ? String(nameParts![1]) : nil
+        let lastName = nameParts.flatMap { $0.count > 1 ? String($0[1]) : nil }
 
         return AuthUser(userId: meResponse.id, email: meResponse.email, firstName: firstName, lastName: lastName, provider: provider)
     }

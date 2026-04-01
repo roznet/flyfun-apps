@@ -62,11 +62,11 @@ struct FlyFunBriefApp: App {
             return
         }
 
-        // Import deep link (flyfunbrief://import?path=...)
+        // Only handle import deep links; ignore auth callbacks
+        // (ASWebAuthenticationSession intercepts those before onOpenURL)
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let pathParam = components.queryItems?.first(where: { $0.name == "path" })?.value,
               !pathParam.isEmpty else {
-            Logger.app.error("Invalid deep link - missing path parameter: \(url.absoluteString)")
             return
         }
 
