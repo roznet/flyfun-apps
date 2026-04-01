@@ -62,14 +62,6 @@ struct FlyFunBriefApp: App {
             return
         }
 
-        // Auth callback (flyfunbrief://auth/callback?token=...)
-        if url.host == "auth" {
-            Task {
-                await appState.auth.handleAuthCallback(url: url)
-            }
-            return
-        }
-
         // Import deep link (flyfunbrief://import?path=...)
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let pathParam = components.queryItems?.first(where: { $0.name == "path" })?.value,

@@ -55,13 +55,7 @@ struct SettingsView: View {
 
                     Button {
                         Task {
-                            do {
-                                try await appState?.auth.signInWithGoogle()
-                            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-                                // User cancelled — no error to show
-                            } catch {
-                                appState?.auth.authError = error.localizedDescription
-                            }
+                            await appState?.auth.signInWithGoogle()
                         }
                     } label: {
                         Text("Sign in with Google")

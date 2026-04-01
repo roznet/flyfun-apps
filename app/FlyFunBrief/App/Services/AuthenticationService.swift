@@ -20,7 +20,7 @@ final class AuthenticationService: NSObject {
 
     private(set) var isAuthenticated = false
     private(set) var currentUser: AuthUser?
-    var authError: String?
+    private(set) var authError: String?
     private(set) var isLoading = false
 
     // MARK: - Configuration
@@ -142,12 +142,17 @@ final class AuthenticationService: NSObject {
 
     // MARK: - Google Sign-In
 
-    /// Start Google OAuth flow via ASWebAuthenticationSession
-    func signInWithGoogle() async throws {
+    /// Start Google OAuth flow via ASWebAuthenticationSession.
+    /// Cancellation (user dismisses browser) is silently ignored.
+    /// Other errors are stored in ``authError``.
+    func signInWithGoogle() async {
         isLoading = true
         authError = nil
 
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            authSession = nil
+        }
 
         var components = URLComponents(string: "\(authURL)/auth/login/google")!
         components.queryItems = [
@@ -156,81 +161,66 @@ final class AuthenticationService: NSObject {
         ]
 
         guard let loginURL = components.url else {
-            throw AuthError.invalidURL
+            authError = AuthError.invalidURL.localizedDescription
+            return
         }
 
         logger.info("Starting Google OAuth flow")
 
-        let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
-            let session = ASWebAuthenticationSession(
-                url: loginURL,
-                callback: .customScheme(callbackScheme)
-            ) { url, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let url {
-                    continuation.resume(returning: url)
-                } else {
-                    continuation.resume(throwing: AuthError.missingToken)
+        let callbackURL: URL
+        do {
+            callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                let session = ASWebAuthenticationSession(
+                    url: loginURL,
+                    callback: .customScheme(callbackScheme)
+                ) { url, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let url {
+                        continuation.resume(returning: url)
+                    } else {
+                        continuation.resume(throwing: AuthError.missingToken)
+                    }
                 }
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                self.authSession = session
+                session.start()
             }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
-            self.authSession = session
-            session.start()
+        } catch is ASWebAuthenticationSessionError {
+            // User cancelled the browser — not an error
+            return
+        } catch {
+            authError = error.localizedDescription
+            return
         }
 
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
               let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
               !token.isEmpty else {
             logger.error("No token in callback URL: \(callbackURL)")
-            throw AuthError.missingToken
-        }
-
-        // Fetch user info before persisting anything — if this fails,
-        // we don't leave an orphaned token in Keychain
-        let user = try await fetchUserInfo(token: token)
-
-        // Persist token and user together
-        saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
-        if let userData = try? JSONEncoder().encode(user) {
-            saveToKeychain(service: keychainServiceUser, account: "authUser", data: userData)
-        }
-        logger.info("Google OAuth: signed in successfully")
-
-        currentUser = user
-        isAuthenticated = true
-        onAuthChanged?(sessionToken)
-    }
-
-    /// Handle an auth callback URL (e.g. flyfunbrief://auth/callback?token=...)
-    func handleAuthCallback(url: URL) async {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.host == "auth",
-              components.path == "/callback",
-              let token = components.queryItems?.first(where: { $0.name == "token" })?.value else {
-            logger.warning("Invalid auth callback URL: \(url.absoluteString)")
+            authError = AuthError.missingToken.localizedDescription
             return
         }
 
-        isLoading = true
-        defer { isLoading = false }
-
-        // Save JWT token
-        saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
-
         do {
+            // Fetch user info before persisting anything — if this fails,
+            // we don't leave an orphaned token in Keychain
             let user = try await fetchUserInfo(token: token)
+
+            // Persist token and user together
+            saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
             if let userData = try? JSONEncoder().encode(user) {
                 saveToKeychain(service: keychainServiceUser, account: "authUser", data: userData)
             }
+            logger.info("Google OAuth: signed in successfully")
+
             currentUser = user
             isAuthenticated = true
             onAuthChanged?(sessionToken)
-            logger.info("Auth callback handled successfully")
         } catch {
-            logger.error("Failed to fetch user info after auth callback: \(error.localizedDescription)")
-            authError = "Sign in failed: \(error.localizedDescription)"
+            logger.error("Google OAuth failed: \(error.localizedDescription)")
+            authError = error.localizedDescription
         }
     }
 
@@ -295,7 +285,7 @@ final class AuthenticationService: NSObject {
     }
 
     /// Fetch user info from /auth/me using a JWT token
-    private func fetchUserInfo(token: String) async throws -> AuthUser {
+    private func fetchUserInfo(token: String, provider: AuthProvider = .google) async throws -> AuthUser {
         guard let url = URL(string: "\(authURL)/auth/me") else {
             throw AuthError.invalidURL
         }
@@ -323,7 +313,7 @@ final class AuthenticationService: NSObject {
         let firstName = nameParts?.first.map(String.init)
         let lastName = nameParts?.count ?? 0 > 1 ? String(nameParts![1]) : nil
 
-        return AuthUser(userId: userId, email: email, firstName: firstName, lastName: lastName, provider: .google)
+        return AuthUser(userId: userId, email: email, firstName: firstName, lastName: lastName, provider: provider)
     }
 
     private func exchangeAppleTokenWithBackend(
