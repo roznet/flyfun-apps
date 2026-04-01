@@ -53,14 +53,14 @@ MAPS_BASE_URL = os.getenv("MAPS_BASE_URL", "https://maps.flyfun.aero")
 
 
 def _attach_viz_url(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Add a ``map_url`` field to the tool result if it contains a visualization."""
+    """Add an ``action`` block with a map visualization link to present to the user."""
     url = build_viz_url(tool_name, result, base_url=MAPS_BASE_URL)
     if url:
-        result["map_url"] = url
-        result["map_url_hint"] = (
-            "Share the map_url link with the user so they can explore the results "
-            "on an interactive map (unless this tool call is just an intermediate step)."
-        )
+        result["action"] = {
+            "type": "present_link",
+            "url": url,
+            "label": "View on FlyFun Maps",
+        }
     return result
 
 # ---- Global context ----------------------------------------------------------
@@ -103,17 +103,20 @@ mcp = FastMCP(
         "Covers airports, runways, procedures, frequencies, customs notifications, "
         "and route planning across Europe. Data freshness varies by country — "
         "call get_data_coverage first to check which countries have current AIRAC data.\n\n"
-        "Most tools return a `map_url` field — a deep link that opens an interactive map "
-        "with the results visualized (route, airports, highlights). When the user would "
-        "benefit from visually exploring the results (e.g. seeing a route, comparing "
-        "airport locations), include this link in your response. Skip it when the tool "
-        "call is just an intermediate step in a larger flow."
+        "Tools that return geographic results include an `action` block with a link "
+        "to an interactive map. Present this link to the user as a clickable URL "
+        "so they can visually explore the results."
     ),
     lifespan=lifespan,
 )
 
 
-# ---- Shared filter description -----------------------------------------------
+# ---- Shared descriptions -----------------------------------------------------
+_MAP_LINK_NOTE = (
+    " Returns an interactive map link in `action.url` — "
+    "present it to the user so they can explore the results visually."
+)
+
 _FILTERS_DESC = (
     "Optional filter dict. Keys: "
     "country (ISO-2 code, e.g. 'FR'), "
@@ -144,6 +147,7 @@ def get_data_coverage() -> Dict[str, Any]:
         "Search airports by ICAO code, IATA code, name, or city. "
         "Returns matching airports with key details (runways, fuel, procedures). "
         "For proximity searches use find_airports_near_location instead."
+        + _MAP_LINK_NOTE
     ),
 )
 def search_airports(
@@ -169,6 +173,7 @@ def search_airports(
         "Find airports near a geographic point — an ICAO code, city, landmark, "
         "or lat/lon coordinates. Returns airports within the search radius sorted "
         "by suitability, with distance and notification requirements."
+        + _MAP_LINK_NOTE
     ),
 )
 def find_airports_near_location(
@@ -204,6 +209,7 @@ def find_airports_near_location(
         "Supports multi-leg routes via intermediate waypoints, time-based filtering "
         "(e.g. fuel stops within 3h flight), and airport filters. "
         "Useful for fuel stops, alternates, and customs/border crossing airports."
+        + _MAP_LINK_NOTE
     ),
 )
 def find_airports_near_route(
@@ -252,6 +258,7 @@ def find_airports_near_route(
     description=(
         "Get full details for a specific airport: runways, procedures, frequencies, "
         "fuel, opening hours, and other AIP information."
+        + _MAP_LINK_NOTE
     ),
 )
 def get_airport_details(
@@ -267,6 +274,7 @@ def get_airport_details(
     description=(
         "Get customs/immigration notification requirements for an airport. "
         "Returns required notice period, contact details, and day-specific rules."
+        + _MAP_LINK_NOTE
     ),
 )
 def get_notification_for_airport(
@@ -284,6 +292,7 @@ def get_notification_for_airport(
     description=(
         "Calculate great-circle distance and estimated flight time between two locations. "
         "Accepts ICAO codes or place names. Provide aircraft type or cruise speed for time estimates."
+        + _MAP_LINK_NOTE
     ),
 )
 def calculate_flight_distance(
