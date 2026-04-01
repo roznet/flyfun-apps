@@ -44,7 +44,7 @@ from security_config import (
 )
 
 # Import API routes
-from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness, notifications, briefing
+from api import airports, procedures, filters, statistics, rules, aviation_agent_chat, ga_friendliness, notifications, briefing, viz
 
 from shared.tool_context import ToolContext
 
@@ -358,6 +358,7 @@ app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
 app.include_router(rules.router, prefix="/api/rules", tags=["rules"])
 app.include_router(notifications.router)  # Has its own prefix /api/notifications
+app.include_router(viz.router, prefix="/api/viz", tags=["viz"])
 
 if aviation_agent_chat.feature_enabled():
     logger.info("Aviation agent router enabled at /api/aviation-agent")
@@ -421,6 +422,18 @@ async def read_root():
     """Serve the main HTML page."""
     html_file = client_dir / "index.html"
     return FileResponse(str(html_file))
+
+
+@app.get("/v/{key}")
+async def read_viz_shortlink(key: str):
+    """Serve the SPA for visualization short-links.
+
+    The frontend reads the key from the URL path and fetches
+    the payload from /api/viz/{key}.
+    """
+    html_file = client_dir / "index.html"
+    return FileResponse(str(html_file))
+
 
 @app.get("/health")
 async def health_check():

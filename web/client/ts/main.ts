@@ -900,33 +900,26 @@ class Application {
       }
     }
 
-    // Handle deep-link visualization (?viz= base64url-encoded JSON payload)
-    if (urlParams.has('viz')) {
+    // Handle visualization short-links (/v/{key})
+    const vizMatch = window.location.pathname.match(/^\/v\/([a-f0-9]{1,16})$/);
+    if (vizMatch) {
+      const key = vizMatch[1];
       try {
-        const vizParam = urlParams.get('viz')!;
-        // Guard against oversized payloads (base64 ≈ 7.5 KB decoded)
-        if (vizParam.length > 10_000) {
-          console.error('viz parameter too large, ignoring (%d chars)', vizParam.length);
-          return;
-        }
-        // Re-add base64 padding if stripped
-        const padded = vizParam + '='.repeat((4 - vizParam.length % 4) % 4);
-        const json = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
-        const payload = JSON.parse(json);
-        console.log('Deep-link visualization payload:', payload);
+        const resp = await fetch(`/api/viz/${key}`);
+        if (!resp.ok) throw new Error(`viz fetch failed: ${resp.status}`);
+        const payload = await resp.json();
+        console.log('Visualization payload from /v/ link:', payload);
 
         // Apply after a short delay to let map fully initialize
         setTimeout(() => {
           this.llmIntegration.applyVizPayload(payload);
         }, 300);
 
-        // Clean the URL (remove ?viz= to avoid re-triggering on refresh)
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('viz');
-        window.history.replaceState({}, '', cleanUrl.toString());
+        // Clean the URL path to root (avoid re-triggering on refresh)
+        window.history.replaceState({}, '', '/');
         return; // Skip default airport loading
       } catch (e) {
-        console.error('Failed to decode viz parameter:', e);
+        console.error('Failed to load visualization from /v/ link:', e);
       }
     }
 

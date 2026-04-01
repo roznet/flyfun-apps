@@ -101,6 +101,8 @@ services:
       - VECTOR_DB_URL=${VECTOR_DB_URL:-http://chromadb:8000}
       # Local path fallback (used if VECTOR_DB_URL is not set)
       - VECTOR_DB_PATH=/app/out/rules_vector_db
+      # Viz payload store: POST payloads to web server, get back short link keys
+      - VIZ_API_URL=http://web-server:8000/api/viz
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
