@@ -92,6 +92,11 @@ Structured search on preprocessed AIP data. Integer encoding for hospitality fie
 Key exports: `HotelFilter`, `RestaurantFilter`, `get_icaos_by_hospitality`
 → Full doc: AIP_FIELD_SEARCH_DESIGN.md
 
+### AIP Field Query Tools
+Tools for querying raw AIP standard field values across airports. Two tools: `list_aip_fields` (discovery) and `query_aip_fields` (values + change history). Shared between MCP server and chatbot agent.
+Key exports: `list_aip_fields`, `query_aip_fields`
+→ Full doc: AIP_FIELD_TOOLS_DESIGN.md
+
 ### GA Notification Agent
 Waterfall parser for PPR/customs notification requirements. Regex patterns handle simple cases (H24, O/R, hours notice), LLM fallback for complex rules. Outputs factual rules to `ga_notifications.db` and hassle scores to `ga_persona.db`.
 Key exports: `NotificationParser`, `NotificationScorer`, `NotificationBatchProcessor`, `get_notification_config`

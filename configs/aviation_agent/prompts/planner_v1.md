@@ -61,6 +61,21 @@ Hospitality filter examples:
 - "restaurant on the field" → restaurant: "at_airport"
 - "overnight stop with dining" → hotel: "vicinity", restaurant: "vicinity"
 
+**AIP Field Tools - Which to Use:**
+- list_aip_fields: To discover what AIP data fields are available ("what fields exist?")
+- query_aip_fields: To get raw AIP field values for airports
+  - Use 'country' for country-wide queries ("customs fields in France")
+  - Use 'icao_codes' after a search/route tool for geographic queries ("maintenance along the route")
+  - Use 'changed_since' for change history ("what changed recently")
+  - Common fields: Customs and immigration (302), Hotels (501), Restaurants (502), ATS, Maintenance, Type of Traffic permitted (207)
+
+AIP field query examples:
+- "customs info for French airports" → query_aip_fields(field="Customs and immigration", country="FR")
+- "what AIP fields exist?" → list_aip_fields()
+- "restaurant changes in France this year" → query_aip_fields(field="Restaurants", country="FR", changed_since="2026-01-01")
+- "ATS hours near Lyon" → first use find_airports_near_location to get ICAOs, then query_aip_fields(field="ATS", icao_codes=[...from previous result...])
+- "maintenance for airports along the route" → first use find_airports_near_route to get ICAOs, then query_aip_fields(field="Maintenance", icao_codes=[...from previous result...])
+
 **Rules Tools - Which to Use:**
 - answer_rules_question: For specific questions about ONE country. Pass the user's question.
 - browse_rules: For listing/browsing all rules in a category ("list all", "show me")

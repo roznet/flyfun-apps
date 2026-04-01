@@ -37,6 +37,8 @@ from shared.airport_tools import (
     get_airport_details as shared_get_airport_details,
     get_data_coverage as shared_get_data_coverage,
     get_notification_for_airport as shared_get_notification_for_airport,
+    list_aip_fields as shared_list_aip_fields,
+    query_aip_fields as shared_query_aip_fields,
     search_airports as shared_search_airports,
 )
 from shared.tool_context import ToolContext
@@ -312,6 +314,51 @@ def calculate_flight_distance(
         aircraft_type=aircraft_type,
     )
     return _attach_viz_url("calculate_flight_distance", result)
+
+
+@mcp.tool(
+    name="list_aip_fields",
+    description=(
+        "List all available AIP standard fields in the database. "
+        "Returns field names, numeric IDs, and how many airports have data for each. "
+        "Use this to discover what fields are available before querying with query_aip_fields."
+    ),
+)
+def list_aip_fields() -> Dict[str, Any]:
+    return shared_list_aip_fields(_require_tool_context())
+
+
+@mcp.tool(
+    name="query_aip_fields",
+    description=(
+        "Query raw AIP field values for airports. Returns the value of a specific "
+        "AIP standard field across airports, filtered by country or ICAO codes. "
+        "Use changed_since to see what changed recently (includes old/new values). "
+        "Common fields: Customs and immigration (302), Hotels (501), Restaurants (502), "
+        "ATS (101), Maintenance, Type of Traffic permitted (207). "
+        "Use list_aip_fields to discover all available fields."
+    ),
+)
+def query_aip_fields(
+    field: Annotated[str, Field(
+        description="AIP standard field name or numeric ID (e.g. 'Customs and immigration', '302', 'Hotels')")],
+    country: Annotated[Optional[str], Field(
+        description="ISO-2 country code to filter airports (e.g. 'FR', 'DE')")] = None,
+    icao_codes: Annotated[Optional[List[str]], Field(
+        description="Explicit list of ICAO codes (use after a search or route tool)")] = None,
+    changed_since: Annotated[Optional[str], Field(
+        description="ISO date (YYYY-MM-DD). Returns only airports where field changed after this date")] = None,
+    max_results: Annotated[int, Field(
+        description="Maximum airports to return")] = 20,
+) -> Dict[str, Any]:
+    return shared_query_aip_fields(
+        _require_tool_context(),
+        field=field,
+        country=country,
+        icao_codes=icao_codes,
+        changed_since=changed_since,
+        max_results=max_results,
+    )
 
 
 # ---- CLI entry point ---------------------------------------------------------

@@ -14,12 +14,16 @@ AIRPORT TOOLS (Section 5):
     - get_notification_for_airport: Customs notification requirements
     - calculate_flight_distance: Calculate distance and flight time between airports
 
-RULES TOOLS (Section 6):
+AIP FIELD TOOLS (Section 6b):
+    - list_aip_fields: Discover available AIP standard fields
+    - query_aip_fields: Query raw AIP field values with optional change history
+
+RULES TOOLS (Section 7):
     - answer_rules_question: Answer specific questions about rules for a country (RAG-based)
     - browse_rules: Browse/list rules by category and tags with pagination
     - compare_rules_between_countries: Compare rules between two or more countries
 
-TOOL REGISTRY (Section 7):
+TOOL REGISTRY (Section 8):
     - get_shared_tool_specs(): Returns the tool manifest for registration
 
 Usage:
@@ -1368,6 +1372,354 @@ def get_data_coverage(
 
 
 # =============================================================================
+# SECTION 6b: AIP FIELD TOOLS
+# =============================================================================
+#
+# NOTE: Helpers prefixed with _aip_ contain logic that should eventually be
+# pushed upstream into the euro_aip library (DatabaseStorage / AirportCollection).
+# They are isolated here for easy extraction.  See future-euroaip-update.md.
+# =============================================================================
+
+import logging as _logging
+import sqlite3 as _sqlite3
+from datetime import datetime as _datetime, date as _date
+from collections import defaultdict as _defaultdict
+
+_aip_logger = _logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# AIP Field Helpers  (candidates for euro_aip library — see future-euroaip-update.md)
+# -----------------------------------------------------------------------------
+
+def _aip_collect_std_fields(model: Any) -> Dict[str, Any]:
+    """Collect distinct standard fields across all airports.
+
+    Returns dict keyed by std_field_id (int) → {std_field, section, count}.
+
+    NOTE: Should become ``model.airports.distinct_std_fields()`` in euro_aip.
+    """
+    field_info: Dict[int, Dict[str, Any]] = {}
+    for airport in model.airports.with_aip_data():
+        seen_ids: set = set()  # deduplicate per-airport
+        for entry in airport.aip_entries:
+            fid = getattr(entry, "std_field_id", None)
+            fname = getattr(entry, "std_field", None)
+            if fid is None or fname is None:
+                continue
+            if fid not in field_info:
+                field_info[fid] = {
+                    "std_field_id": fid,
+                    "std_field": fname,
+                    "section": getattr(entry, "section", None),
+                    "airport_count": 0,
+                }
+            if fid not in seen_ids:
+                field_info[fid]["airport_count"] += 1
+                seen_ids.add(fid)
+    return field_info
+
+
+def _aip_resolve_field(
+    field: str,
+    known_fields: Dict[int, Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Resolve a user-supplied field name or numeric ID to a known field entry.
+
+    Matching strategy (in order):
+      1. Exact numeric ID
+      2. Case-insensitive exact name match
+      3. Case-insensitive substring match (first hit)
+
+    Returns the field_info dict or None.
+    """
+    # 1. Numeric ID
+    if field.isdigit():
+        return known_fields.get(int(field))
+
+    field_lower = field.lower().strip()
+
+    # 2. Exact name match
+    for info in known_fields.values():
+        if info["std_field"].lower() == field_lower:
+            return info
+
+    # 3. Substring match
+    for info in known_fields.values():
+        if field_lower in info["std_field"].lower():
+            return info
+
+    return None
+
+
+def _aip_get_field_values(
+    model: Any,
+    std_field_id: int,
+    *,
+    country: Optional[str] = None,
+    icao_codes: Optional[List[str]] = None,
+    max_results: int = 20,
+) -> List[Dict[str, Any]]:
+    """Retrieve a specific AIP field value for airports matching criteria.
+
+    Uses the euro_aip collection API for airport selection.
+
+    NOTE: Should become a collection method in euro_aip
+    (e.g. ``airports.by_country("FR").aip_field(302)``).
+    """
+    airports = model.airports.with_aip_data()
+
+    if country:
+        airports = airports.by_country(country.upper())
+
+    if icao_codes:
+        icao_set = {c.upper() for c in icao_codes}
+        airports = airports.filter(lambda a: a.ident in icao_set)
+
+    results: List[Dict[str, Any]] = []
+    for airport in airports:
+        for entry in airport.aip_entries:
+            if getattr(entry, "std_field_id", None) == std_field_id:
+                results.append({
+                    "icao": airport.ident,
+                    "name": airport.name,
+                    "country": airport.iso_country,
+                    "value": getattr(entry, "value", None),
+                    "source": getattr(entry, "source", None),
+                })
+                break  # one value per airport
+        if len(results) >= max_results:
+            break
+
+    return results
+
+
+def _aip_get_field_changes(
+    storage: Any,
+    std_field_id: int,
+    since_date: str,
+    *,
+    country: Optional[str] = None,
+    icao_codes: Optional[List[str]] = None,
+    max_results: int = 20,
+) -> List[Dict[str, Any]]:
+    """Query aip_entries_changes for field modifications since a date.
+
+    Requires raw SQL because euro_aip DatabaseStorage does not yet expose
+    a change-query API.
+
+    NOTE: Should become ``storage.get_field_changes(field_id, since, country)``
+    in euro_aip.  See future-euroaip-update.md.
+    """
+    db_path = getattr(storage, "database_path", None)
+    if not db_path:
+        return []
+
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.row_factory = _sqlite3.Row
+
+        query = """
+            SELECT
+                c.airport_icao,
+                c.old_value,
+                c.new_value,
+                c.changed_at,
+                c.source
+            FROM aip_entries_changes c
+            WHERE c.std_field_id = ?
+              AND c.changed_at >= ?
+        """
+        params: List[Any] = [std_field_id, since_date]
+
+        if country:
+            query += """
+              AND c.airport_icao IN (
+                  SELECT ident FROM airports WHERE iso_country = ?
+              )
+            """
+            params.append(country.upper())
+
+        if icao_codes:
+            placeholders = ",".join("?" for _ in icao_codes)
+            query += f" AND c.airport_icao IN ({placeholders})"
+            params.extend(c.upper() for c in icao_codes)
+
+        query += " ORDER BY c.changed_at DESC LIMIT ?"
+        params.append(max_results)
+
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+
+        return [
+            {
+                "icao": row["airport_icao"],
+                "previous_value": row["old_value"],
+                "new_value": row["new_value"],
+                "changed_at": row["changed_at"],
+                "source": row["source"],
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        _aip_logger.warning("Failed to query aip_entries_changes: %s", e)
+        return []
+
+
+def _aip_get_staleness(
+    storage: Any,
+    countries: Optional[set] = None,
+) -> Dict[str, str]:
+    """Get AIRAC dates for relevant countries.
+
+    Uses ``storage.get_country_coverage()`` from euro_aip.
+    """
+    try:
+        coverage_rows = storage.get_country_coverage()
+    except Exception:
+        return {}
+
+    result: Dict[str, str] = {}
+    for row in (coverage_rows or []):
+        iso = row["country_iso"]
+        if countries is None or iso in countries:
+            result[iso] = row["airac_date"]
+    return result
+
+
+# -----------------------------------------------------------------------------
+# AIP Field Tools (public interface)
+# -----------------------------------------------------------------------------
+
+def list_aip_fields(
+    ctx: ToolContext,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """List all available AIP standard fields.
+
+    Returns the set of standardized AIP fields present in the database,
+    along with how many airports have data for each field.
+    Use this to discover what fields are available before querying with
+    query_aip_fields.
+    """
+    kwargs.pop("_persona_id", None)
+
+    field_info = _aip_collect_std_fields(ctx.model)
+
+    fields_list = sorted(field_info.values(), key=lambda f: f["std_field_id"])
+
+    return {
+        "fields": fields_list,
+        "total_fields": len(fields_list),
+        "total_airports_with_aip_data": ctx.model.airports.with_aip_data().count(),
+    }
+
+
+def query_aip_fields(
+    ctx: ToolContext,
+    field: str,
+    country: Optional[str] = None,
+    icao_codes: Optional[List[str]] = None,
+    changed_since: Optional[str] = None,
+    max_results: int = 20,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Query raw AIP field values for airports matching criteria.
+
+    Retrieves the value of a specific AIP standard field across airports,
+    optionally filtered by country or ICAO codes. When changed_since is
+    provided, returns only airports where the field changed after that date,
+    including old and new values.
+
+    Common fields: Customs and immigration (302), Hotels (501),
+    Restaurants (502), ATS (101), Maintenance, Type of Traffic permitted (207).
+
+    Use list_aip_fields to discover all available fields.
+    """
+    kwargs.pop("_persona_id", None)
+
+    # --- Resolve field ---
+    known_fields = _aip_collect_std_fields(ctx.model)
+    resolved = _aip_resolve_field(field, known_fields)
+
+    if not resolved:
+        return {
+            "found": False,
+            "error": f"Unknown AIP field: '{field}'",
+            "hint": "Use list_aip_fields to see available fields.",
+            "pretty": f"I couldn't find an AIP field matching '{field}'. "
+                       "You can use list_aip_fields to see what's available.",
+        }
+
+    std_field_id = resolved["std_field_id"]
+    std_field_name = resolved["std_field"]
+
+    # --- Build result ---
+    staleness: Dict[str, Any] = {}
+
+    if changed_since:
+        # Change history mode
+        changes = _aip_get_field_changes(
+            ctx.storage,
+            std_field_id,
+            changed_since,
+            country=country,
+            icao_codes=icao_codes,
+            max_results=max_results,
+        )
+
+        # Enrich with airport names from the model
+        for change in changes:
+            airport = ctx.model.airports.get(change["icao"])
+            change["name"] = airport.name if airport else change["icao"]
+            change["country"] = airport.iso_country if airport else None
+
+        # Also include the current value for context
+        if changes:
+            current_lookup = {
+                a.ident: next(
+                    (e.value for e in a.aip_entries if getattr(e, "std_field_id", None) == std_field_id),
+                    None,
+                )
+                for a in ctx.model.airports.with_aip_data()
+                if a.ident in {c["icao"] for c in changes}
+            }
+            for change in changes:
+                change["current_value"] = current_lookup.get(change["icao"])
+
+        airports_result = changes
+        total_matches = len(changes)
+        staleness["changes_queried_since"] = changed_since
+    else:
+        # Normal value query mode
+        airports_result = _aip_get_field_values(
+            ctx.model,
+            std_field_id,
+            country=country,
+            icao_codes=icao_codes,
+            max_results=max_results,
+        )
+        total_matches = len(airports_result)
+
+    # --- Staleness info ---
+    result_countries = {a.get("country") for a in airports_result if a.get("country")}
+    if ctx.storage and result_countries:
+        staleness["country_airac_dates"] = _aip_get_staleness(ctx.storage, result_countries)
+
+    return {
+        "found": True,
+        "field": {
+            "std_field": std_field_name,
+            "std_field_id": std_field_id,
+        },
+        "airports": airports_result,
+        "total_matches": total_matches,
+        "returned": len(airports_result),
+        "staleness": staleness,
+    }
+
+
+# =============================================================================
 # SECTION 7: RULES TOOLS
 # =============================================================================
 
@@ -2059,6 +2411,59 @@ def _build_shared_tool_specs() -> OrderedDictType[str, ToolSpec]:
                 "parameters": {
                     "type": "object",
                     "properties": {},
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        # -----------------------------------------------------------------
+        # AIP FIELD QUERY
+        # -----------------------------------------------------------------
+        (
+            "list_aip_fields",
+            {
+                "name": "list_aip_fields",
+                "handler": list_aip_fields,
+                "description": _get_tool_description(list_aip_fields, "list_aip_fields"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "expose_to_llm": True,
+            },
+        ),
+        (
+            "query_aip_fields",
+            {
+                "name": "query_aip_fields",
+                "handler": query_aip_fields,
+                "description": _get_tool_description(query_aip_fields, "query_aip_fields"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "description": "AIP standard field name or numeric ID. Common fields: 'Customs and immigration' (302), 'Hotels' (501), 'Restaurants' (502), 'ATS' (101), 'Maintenance', 'Type of Traffic permitted' (207). Use list_aip_fields to discover all available fields.",
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "ISO-2 country code to filter airports (e.g., 'FR', 'DE'). Use for country-wide queries like 'customs in France'.",
+                        },
+                        "icao_codes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Explicit list of airport ICAO codes. Use after a search or route tool to query fields for specific airports.",
+                        },
+                        "changed_since": {
+                            "type": "string",
+                            "description": "ISO date (YYYY-MM-DD). When set, returns only airports where this field changed after this date, with old and new values. Use for 'what changed recently' queries.",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Maximum airports to return. Default 20. Use higher for comprehensive queries.",
+                            "default": 20,
+                        },
+                    },
+                    "required": ["field"],
                 },
                 "expose_to_llm": True,
             },
