@@ -332,23 +332,12 @@ def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
         # Read-only mode: database must exist
         if not db_path.exists():
             raise StorageError(f"Database not found (readonly mode): {db_path}")
-        
-        # Use URI mode with ?mode=ro to prevent SQLite from creating temporary files
-        # This is necessary when the database file is in a read-only directory (like Docker volume :ro)
-        # SQLite normally tries to create .db-shm and .db-wal files even for read-only access
-        # check_same_thread=False allows this connection to be used across threads (safe for read-only)
-        # Use absolute path for URI mode (required on some systems)
+
+        # Use immutable=1 to prevent SQLite from creating WAL/SHM files.
+        # mode=ro alone doesn't help with WAL-mode databases — SQLite still
+        # tries to open .db-shm/.db-wal which fails on read-only mounts.
         abs_path = str(db_path.resolve() if isinstance(db_path, Path) else Path(db_path).resolve())
-        db_uri = f"file:{abs_path}?mode=ro"
-        conn = sqlite3.connect(db_uri, uri=True, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-        
-        # Use URI mode with ?mode=ro to prevent SQLite from creating temporary files
-        # This is necessary when the database file is in a read-only directory (like Docker volume :ro)
-        # SQLite normally tries to create .db-shm and .db-wal files even for read-only access
-        # check_same_thread=False allows this connection to be used across threads (safe for read-only)
-        db_uri = f"file:{abs_path}?mode=ro"
+        db_uri = f"file:{abs_path}?mode=ro&immutable=1"
         conn = sqlite3.connect(db_uri, uri=True, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
