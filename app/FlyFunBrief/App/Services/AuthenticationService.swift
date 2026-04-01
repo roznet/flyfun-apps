@@ -271,13 +271,18 @@ final class AuthenticationService: NSObject {
     private func checkExistingSession() async {
         var userData = loadFromKeychain(service: keychainServiceUser, account: "authUser")
 
-        // Migrate from legacy "appleUser" key if needed
+        // Migrate from legacy "appleUser" key (no provider field) if needed
         if userData == nil,
-           let legacyData = loadFromKeychain(service: keychainServiceUser, account: "appleUser") {
-            userData = legacyData
-            saveToKeychain(service: keychainServiceUser, account: "authUser", data: legacyData)
+           let legacyData = loadFromKeychain(service: keychainServiceUser, account: "appleUser"),
+           let legacy = try? JSONDecoder().decode(LegacyAppleUser.self, from: legacyData) {
+            let converted = AuthUser(userId: legacy.userId, email: legacy.email,
+                                     firstName: legacy.firstName, lastName: legacy.lastName, provider: .apple)
+            if let reencoded = try? JSONEncoder().encode(converted) {
+                userData = reencoded
+                saveToKeychain(service: keychainServiceUser, account: "authUser", data: reencoded)
+            }
             deleteFromKeychain(service: keychainServiceUser, account: "appleUser")
-            logger.info("Migrated session from legacy Keychain key")
+            logger.info("Migrated legacy Apple session to new format")
         }
 
         guard let userData,
@@ -485,6 +490,14 @@ struct AuthUser: Codable, Equatable {
         case .google: return "g.circle.fill"
         }
     }
+}
+
+/// Legacy Keychain format (pre-Google OAuth, no provider field)
+private struct LegacyAppleUser: Decodable {
+    let userId: String
+    let email: String?
+    let firstName: String?
+    let lastName: String?
 }
 
 /// Response from /auth/me endpoint
