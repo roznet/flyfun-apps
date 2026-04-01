@@ -904,6 +904,11 @@ class Application {
     if (urlParams.has('viz')) {
       try {
         const vizParam = urlParams.get('viz')!;
+        // Guard against oversized payloads (base64 ≈ 7.5 KB decoded)
+        if (vizParam.length > 10_000) {
+          console.error('viz parameter too large, ignoring (%d chars)', vizParam.length);
+          return;
+        }
         // Re-add base64 padding if stripped
         const padded = vizParam + '='.repeat((4 - vizParam.length % 4) % 4);
         const json = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
