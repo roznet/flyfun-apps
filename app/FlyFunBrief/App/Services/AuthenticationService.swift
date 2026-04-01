@@ -187,17 +187,16 @@ final class AuthenticationService: NSObject {
             throw AuthError.missingToken
         }
 
-        // Save JWT token
-        saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
-        logger.info("Google OAuth: received JWT token")
-
-        // Fetch user info from /auth/me
+        // Fetch user info before persisting anything — if this fails,
+        // we don't leave an orphaned token in Keychain
         let user = try await fetchUserInfo(token: token)
 
-        // Persist user data
+        // Persist token and user together
+        saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
         if let userData = try? JSONEncoder().encode(user) {
             saveToKeychain(service: keychainServiceUser, account: "authUser", data: userData)
         }
+        logger.info("Google OAuth: signed in successfully")
 
         currentUser = user
         isAuthenticated = true
@@ -433,7 +432,7 @@ final class AuthenticationService: NSObject {
 extension AuthenticationService: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = scene.windows.first else {
+              let window = scene.keyWindow else {
             return ASPresentationAnchor()
         }
         return window
@@ -484,7 +483,6 @@ enum AuthError: LocalizedError {
     case invalidResponse
     case backendError(Int)
     case notAuthenticated
-    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -500,8 +498,6 @@ enum AuthError: LocalizedError {
             return "Backend error: \(code)"
         case .notAuthenticated:
             return "Sign in required to fetch live NOTAMs"
-        case .cancelled:
-            return nil
         }
     }
 }

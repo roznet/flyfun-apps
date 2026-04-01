@@ -64,14 +64,8 @@ struct SettingsView: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 8) {
-                            if appState?.auth.isLoading == true {
-                                ProgressView()
-                                    .tint(.primary)
-                            }
-                            Text("Sign in with Google")
-                                .fontWeight(.medium)
-                        }
+                        Text("Sign in with Google")
+                            .fontWeight(.medium)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background {
                             RoundedRectangle(cornerRadius: 8)
