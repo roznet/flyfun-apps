@@ -1387,6 +1387,10 @@ from collections import defaultdict as _defaultdict
 
 _aip_logger = _logging.getLogger(__name__)
 
+# Module-level cache for _aip_collect_std_fields to avoid repeated full scans.
+# Keyed by id(model) so it invalidates when the model object changes.
+_aip_field_catalog_cache: Dict[int, Dict[int, Dict[str, Any]]] = {}
+
 
 # -----------------------------------------------------------------------------
 # AIP Field Helpers  (candidates for euro_aip library — see future-euroaip-update.md)
@@ -1397,8 +1401,14 @@ def _aip_collect_std_fields(model: Any) -> Dict[str, Any]:
 
     Returns dict keyed by std_field_id (int) → {std_field, section, count}.
 
+    Results are cached per model instance to avoid repeated full-airport scans.
+
     NOTE: Should become ``model.airports.distinct_std_fields()`` in euro_aip.
     """
+    cache_key = id(model)
+    if cache_key in _aip_field_catalog_cache:
+        return _aip_field_catalog_cache[cache_key]
+
     field_info: Dict[int, Dict[str, Any]] = {}
     for airport in model.airports.with_aip_data():
         seen_ids: set = set()  # deduplicate per-airport
@@ -1417,6 +1427,8 @@ def _aip_collect_std_fields(model: Any) -> Dict[str, Any]:
             if fid not in seen_ids:
                 field_info[fid]["airport_count"] += 1
                 seen_ids.add(fid)
+
+    _aip_field_catalog_cache[cache_key] = field_info
     return field_info
 
 
@@ -1459,10 +1471,13 @@ def _aip_get_field_values(
     country: Optional[str] = None,
     icao_codes: Optional[List[str]] = None,
     max_results: int = 20,
-) -> List[Dict[str, Any]]:
+) -> tuple:
     """Retrieve a specific AIP field value for airports matching criteria.
 
     Uses the euro_aip collection API for airport selection.
+
+    Returns (results_list, total_count) where total_count is the number of
+    matching airports before the max_results limit is applied.
 
     NOTE: Should become a collection method in euro_aip
     (e.g. ``airports.by_country("FR").aip_field(302)``).
@@ -1477,21 +1492,22 @@ def _aip_get_field_values(
         airports = airports.filter(lambda a: a.ident in icao_set)
 
     results: List[Dict[str, Any]] = []
+    total_count = 0
     for airport in airports:
         for entry in airport.aip_entries:
             if getattr(entry, "std_field_id", None) == std_field_id:
-                results.append({
-                    "icao": airport.ident,
-                    "name": airport.name,
-                    "country": airport.iso_country,
-                    "value": getattr(entry, "value", None),
-                    "source": getattr(entry, "source", None),
-                })
+                total_count += 1
+                if len(results) < max_results:
+                    results.append({
+                        "icao": airport.ident,
+                        "name": airport.name,
+                        "country": airport.iso_country,
+                        "value": getattr(entry, "value", None),
+                        "source": getattr(entry, "source", None),
+                    })
                 break  # one value per airport
-        if len(results) >= max_results:
-            break
 
-    return results
+    return results, total_count
 
 
 def _aip_get_field_changes(
@@ -1502,54 +1518,65 @@ def _aip_get_field_changes(
     country: Optional[str] = None,
     icao_codes: Optional[List[str]] = None,
     max_results: int = 20,
-) -> List[Dict[str, Any]]:
+) -> tuple:
     """Query aip_entries_changes for field modifications since a date.
 
     Requires raw SQL because euro_aip DatabaseStorage does not yet expose
     a change-query API.
+
+    Returns (results_list, total_count) where total_count is the number of
+    matching rows before the LIMIT is applied.
 
     NOTE: Should become ``storage.get_field_changes(field_id, since, country)``
     in euro_aip.  See future-euroaip-update.md.
     """
     db_path = getattr(storage, "database_path", None)
     if not db_path:
-        return []
+        return [], 0
 
     try:
-        conn = _sqlite3.connect(db_path)
-        conn.row_factory = _sqlite3.Row
+        with _sqlite3.connect(db_path) as conn:
+            conn.row_factory = _sqlite3.Row
 
-        query = """
-            SELECT
-                c.airport_icao,
-                c.old_value,
-                c.new_value,
-                c.changed_at,
-                c.source
-            FROM aip_entries_changes c
-            WHERE c.std_field_id = ?
-              AND c.changed_at >= ?
-        """
-        params: List[Any] = [std_field_id, since_date]
-
-        if country:
-            query += """
-              AND c.airport_icao IN (
-                  SELECT ident FROM airports WHERE iso_country = ?
-              )
+            where_clause = """
+                WHERE c.std_field_id = ?
+                  AND c.changed_at >= ?
             """
-            params.append(country.upper())
+            params: List[Any] = [std_field_id, since_date]
 
-        if icao_codes:
-            placeholders = ",".join("?" for _ in icao_codes)
-            query += f" AND c.airport_icao IN ({placeholders})"
-            params.extend(c.upper() for c in icao_codes)
+            if country:
+                where_clause += """
+                  AND c.airport_icao IN (
+                      SELECT ident FROM airports WHERE iso_country = ?
+                  )
+                """
+                params.append(country.upper())
 
-        query += " ORDER BY c.changed_at DESC LIMIT ?"
-        params.append(max_results)
+            if icao_codes:
+                placeholders = ",".join("?" for _ in icao_codes)
+                where_clause += f" AND c.airport_icao IN ({placeholders})"
+                params.extend(c.upper() for c in icao_codes)
 
-        rows = conn.execute(query, params).fetchall()
-        conn.close()
+            # Get total count before applying LIMIT
+            count_query = f"""
+                SELECT COUNT(*) FROM aip_entries_changes c
+                {where_clause}
+            """
+            total_count = conn.execute(count_query, params).fetchone()[0]
+
+            # Get limited results
+            data_query = f"""
+                SELECT
+                    c.airport_icao,
+                    c.old_value,
+                    c.new_value,
+                    c.changed_at,
+                    c.source
+                FROM aip_entries_changes c
+                {where_clause}
+                ORDER BY c.changed_at DESC LIMIT ?
+            """
+            rows = conn.execute(data_query, params + [max_results]).fetchall()
 
         return [
             {
@@ -1560,10 +1587,10 @@ def _aip_get_field_changes(
                 "source": row["source"],
             }
             for row in rows
-        ]
+        ], total_count
     except Exception as e:
         _aip_logger.warning("Failed to query aip_entries_changes: %s", e)
-        return []
+        return [], 0
 
 
 def _aip_get_staleness(
@@ -1659,7 +1686,7 @@ def query_aip_fields(
 
     if changed_since:
         # Change history mode
-        changes = _aip_get_field_changes(
+        changes, total_matches = _aip_get_field_changes(
             ctx.storage,
             std_field_id,
             changed_since,
@@ -1688,18 +1715,16 @@ def query_aip_fields(
                 change["current_value"] = current_lookup.get(change["icao"])
 
         airports_result = changes
-        total_matches = len(changes)
         staleness["changes_queried_since"] = changed_since
     else:
         # Normal value query mode
-        airports_result = _aip_get_field_values(
+        airports_result, total_matches = _aip_get_field_values(
             ctx.model,
             std_field_id,
             country=country,
             icao_codes=icao_codes,
             max_results=max_results,
         )
-        total_matches = len(airports_result)
 
     # --- Staleness info ---
     result_countries = {a.get("country") for a in airports_result if a.get("country")}
