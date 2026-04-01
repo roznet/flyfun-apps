@@ -108,6 +108,7 @@ mcp = FastMCP(
         "so they can visually explore the results."
     ),
     lifespan=lifespan,
+    stateless_http=True,
 )
 
 
