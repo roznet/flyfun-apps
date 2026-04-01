@@ -22,13 +22,17 @@ struct SecretsManager {
 
     // MARK: - Configuration Values
 
-    /// Base URL for API requests
+    /// Base URL for API requests (FlyFunBrief server)
     let apiBaseURL: String
+
+    /// Base URL for OAuth (shared flyfun-common auth server)
+    let authBaseURL: String
 
     // MARK: - Defaults
 
     private static let defaults: [String: String] = [
-        "api_base_url": "http://localhost:8000"
+        "api_base_url": "http://localhost:8000",
+        "auth_base_url": "https://forms.flyfun.aero"
     ]
 
     // MARK: - Init
@@ -37,6 +41,7 @@ struct SecretsManager {
         let secrets = Self.loadSecrets()
         let baseURL = secrets["api_base_url"] ?? Self.defaults["api_base_url"]!
         self.apiBaseURL = baseURL
+        self.authBaseURL = secrets["auth_base_url"] ?? Self.defaults["auth_base_url"]!
 
         Logger.app.info("SecretsManager loaded - API: \(baseURL)")
     }

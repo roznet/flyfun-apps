@@ -56,13 +56,21 @@ struct FlyFunBriefApp: App {
             return
         }
 
-        // Handle flyfunbrief:// deep links (from share extension)
+        // Handle flyfunbrief:// deep links
         guard url.scheme == "flyfunbrief" else {
             Logger.app.warning("Unknown URL scheme: \(url.scheme ?? "nil")")
             return
         }
 
-        // Parse query parameter for file path
+        // Auth callback (flyfunbrief://auth/callback?token=...)
+        if url.host == "auth" {
+            Task {
+                await appState.auth.handleAuthCallback(url: url)
+            }
+            return
+        }
+
+        // Import deep link (flyfunbrief://import?path=...)
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let pathParam = components.queryItems?.first(where: { $0.name == "path" })?.value,
               !pathParam.isEmpty else {

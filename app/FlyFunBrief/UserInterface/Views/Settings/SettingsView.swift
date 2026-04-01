@@ -18,7 +18,7 @@ struct SettingsView: View {
             Section("Account") {
                 if let auth = appState?.auth, auth.isAuthenticated {
                     HStack {
-                        Image(systemName: "person.crop.circle.fill")
+                        Image(systemName: auth.currentUser?.providerIcon ?? "person.crop.circle.fill")
                             .foregroundStyle(.green)
                         VStack(alignment: .leading) {
                             Text(auth.currentUser?.displayName ?? "Signed In")
@@ -46,12 +46,39 @@ struct SettingsView: View {
                     } onCompletion: { result in
                         Task {
                             if case .success(let authorization) = result {
-                                try? await appState?.auth.handleAuthorization(authorization)
+                                try? await appState?.auth.handleAppleAuthorization(authorization)
                             }
                         }
                     }
                     .signInWithAppleButtonStyle(.black)
                     .frame(height: 44)
+
+                    Button {
+                        Task {
+                            do {
+                                try await appState?.auth.signInWithGoogle()
+                            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+                                // User cancelled — no error to show
+                            } catch {
+                                appState?.auth.authError = error.localizedDescription
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if appState?.auth.isLoading == true {
+                                ProgressView()
+                                    .tint(.primary)
+                            }
+                            Text("Sign in with Google")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.primary.opacity(0.3), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
 
                     if let error = appState?.auth.authError {
                         Text(error)
