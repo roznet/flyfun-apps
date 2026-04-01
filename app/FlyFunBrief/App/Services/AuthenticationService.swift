@@ -269,17 +269,39 @@ final class AuthenticationService: NSObject {
     // MARK: - Private Methods
 
     private func checkExistingSession() async {
-        if let userData = loadFromKeychain(service: keychainServiceUser, account: "authUser"),
-           let user = try? JSONDecoder().decode(AuthUser.self, from: userData) {
-            self.currentUser = user
-            self.isAuthenticated = true
-            logger.info("Restored existing session (\(user.provider.rawValue))")
+        var userData = loadFromKeychain(service: keychainServiceUser, account: "authUser")
 
-            // Notify so BriefingService gets the token
-            onAuthChanged?(sessionToken)
+        // Migrate from legacy "appleUser" key if needed
+        if userData == nil,
+           let legacyData = loadFromKeychain(service: keychainServiceUser, account: "appleUser") {
+            userData = legacyData
+            saveToKeychain(service: keychainServiceUser, account: "authUser", data: legacyData)
+            deleteFromKeychain(service: keychainServiceUser, account: "appleUser")
+            logger.info("Migrated session from legacy Keychain key")
+        }
 
-            if user.provider == .apple {
-                await checkCredentialState()
+        guard let userData,
+              let user = try? JSONDecoder().decode(AuthUser.self, from: userData) else {
+            return
+        }
+
+        self.currentUser = user
+        self.isAuthenticated = true
+        logger.info("Restored existing session (\(user.provider.rawValue))")
+
+        // Notify so BriefingService gets the token
+        onAuthChanged?(sessionToken)
+
+        if user.provider == .apple {
+            await checkCredentialState()
+        } else if user.provider == .google, let token = sessionToken {
+            // Validate Google token is still valid
+            do {
+                _ = try await fetchUserInfo(token: token, provider: .google)
+                logger.debug("Google session token is valid")
+            } catch {
+                logger.warning("Google session token expired, signing out")
+                signOut()
             }
         }
     }
@@ -300,22 +322,18 @@ final class AuthenticationService: NSObject {
             throw AuthError.invalidResponse
         }
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw AuthError.invalidResponse
-        }
+        let meResponse = try JSONDecoder().decode(AuthMeResponse.self, from: data)
 
-        guard let userId = json["id"] as? String, !userId.isEmpty else {
+        guard !meResponse.id.isEmpty else {
             throw AuthError.invalidResponse
         }
-        let email = json["email"] as? String
-        let name = json["name"] as? String
 
         // Split name into first/last
-        let nameParts = name?.split(separator: " ", maxSplits: 1)
+        let nameParts = meResponse.name?.split(separator: " ", maxSplits: 1)
         let firstName = nameParts?.first.map(String.init)
         let lastName = nameParts?.count ?? 0 > 1 ? String(nameParts![1]) : nil
 
-        return AuthUser(userId: userId, email: email, firstName: firstName, lastName: lastName, provider: provider)
+        return AuthUser(userId: meResponse.id, email: meResponse.email, firstName: firstName, lastName: lastName, provider: provider)
     }
 
     private func exchangeAppleTokenWithBackend(
@@ -467,6 +485,13 @@ struct AuthUser: Codable, Equatable {
         case .google: return "g.circle.fill"
         }
     }
+}
+
+/// Response from /auth/me endpoint
+private struct AuthMeResponse: Decodable {
+    let id: String
+    let email: String?
+    let name: String?
 }
 
 /// Authentication errors
