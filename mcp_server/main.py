@@ -57,6 +57,10 @@ def _attach_viz_url(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     url = build_viz_url(tool_name, result, base_url=MAPS_BASE_URL)
     if url:
         result["map_url"] = url
+        result["map_url_hint"] = (
+            "Share the map_url link with the user so they can explore the results "
+            "on an interactive map (unless this tool call is just an intermediate step)."
+        )
     return result
 
 # ---- Global context ----------------------------------------------------------
