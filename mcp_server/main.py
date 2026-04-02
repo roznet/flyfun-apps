@@ -344,9 +344,10 @@ def calculate_flight_distance(
 @mcp.tool(
     name="list_aip_fields",
     description=(
-        "List all available AIP standard fields in the database. "
-        "Returns field names, numeric IDs, and how many airports have data for each. "
-        "Use this to discover what fields are available before querying with query_aip_fields."
+        "List what AIP data fields exist — what information categories are stored for airports. "
+        "Returns field names, numeric IDs, and airport counts. "
+        "Use when asked 'what fields are available', 'what data do you have', or 'list AIP fields'. "
+        "Call this before query_aip_fields to discover field names."
     ),
 )
 def list_aip_fields() -> Dict[str, Any]:
@@ -356,12 +357,12 @@ def list_aip_fields() -> Dict[str, Any]:
 @mcp.tool(
     name="query_aip_fields",
     description=(
-        "Query raw AIP field values for airports. Returns the value of a specific "
-        "AIP standard field across airports, filtered by country or ICAO codes. "
-        "Use changed_since to see what changed recently (includes old/new values). "
+        "Get the value of a specific AIP field (customs, hotels, restaurants, ATS, fuel, maintenance, etc.) "
+        "across airports filtered by country or ICAO codes. "
+        "Use for 'customs info in France', 'ATS hours', 'fuel types at LFPG', 'what changed recently'. "
+        "Supports change history via changed_since parameter. "
         "Common fields: Customs and immigration (302), Hotels (501), Restaurants (502), "
-        "ATS (101), Maintenance, Type of Traffic permitted (207). "
-        "Use list_aip_fields to discover all available fields."
+        "ATS (307), Fuelling (308), Maintenance (406), Type of Traffic permitted (207)."
     ),
 )
 def query_aip_fields(
