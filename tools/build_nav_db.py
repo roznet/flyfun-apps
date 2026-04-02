@@ -173,6 +173,13 @@ def main():
 
     logger.info(f"Raw airports: {len(airports_df)}")
 
+    # Fix OurAirports data: some mainland Spanish airports (LE*) are miscoded as AF
+    # ICAO prefix "L" is exclusively Southern Europe, so AF is always wrong
+    misclassified = (airports_df['ident'].str.startswith('L')) & (airports_df['continent'] == 'AF')
+    if misclassified.sum() > 0:
+        logger.info(f"Fixing {misclassified.sum()} L-prefix airports miscoded as AF → EU")
+        airports_df.loc[misclassified, 'continent'] = 'EU'
+
     # Apply GA filters
     airports_df = airports_df[
         airports_df['type'].isin(GA_TYPES)
