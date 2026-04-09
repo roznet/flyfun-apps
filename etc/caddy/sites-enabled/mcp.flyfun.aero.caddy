@@ -19,6 +19,13 @@ mcp.flyfun.aero {
 			header_up X-Real-IP {remote_host}
 		}
 	}
+	handle /weather* {
+		uri replace /weather /mcp
+		reverse_proxy localhost:8021 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
 	handle {
 		respond "Not Found" 403
