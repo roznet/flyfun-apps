@@ -174,7 +174,8 @@ class ModelBuilder:
             self.sources['autorouter'] = AutorouterSource(
                 cache_dir=str(self.cache_dir),
                 username=self.args.autorouter_username,
-                password=self.args.autorouter_password
+                password=self.args.autorouter_password,
+                airac_date=getattr(self.args, 'airac_date', None)
             )
         
         if self.args.pointdepassage:
@@ -501,9 +502,10 @@ def main():
         logger.error("At least one output format must be specified")
         return
     
-    # Handle AIRAC date for web sources
+    # Handle AIRAC date for web sources and autorouter
     web_sources_enabled = getattr(args, 'france_web', False) or getattr(args, 'uk_web', False) or getattr(args, 'norway_web', False) or getattr(args, 'slovenia_web', False) or getattr(args, 'austria_web', False)
-    if web_sources_enabled and not args.airac_date:
+    airac_aware_sources = web_sources_enabled or getattr(args, 'autorouter', False)
+    if airac_aware_sources and not args.airac_date:
         # Calculate the current effective AIRAC date
         calculator = AIRACDateCalculator()
         args.airac_date = calculator.get_current_airac_date()
