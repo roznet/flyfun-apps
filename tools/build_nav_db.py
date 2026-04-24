@@ -44,6 +44,7 @@ from euro_aip.storage import DatabaseStorage
 from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
 from euro_aip.sources.opennav import OpenNavSource
 from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
+from euro_aip.sources.faa_nasr_fix import FAANasrFixSource
 
 logging.basicConfig(
     level=logging.INFO,
@@ -158,6 +159,8 @@ def main():
                         help='Cache directory for downloaded CSVs (default: cache)')
     parser.add_argument('--continents', nargs='*', default=['EU', 'NA'],
                         help='Continents to include (default: EU NA). Use "all" for worldwide.')
+    parser.add_argument('--include-faa', action='store_true',
+                        help='Include FAA NASR fixes (~70k US named waypoints).')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -214,9 +217,30 @@ def main():
     opennav_source.update_model(model)
     logger.info(f"After OpenNav: {model.waypoints.count()} waypoints")
 
-    ourairports_source = OurAirportsNavaidSource(cache_dir=str(cache_dir_path))
+    # Scope OurAirports NAVAIDs to countries that are actually in the DB.
+    # Using iso_country (authoritative per-row) avoids the continent-miscode
+    # problem where e.g. LE* airports were tagged AF in OurAirports data.
+    allowed_countries = sorted(airports_df['iso_country'].dropna().unique().tolist())
+    logger.info(f"OurAirports NAVAID scope: {len(allowed_countries)} countries")
+    ourairports_source = OurAirportsNavaidSource(
+        cache_dir=str(cache_dir_path),
+        countries=allowed_countries,
+    )
     ourairports_source.update_model(model)
     logger.info(f"After OurAirports NAVAIDs: {model.waypoints.count()} waypoints")
+
+    if args.include_faa:
+        faa_source = FAANasrFixSource(cache_dir=str(cache_dir_path))
+        faa_source.update_model(model)
+        logger.info(f"After FAA NASR fixes: {model.waypoints.count()} waypoints")
+
+    # Collapse near-duplicate candidates (same name, coords within tolerance).
+    # Keeps genuine geographic collisions (same ident reused in far-apart
+    # regions) intact. Source priority: FRA > OpenNav > OurAirports > FAA.
+    dedup_result = model.dedup_waypoints(tolerance_nm=0.5)
+    logger.info(
+        f"Dedup: kept {dedup_result['kept']}, dropped {dedup_result['dropped']} waypoints"
+    )
 
     storage = DatabaseStorage(args.output)
     storage.save_model(model)
