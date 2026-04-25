@@ -45,6 +45,7 @@ from euro_aip.sources.eurocontrol_fra import EurocontrolFRASource
 from euro_aip.sources.opennav import OpenNavSource
 from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 from euro_aip.sources.faa_nasr_fix import FAANasrFixSource
+from euro_aip.sources.eurocontrol_sdo import EurocontrolSDOSource
 
 logging.basicConfig(
     level=logging.INFO,
@@ -161,6 +162,10 @@ def main():
                         help='Continents to include (default: EU NA). Use "all" for worldwide.')
     parser.add_argument('--include-faa', action='store_true',
                         help='Include FAA NASR fixes (~70k US named waypoints).')
+    parser.add_argument('--include-sdo', action='store_true',
+                        help='Include Eurocontrol SDO designated points from local HTML exports.')
+    parser.add_argument('--sdo-paths', nargs='*', default=None,
+                        help='Override default SDO file location (data/eurocontrol_sdo/*.html).')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -168,6 +173,14 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     continents = ALL_CONTINENTS if args.continents == ['all'] else args.continents
+
+    # nav.db is always rebuilt from scratch. DatabaseStorage upserts by key,
+    # so leaving stale rows from a previous build (e.g. lower-priority sources
+    # that would now lose dedup) would silently bloat the DB.
+    output_path = Path(args.output)
+    if output_path.exists():
+        logger.info(f"Removing existing {output_path} before rebuild")
+        output_path.unlink()
 
     # Download data
     cache_dir = Path(args.cache_dir)
@@ -233,6 +246,21 @@ def main():
         faa_source = FAANasrFixSource(cache_dir=str(cache_dir_path))
         faa_source.update_model(model)
         logger.info(f"After FAA NASR fixes: {model.waypoints.count()} waypoints")
+
+    if args.include_sdo:
+        if args.sdo_paths:
+            sdo_paths = [Path(p) for p in args.sdo_paths]
+        else:
+            sdo_paths = sorted(Path('data/eurocontrol_sdo').glob('*.html'))
+        if not sdo_paths:
+            logger.warning(
+                "--include-sdo set but no SDO HTML files found "
+                "(checked data/eurocontrol_sdo/*.html). Skipping."
+            )
+        else:
+            sdo_source = EurocontrolSDOSource(local_paths=[str(p) for p in sdo_paths])
+            sdo_source.update_model(model)
+            logger.info(f"After Eurocontrol SDO: {model.waypoints.count()} waypoints")
 
     # Collapse near-duplicate candidates (same name, coords within tolerance).
     # Keeps genuine geographic collisions (same ident reused in far-apart

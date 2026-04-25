@@ -3,6 +3,11 @@
 *~
 .DS_Store
 ~$*
+
+# Eurocontrol SDO HTML exports (manual download behind EAD login,
+# fed into nav.db via build_nav_db.py --include-sdo).
+# nav.db itself is the authoritative committed artefact.
+data/eurocontrol_sdo/*.html
 \#*#
 .#*
 
