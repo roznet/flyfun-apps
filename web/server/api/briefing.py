@@ -17,6 +17,7 @@ import json
 import tempfile
 import logging
 import os
+import requests
 
 
 def serialize_datetime(dt: datetime) -> str:
@@ -35,8 +36,26 @@ from euro_aip.briefing.models.route import Route
 from euro_aip.briefing.categorization import parse_q_code
 from euro_aip.utils.autorouter_credentials import AutorouterCredentialManager
 from euro_aip.models.euro_aip_model import EuroAipModel
-from flyfun_common.credentials import load_encrypted_creds
+from flyfun_common.autorouter import get_autorouter_token
 from flyfun_common.db import current_user_id, get_db
+
+# Autorouter OAuth linking is hosted on flyfun-weather (that's where the redirect URI
+# is registered with Autorouter). Tokens live in the shared flyfun-common DB. Override
+# via AUTOROUTER_LINK_URL for dev environments.
+_AUTOROUTER_LINK_URL = os.environ.get(
+    "AUTOROUTER_LINK_URL",
+    "https://weather.flyfun.aero/autorouter/link",
+)
+
+
+def _autorouter_not_linked_detail() -> Dict[str, str]:
+    """Structured 409 payload returned when the user hasn't linked Autorouter (or
+    token expired). iOS surfaces this to trigger the 'Connect Autorouter' flow."""
+    return {
+        "error": "autorouter_not_linked",
+        "message": "Connect your Autorouter account to fetch NOTAMs.",
+        "link_url": _AUTOROUTER_LINK_URL,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -71,35 +90,21 @@ def _get_fir_mapping() -> Dict[str, List[str]]:
 
 
 def _get_notam_source_for_user(db: Session, user_id: str) -> AutorouterNotamSource:
-    """Create an AutorouterNotamSource using the authenticated user's stored credentials.
+    """Create an AutorouterNotamSource using the authenticated user's OAuth bearer token.
 
-    Autorouter requires per-user credentials. Users store their credentials
-    via flyfun-weather's preferences UI (or any service sharing flyfun-common's DB).
-    Credentials are encrypted at rest and never returned to the client.
+    The token is obtained via the Autorouter OAuth account-linking flow
+    (`GET /autorouter/link`) and stored encrypted in `UserPreferencesRow`.
+    Raises 409 with a structured payload when the user hasn't linked yet, so
+    iOS can surface the "Connect Autorouter" UI.
     """
-    creds = load_encrypted_creds(db, user_id)
-    if not creds:
-        raise HTTPException(
-            status_code=403,
-            detail="No autorouter credentials configured. Please set up your autorouter "
-                   "credentials in the WeatherBrief app settings."
-        )
-
-    username = creds.get("username")
-    password = creds.get("password")
-    if not username or not password:
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid autorouter credentials format. Please re-enter your "
-                   "credentials in the WeatherBrief app settings."
-        )
+    token = get_autorouter_token(db, user_id)
+    if not token:
+        raise HTTPException(status_code=409, detail=_autorouter_not_linked_detail())
 
     cache_dir = os.environ.get("CACHE_DIR", "/tmp/flyfun-cache")
-    # Per-user token cache to avoid OAuth token conflicts between users
     user_cache_dir = os.path.join(cache_dir, "autorouter", user_id)
     cred_mgr = AutorouterCredentialManager(user_cache_dir)
-    cred_mgr.set_credentials(username, password)
-
+    cred_mgr.set_token(token)
     return AutorouterNotamSource(cred_mgr)
 
 
@@ -563,6 +568,14 @@ async def fetch_route_notams(
         )
     except HTTPException:
         raise
+    except requests.HTTPError as e:
+        # 401 from Autorouter = expired/revoked token. Surface as not-linked so iOS
+        # prompts the user to reconnect rather than treating it as a server outage.
+        status = e.response.status_code if e.response is not None else None
+        if status == 401:
+            raise HTTPException(status_code=409, detail=_autorouter_not_linked_detail())
+        logger.error("Autorouter NOTAM API HTTP %s: %s", status, e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Autorouter API error: {e}")
     except Exception as e:
         logger.error("Failed to fetch NOTAMs from Autorouter: %s", e, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Autorouter API error: {e}")

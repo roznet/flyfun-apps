@@ -351,6 +351,11 @@ def trial_status(request: Request):
 # Mount common auth router (login/google, callback/google, logout, providers)
 app.include_router(create_auth_router())
 
+# NOTE: Autorouter OAuth linking lives on flyfun-weather (where it was originally
+# set up; the redirect URI registered with Autorouter is weather.flyfun.aero).
+# Tokens are stored in the shared flyfun-common DB, so /api/briefing/notams below
+# reads them via get_autorouter_token without needing the link router here.
+
 # Include API routes
 app.include_router(airports.router, prefix="/api/airports", tags=["airports"])
 app.include_router(procedures.router, prefix="/api/procedures", tags=["procedures"])
