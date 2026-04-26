@@ -46,6 +46,7 @@ from euro_aip.sources.opennav import OpenNavSource
 from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 from euro_aip.sources.faa_nasr_fix import FAANasrFixSource
 from euro_aip.sources.eurocontrol_sdo import EurocontrolSDOSource
+from euro_aip.sources.vatspy_fir import VatspyFirSource
 
 logging.basicConfig(
     level=logging.INFO,
@@ -166,6 +167,10 @@ def main():
                         help='Include Eurocontrol SDO designated points from local HTML exports.')
     parser.add_argument('--sdo-paths', nargs='*', default=None,
                         help='Override default SDO file location (data/eurocontrol_sdo/*.html).')
+    parser.add_argument('--include-vatspy-firs', action='store_true',
+                        help='Include FIR boundaries from the VATSpy Data Project (CC-BY-SA-4.0).')
+    parser.add_argument('--vatspy-fir-path', default=None,
+                        help='Local path to a VATSpy Boundaries.geojson; if omitted, fetches the latest from GitHub (cached).')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -270,9 +275,20 @@ def main():
         f"Dedup: kept {dedup_result['kept']}, dropped {dedup_result['dropped']} waypoints"
     )
 
+    if args.include_vatspy_firs:
+        vatspy_source = VatspyFirSource(
+            cache_dir=str(cache_dir_path),
+            local_path=args.vatspy_fir_path,
+        )
+        vatspy_source.update_model(model)
+        logger.info(f"After VATSpy FIRs: {model.firs.count()} FIR boundaries")
+
     storage = DatabaseStorage(args.output)
     storage.save_model(model)
-    logger.info(f"Saved {model.airports.count()} airports, {model.waypoints.count()} waypoints to {args.output}")
+    logger.info(
+        f"Saved {model.airports.count()} airports, {model.waypoints.count()} waypoints, "
+        f"{model.firs.count()} FIRs to {args.output}"
+    )
 
 
 if __name__ == '__main__':

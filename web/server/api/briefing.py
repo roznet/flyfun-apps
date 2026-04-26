@@ -12,8 +12,6 @@ from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-import json
 import tempfile
 import logging
 import os
@@ -62,31 +60,12 @@ logger = logging.getLogger(__name__)
 # Global model reference (set by main.py during startup)
 model: Optional[EuroAipModel] = None
 
-# FIR mapping loaded from config
-_fir_mapping: Optional[Dict[str, List[str]]] = None
-
 
 def set_model(m: EuroAipModel):
     """Set the global model reference for geocoding."""
     global model
     model = m
     logger.info(f"Briefing API: model set with {m.airports.count()} airports")
-
-
-def _get_fir_mapping() -> Dict[str, List[str]]:
-    """Load FIR mapping from config, cached after first load."""
-    global _fir_mapping
-    if _fir_mapping is None:
-        config_path = Path(__file__).parent.parent.parent.parent / "configs" / "fir_mapping.json"
-        try:
-            with open(config_path) as f:
-                data = json.load(f)
-            _fir_mapping = data.get("prefix_to_firs", {})
-            logger.info("Loaded FIR mapping with %d prefixes", len(_fir_mapping))
-        except FileNotFoundError:
-            logger.warning("FIR mapping config not found at %s", config_path)
-            _fir_mapping = {}
-    return _fir_mapping
 
 
 def _get_notam_source_for_user(db: Session, user_id: str) -> AutorouterNotamSource:
@@ -114,27 +93,27 @@ def _resolve_route_icaos(
     waypoints: List[str],
     corridor_nm: float = 25.0,
 ) -> tuple[List[str], List[str]]:
-    """
-    Resolve a flight route to airport ICAOs and FIR codes for NOTAM queries.
+    """Resolve a flight route to airport ICAOs and FIR codes for NOTAM queries.
 
-    Uses the model's near-route airport lookup to find airports within the
-    corridor, then maps ICAO prefixes to FIR codes.
+    Airports come from `find_airports_near_route` (corridor lookup). FIRs come
+    from `model.firs_along_route` (polygon intersection of the buffered route
+    against VATSpy boundaries loaded into the model).
 
     Returns:
-        (airport_icaos, fir_codes) - deduplicated lists
+        (airport_icaos, fir_codes) — deduplicated, sorted lists
     """
     # Start with explicit route airports
     airports = {departure.upper(), destination.upper()}
     for wp in waypoints:
         airports.add(wp.upper())
 
-    # Find nearby airports using model, resolving waypoints to NavPoints
+    route_points: list = []
+
     if model is not None:
         from euro_aip.models.route_resolver import RouteResolver
         from euro_aip.models.navpoint import NavPoint
 
         resolver = RouteResolver(model)
-        route_points: list = []
         for token in [departure] + waypoints + [destination]:
             point = resolver.resolve_point(token.strip().upper())
             if point:
@@ -154,12 +133,25 @@ def _resolve_route_icaos(
         except Exception as e:
             logger.warning("Near-route lookup failed: %s", e)
 
-    # Extract unique ICAO prefixes and map to FIRs
-    fir_mapping = _get_fir_mapping()
-    prefixes = {icao[:2].upper() for icao in airports if len(icao) >= 2}
     firs: set[str] = set()
-    for prefix in prefixes:
-        firs.update(fir_mapping.get(prefix, []))
+
+    if model is not None and route_points:
+        # firs_along_route accepts NavPoint or Airport-like; route_points may
+        # contain ICAO strings — resolve those to airport NavPoints first.
+        resolved: list = []
+        for p in route_points:
+            if isinstance(p, str):
+                airport = model._airports.get(p)
+                if airport and airport.navpoint:
+                    resolved.append(airport.navpoint)
+            else:
+                resolved.append(p)
+        if resolved:
+            try:
+                firs.update(model.firs_along_route(resolved, corridor_nm=corridor_nm))
+                logger.info("FIRs along route: %s", sorted(firs))
+            except Exception as e:
+                logger.warning("FIR polygon lookup failed: %s", e)
 
     return sorted(airports), sorted(firs)
 
