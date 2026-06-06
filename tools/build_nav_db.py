@@ -19,6 +19,11 @@ Waypoint sources:
 - Eurocontrol FRA: ~8,100 FRA-significant waypoints across ECAC
 - OpenNav: ~12,000+ additional waypoints per country
 
+Approach procedures (optional):
+- --procedures-from data/airports.db copies the curated IFR approach
+  procedures from the AIP database onto the matching in-scope airports,
+  avoiding a re-fetch of AIP data.
+
 Usage:
     python tools/build_nav_db.py [OPTIONS]
 
@@ -30,6 +35,11 @@ Usage:
 
     # Custom output path
     python tools/build_nav_db.py -o /tmp/nav.db
+
+    # Full build matching the committed nav.db, with procedures
+    python tools/build_nav_db.py -o data/nav.db \\
+        --include-sdo --include-faa --include-vatspy-firs \\
+        --procedures-from data/airports.db
 """
 
 import argparse
@@ -171,6 +181,10 @@ def main():
                         help='Include FIR boundaries from the VATSpy Data Project (CC-BY-SA-4.0).')
     parser.add_argument('--vatspy-fir-path', default=None,
                         help='Local path to a VATSpy Boundaries.geojson; if omitted, fetches the latest from GitHub (cached).')
+    parser.add_argument('--procedures-from', default=None,
+                        help='Copy approach procedures from an existing AIP database '
+                             '(e.g. data/airports.db) onto in-scope airports. Procedures '
+                             'inherit that database\'s AIRAC freshness.')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -283,11 +297,34 @@ def main():
         vatspy_source.update_model(model)
         logger.info(f"After VATSpy FIRs: {model.firs.count()} FIR boundaries")
 
+    # Copy approach procedures from an existing AIP database (e.g. airports.db).
+    # nav.db airports come from OurAirports and carry no AIP data; the AIP
+    # pipeline already curated procedures, so we mirror them rather than
+    # re-fetching. Only airports already in the nav model get procedures —
+    # any AIP airport outside nav.db's scope is skipped (logged below).
+    if args.procedures_from:
+        logger.info(f"Loading procedures from {args.procedures_from}")
+        aip_model = DatabaseStorage(args.procedures_from).load_model()
+        copied = 0
+        skipped = 0
+        for src_airport in aip_model.airports.with_procedures().all():
+            nav_airport = model.airports.get(src_airport.ident)
+            if nav_airport is None:
+                skipped += 1
+                continue
+            for procedure in src_airport.procedures:
+                nav_airport.add_procedure(procedure)
+                copied += 1
+        logger.info(
+            f"Copied {copied} procedures onto {model.airports.with_procedures().count()} "
+            f"airports ({skipped} AIP airports skipped — not in nav scope)"
+        )
+
     storage = DatabaseStorage(args.output)
     storage.save_model(model)
     logger.info(
         f"Saved {model.airports.count()} airports, {model.waypoints.count()} waypoints, "
-        f"{model.firs.count()} FIRs to {args.output}"
+        f"{model.procedures.count()} procedures, {model.firs.count()} FIRs to {args.output}"
     )
 
 
