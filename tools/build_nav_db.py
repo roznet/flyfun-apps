@@ -19,10 +19,12 @@ Waypoint sources:
 - Eurocontrol FRA: ~8,100 FRA-significant waypoints across ECAC
 - OpenNav: ~12,000+ additional waypoints per country
 
-Approach procedures (optional):
+Approach procedures + border crossings (optional):
 - --procedures-from data/airports.db copies the curated IFR approach
-  procedures from the AIP database onto the matching in-scope airports,
-  avoiding a re-fetch of AIP data.
+  procedures AND the border crossing (point-of-entry / customs) entries
+  from the AIP database onto the matching in-scope airports, avoiding a
+  re-fetch of AIP data. The point_of_entry flag is derived at load time
+  from the copied border_crossing_points table.
 
 Usage:
     python tools/build_nav_db.py [OPTIONS]
@@ -182,9 +184,10 @@ def main():
     parser.add_argument('--vatspy-fir-path', default=None,
                         help='Local path to a VATSpy Boundaries.geojson; if omitted, fetches the latest from GitHub (cached).')
     parser.add_argument('--procedures-from', default=None,
-                        help='Copy approach procedures from an existing AIP database '
-                             '(e.g. data/airports.db) onto in-scope airports. Procedures '
-                             'inherit that database\'s AIRAC freshness.')
+                        help='Copy approach procedures and border crossing (point-of-entry) '
+                             'entries from an existing AIP database (e.g. data/airports.db) '
+                             'onto in-scope airports. Both inherit that database\'s AIRAC '
+                             'freshness.')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -318,6 +321,23 @@ def main():
         logger.info(
             f"Copied {copied} procedures onto {model.airports.with_procedures().count()} "
             f"airports ({skipped} AIP airports skipped — not in nav scope)"
+        )
+
+        # Copy border crossing (point-of-entry / customs) entries. add_border_crossing_entry
+        # self-scopes: entries whose ICAO isn't already in the nav model are dropped, so
+        # out-of-scope points are skipped the same way procedures are. The point_of_entry
+        # flag is not stored directly — it's re-derived from these rows on load_model().
+        bc_copied = 0
+        for entry in aip_model.get_all_border_crossing_points():
+            icao = entry.icao_code or entry.matched_airport_icao
+            if icao and model.airports.get(icao) is not None:
+                model.add_border_crossing_entry(entry)
+                bc_copied += 1
+        model.update_all_derived_fields()
+        poe_count = sum(1 for a in model.airports.all() if a.point_of_entry)
+        logger.info(
+            f"Copied {bc_copied} border crossing entries; {poe_count} airports flagged "
+            f"as point-of-entry"
         )
 
     storage = DatabaseStorage(args.output)
