@@ -15,6 +15,14 @@ Airport filters:
 - Has coordinates
 - Continents: configurable (default: EU + NA)
 
+Derived military flag:
+- OurAirports has no military indicator, so euro_aip's MilitaryClassifier
+  derives one from ICAO code conventions (Germany's ET prefix, the UK's EG
+  military third letters), a curated ICAO list for joint-use fields whose name
+  gives nothing away, and aerodrome-name patterns ("Air Base", "Fliegerhorst",
+  "(BA 118)"). Best-effort only: a False flag means "no military signal found",
+  not a positive assertion of civil status. The build logs a per-rule breakdown.
+
 Waypoint sources:
 - Eurocontrol FRA: ~8,100 FRA-significant waypoints across ECAC
 - OpenNav: ~12,000+ additional waypoints per country
@@ -59,6 +67,7 @@ from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 from euro_aip.sources.faa_nasr_fix import FAANasrFixSource
 from euro_aip.sources.eurocontrol_sdo import EurocontrolSDOSource
 from euro_aip.sources.vatspy_fir import VatspyFirSource
+from euro_aip.utils import MilitaryClassifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -158,11 +167,39 @@ def build_model(airports_df: pd.DataFrame, runways_df: pd.DataFrame) -> EuroAipM
 
         airports_to_add.append(airport)
 
+    annotate_military(airports_to_add)
+
     # validate=False because we already filtered to valid 4-char idents
     result = model.bulk_add_airports(airports_to_add, merge="update_existing",
                                      validate=False, update_derived=True)
     logger.info(f"Added {result['added']} airports, updated {result['updated']}")
     return model
+
+
+def annotate_military(airports: List[Airport]) -> None:
+    """Set the best-effort military flag on each airport, in place.
+
+    OurAirports carries no military indicator, so euro_aip derives one from ICAO
+    code conventions, a curated ICAO list, and aerodrome-name patterns. The
+    per-rule breakdown is logged rather than just a total: if an upstream naming
+    change silently kills a rule, a count dropping to zero is the only way we
+    would notice.
+    """
+    classifier = MilitaryClassifier()
+    counts = classifier.annotate_all(airports)
+
+    total = sum(counts.values())
+    logger.info(f"Military/joint-use aerodromes flagged: {total}")
+    for rule, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        logger.info(f"  {rule}: {count}")
+
+    # A rule that stops matching is a silent data-quality regression, so say so.
+    for rule in ('icao_prefix', 'override_military'):
+        if not counts.get(rule):
+            logger.warning(
+                f"Military rule '{rule}' matched nothing — check whether "
+                f"upstream naming or ICAO coding changed"
+            )
 
 
 def main():
