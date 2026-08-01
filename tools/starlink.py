@@ -70,7 +70,7 @@ still have signal; where it says "covered" you should have it.
 
 Usage:
   python tools/starlink.py [NAME]
-      [-r REGION | --bbox W,S,E,N]
+      [-r REGION | --bbox=W,S,E,N]
       [--distance-nm NM] [--source SOURCE]
       [--land-simplify-m M] [--simplify-m M]
       [--no-fill] [--out-dir DIR] [--kmz FILE] [--geojson FILE]
@@ -95,7 +95,9 @@ Examples:
   python tools/starlink.py Starlink12NM --out-dir out --kmz out/preview.kmz
 
   # Custom area, and dump GeoJSON to inspect in QGIS/geojson.io
-  python tools/starlink.py --bbox -15,45,10,60 --geojson /tmp/limit.geojson
+  # Note the '=': a bbox starting with a negative longitude looks like an option
+  # to argparse, so --bbox=-15,... works where --bbox -15,... does not.
+  python tools/starlink.py --bbox=-15,45,10,60 --geojson /tmp/limit.geojson
 """
 
 import argparse
@@ -298,12 +300,51 @@ class CoastlineSource:
         logger.info(f'Cached {dest} ({dest.stat().st_size / 1e6:.1f} MB)')
         return dest
 
-    def _unzip(self, archive: Path) -> Path:
+    def _unzip(self, url: str, expect: Optional[str] = None) -> Path:
+        """
+        Download and extract into the cache, unless what we need is already there.
+
+        Keyed on the wanted file rather than on the target directory existing.
+        These archives carry several resolutions, and a directory extracted for
+        one of them would otherwise permanently mask the rest — asking for a
+        resolution that had not been unpacked yet failed with "not found" while
+        the archive holding it sat right there in the cache.
+
+        When the wanted file is named exactly, only its own sidecars are
+        unpacked: a shapefile needs its .shx/.dbf/.prj, but there is no reason to
+        spill every other resolution across the disk to read one of them.
+
+        A truncated archive is discarded and fetched again. _fetch only knows
+        whether a cached file is non-empty, so an interrupted download would
+        otherwise be trusted forever and fail on every subsequent run.
+        """
+        archive = self._fetch(url)
         target = self.cache_dir / archive.stem
-        if not target.exists():
-            logger.info(f'Extracting {archive}')
-            with zipfile.ZipFile(archive) as zf:
-                zf.extractall(target)
+        if expect:
+            if any(target.glob(f'**/{expect}')):
+                return target
+        elif target.exists():
+            return target
+
+        for attempt in (1, 2):
+            try:
+                logger.info(f'Extracting {archive}')
+                with zipfile.ZipFile(archive) as zf:
+                    members = None
+                    if expect and not any(ch in expect for ch in '*?['):
+                        stem = Path(expect).stem
+                        members = [n for n in zf.namelist() if Path(n).stem == stem] or None
+                    zf.extractall(target, members)
+                return target
+            except zipfile.BadZipFile:
+                if attempt == 2:
+                    raise
+                logger.warning(
+                    f'{archive.name} is not a valid zip — most likely a truncated '
+                    f'download. Discarding and fetching it again.'
+                )
+                archive.unlink()
+                archive = self._fetch(url)
         return target
 
     @staticmethod
@@ -348,8 +389,8 @@ class GshhgSource(CoastlineSource):
         self.accuracy_note = f'GSHHG-{resolution} ({self.ACCURACY.get(resolution, "?")})'
 
     def shapefile_path(self) -> Path:
-        root = self._unzip(self._fetch(self.URL))
         wanted = f'GSHHS_{self.resolution}_L1.shp'
+        root = self._unzip(self.URL, expect=wanted)
         for candidate in root.glob(f'**/{wanted}'):
             return candidate
         raise ValueError(f'{wanted} not found under {root}')
@@ -413,7 +454,7 @@ class OsmSource(CoastlineSource):
     accuracy_note = 'OSM land polygons (full resolution)'
 
     def shapefile_path(self) -> Path:
-        root = self._unzip(self._fetch(self.URL))
+        root = self._unzip(self.URL, expect='*.shp')
         for candidate in sorted(root.glob('**/*.shp')):
             return candidate
         raise ValueError(f'No .shp found under {root}')

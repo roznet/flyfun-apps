@@ -149,7 +149,8 @@ python starlink.py Starlink12NM -r western-europe -n
 
 - **Key options**
   - `-r/--region`: `western-europe` (default), `uk-ireland`, `mediterranean`, `atlantic-islands`,
-    `scandinavia`, `europe`. Or `--bbox W,S,E,N` for anything else.
+    `scandinavia`, `europe`. Or `--bbox=W,S,E,N` for anything else — use the `=`, since a
+    bbox starting with a negative longitude is otherwise parsed as an option name.
   - `--distance-nm`: the rule itself, default 12. Change it and the layer follows.
   - `--source`: coastline dataset, default `gshhg-h` (~200 m). Also `gshhg-i`, `ne10m`, `osm`.
   - `--no-fill`: emit only the limit line, skipping the shaded beyond-limit layer.
