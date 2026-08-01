@@ -193,6 +193,13 @@ def annotate_military(airports: List[Airport]) -> None:
     for rule, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         logger.info(f"  {rule}: {count}")
 
+    # The split that matters downstream: military-only fields are the ones a
+    # civil flight cannot divert into, whereas joint fields have a civil
+    # terminal and should stay in the candidate list.
+    joint = sum(1 for a in airports if a.military and a.joint_use)
+    logger.info(f"  of which joint civil/military: {joint}")
+    logger.info(f"  military-only (not divertable): {total - joint}")
+
     # A rule that stops matching is a silent data-quality regression, so say so.
     for rule in ('icao_prefix', 'override_military'):
         if not counts.get(rule):

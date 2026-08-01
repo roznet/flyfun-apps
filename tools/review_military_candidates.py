@@ -22,6 +22,12 @@ What counts as AIP confirmation
 There is no "military" field in the AIP. The usable evidence is indirect and
 concentrated in the fuel fields:
 
+  strong   a defence ministry or armed service named in AD Administration
+           (AD 2.2 item 6, "AD Administration, address, telephone…"). That field
+           names who OPERATES the aerodrome, so it is the most direct statement
+           the AIP makes -- and it catches fields whose name gives nothing away:
+           LFMC Le Luc and LFBY Dax read "MINISTRY OF DEFENCE (ALAT)", LFTH
+           Toulon-Hyeres reads "MINISTRY OF DEFENCE" behind an "Airport" name.
   strong   NATO oil/hydraulic codes (O-133, O-150, H-515) — civil aerodromes
            never publish these
   strong   military-only fuels: F-18 (military avgas), F-44 (JP-5, naval)
@@ -161,6 +167,32 @@ WORDING_FIELDS = (
 
 MILITARY_WORDING = re.compile(r'militar\w*|militaire', re.IGNORECASE)
 
+# AD 2.2 item 6 ("AD Administration, address, telephone…") names the authority
+# that operates the aerodrome, so a defence ministry or armed service appearing
+# here is about as direct a statement as the AIP ever makes. Stronger than the
+# fuel-code proxies, and it catches fields whose name gives nothing away:
+# LFMC Le Luc and LFBY Dax read "MINISTRY OF DEFENCE (ALAT)", LFTH Toulon-Hyères
+# reads "MINISTRY OF DEFENCE" behind an ordinary "Airport" name.
+#
+# Scoped to this one field on purpose — "Air Force" in Hotels or Transportation
+# is incidental, and only here does it identify the operator.
+ADMIN_FIELD = 'AD Administration'
+
+ADMIN_MILITARY_AUTHORITY = re.compile(
+    r'\bdefen[cs]e\b'                       # MINISTRY OF DEFENCE / DEFENSE
+    r'|\bd[eé]fense\b'                      # MINISTÈRE DE LA DÉFENSE
+    r'|\bair\s+force\b'                     # incl. Royal Norwegian Air Force
+    r'|\bluftwaffe\b|\bbundeswehr\b'
+    r'|\bluftforsvaret\b|\bflygvapnet\b'
+    r'|\baeronautica\s+militare\b'
+    r'|\barm[eé]e\s+de\s+l[\'’]air\b'
+    r'|\bmarine\s+nationale\b'
+    r'|\bALAT\b|\bFAF\b|\bFNF\b'            # French army / air force / navy air arms
+    r'|\bnavy\b|\bnaval\b|\barmy\b'
+    r'|\bmilit[aä]r',
+    re.IGNORECASE,
+)
+
 # Markers that LOOK strong but are not. Kept, reported, and never used to
 # promote — documenting the traps is the point:
 #
@@ -227,6 +259,13 @@ def load_aip_evidence(aip_db: Path) -> Dict[str, AipEvidence]:
             m = pattern.search(value)
             if m:
                 ev.strong[label].append(f'{label_field}: …{_excerpt(value, m)}…')
+
+        # The operating authority named in AD 2.2 item 6.
+        if label_field == ADMIN_FIELD:
+            m = ADMIN_MILITARY_AUTHORITY.search(value)
+            if m:
+                ev.strong['defence authority (AD Administration)'].append(
+                    f'{label_field}: …{_excerpt(value, m)}…')
 
         # "military" only counts in a field that describes the aerodrome.
         if label_field in WORDING_FIELDS:

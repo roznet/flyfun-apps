@@ -26,7 +26,7 @@ alembic==1.16.1
 PyMySQL==1.1.1
 SQLAlchemy==2.0.44
 uvicorn==0.38.0
-euro-aip>=0.14.0
+euro-aip>=0.15.0
 flyfun-common>=0.1.2
 # KML/geometry for the ForeFlight export tools (tools/foreflight.py, tools/starlink.py)
 simplekml==1.3.2
