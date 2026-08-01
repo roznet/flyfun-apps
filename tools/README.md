@@ -28,6 +28,8 @@ source dev.env
 | `aipchange.py` | Compare two AIP sources (e.g., sequential AIRAC cycles) and report field-level deltas. |
 | `bordercrossingexport.py` | Build a model enriched with customs/border crossing data and export it to database/JSON for downstream use. |
 | `foreflight.py` | Create ForeFlight content packs (KML/CSV + manifest) from the Euro AIP database or custom Excel definitions. |
+| `starlink.py` | Build a ForeFlight map layer showing where Starlink coastal coverage ends (the 12 NM offshore limit). |
+| `ffpack.py` | Shared helper, not a CLI: content pack directory + `manifest.json` handling, used by `foreflight.py` and `starlink.py`. |
 
 ## `aipexport.py`
 
@@ -132,6 +134,49 @@ python foreflight.py CustomApproach -c approach -x ./approach_definition.xlsx -n
   - `simplekml` for KML generation (already listed in `requirements.txt`)
 - **Outputs**
   - Content pack directory containing `manifest.json`, `navdata/*.kml`, and optional updated Excel (`*_updated.xlsx`)
+
+## `starlink.py`
+
+- **Use when** you want to see in the cockpit where Starlink stops working. Starlink's land/Roam
+  service reaches territorial waters only out to 12 NM from the coast; this draws that limit as a
+  ForeFlight map layer.
+- **Example (the default covers UK + France + Spain + Balearics)**
+
+```bash
+source dev.env
+python starlink.py Starlink12NM -r western-europe -n
+```
+
+- **Key options**
+  - `-r/--region`: `western-europe` (default), `uk-ireland`, `mediterranean`, `atlantic-islands`,
+    `scandinavia`, `europe`. Or `--bbox W,S,E,N` for anything else.
+  - `--distance-nm`: the rule itself, default 12. Change it and the layer follows.
+  - `--source`: coastline dataset, default `gshhg-h` (~200 m). Also `gshhg-i`, `ne10m`, `osm`.
+  - `--no-fill`: emit only the limit line, skipping the shaded beyond-limit layer.
+  - `--kmz FILE`: also write a single-file KMZ with both layers as folders, for checking the
+    result in Google Earth before loading it on the iPad. The content pack `.zip` is *not* a KMZ
+    (a KMZ needs `doc.kml` at the archive root), so use this rather than renaming the pack.
+  - `--out-dir DIR`: build the pack somewhere other than the current directory, e.g. `out/`.
+- **Outputs**
+  - `layers/<Name>Limit.kml` — the offshore limit, as one placemark holding a MultiGeometry of
+    LineStrings. Islands and enclosed water (mid Irish Sea) come out as their own closed rings.
+  - `layers/<Name>Beyond.kml` — translucent wash over the water past the limit. Separate file so
+    ForeFlight lists it as an independent toggle.
+- **Notes**
+  - Every run measures its own output: it resamples the emitted limit and reports the geodesic
+    distance back to land. Expect a median near 12.0 NM and ~100% of samples within 0.5 NM. This
+    checks the buffer maths, *not* the fidelity of the source coastline.
+  - The limit is buffered from the *physical* shoreline, so it is conservative. Legal territorial
+    seas use straight baselines that close bays, which sit further out in places like Norway and
+    the French Biscay coast.
+  - **Resolution is a memory decision, not a quality preference.** Detail below a few hundred
+    metres cannot survive a 22 km buffer, and peak memory in GEOS scales with the number of
+    polygon parts fed to one buffer call. Full-resolution OSM coastline is 5.3M vertices for the
+    British Isles alone; buffering an archipelago in one call has been measured at 30 GB. Hence
+    the defaults simplify on read and buffer in small batches, and `--max-vertices` /
+    `--memory-limit-mb` exist to abort rather than let the machine swap.
+- **Dependencies**
+  - `shapely`, `pyproj`, `pyshp`, `simplekml`
 
 ---
 
