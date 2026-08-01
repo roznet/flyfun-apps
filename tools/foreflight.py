@@ -76,8 +76,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pprint import pprint
 import simplekml
-import json
-import datetime
 import pandas as pd
 import os
 try:
@@ -88,6 +86,8 @@ except ImportError:
 from euro_aip.storage.database_storage import DatabaseStorage
 from euro_aip.models.euro_aip_model import EuroAipModel
 from euro_aip.models.navpoint import NavPoint
+
+from ffpack import ContentPack
 
 # Configure logging
 logging.basicConfig(
@@ -273,39 +273,16 @@ class Command:
 
     def build_database_content_pack(self):
         """Build a complete ForeFlight content pack from database."""
-        name = self.args.name
-        pack_dir = Path(name)
-        pack_dir.mkdir(exist_ok=True)
-        
-        nav_dir = pack_dir / 'navdata'
-        nav_dir.mkdir(exist_ok=True)
-
-        # Create or update manifest
-        manifest_file = pack_dir / 'manifest.json'
-        manifest_data = {
-            'name': 'Point of Entry',
-            'abbreviation': 'POE.V2',
-            'version': 2,
-            'organizationName': 'flyfun.aero'
-        }
-
-        if manifest_file.exists():
-            with open(manifest_file, 'r') as f:
-                existing = json.load(f)
-            manifest_data['version'] = existing['version']
-            if self.args.next_version:
-                manifest_data['version'] += 1
-                logger.info(f'Incrementing version to {manifest_data["version"]}')
-
-        manifest_data['effectiveDate'] = datetime.datetime.now().isoformat()
-        days = int(self.args.expiration)
-        manifest_data['expirationDate'] = (
-            datetime.datetime.now() + datetime.timedelta(days=days)
-        ).isoformat()
-
-        with open(manifest_file, 'w') as f:
-            json.dump(manifest_data, f, indent=2)
-        logger.info(f'Writing {manifest_file}')
+        pack = ContentPack(
+            self.args.name,
+            name='Point of Entry',
+            abbreviation='POE.V2',
+            version=2,
+        )
+        # The abbreviation is intentionally not re-stamped with the version here.
+        pack.adopt_version(self.args.next_version)
+        pack.write_manifest(self.args.expiration)
+        nav_dir = pack.subdir(ContentPack.NAVDATA)
 
         # Build KML files
         self.build_approaches(str(nav_dir / 'Approaches.kml'))
@@ -317,41 +294,17 @@ class Command:
         
         # Open and process the Excel file
         self.open_definition_file(name)
-        
-        # Create content pack directory
-        pack_dir = Path(name)
-        pack_dir.mkdir(exist_ok=True)
-        
-        nav_dir = pack_dir / 'navdata'
-        nav_dir.mkdir(exist_ok=True)
 
-        # Create or update manifest
-        manifest_file = pack_dir / 'manifest.json'
-        manifest_data = {
-            'name': 'Custom Approaches',
-            'abbreviation': f'{name}.V1',
-            'version': 1,
-            'organizationName': 'flyfun.aero'
-        }
-
-        if manifest_file.exists():
-            with open(manifest_file, 'r') as f:
-                existing = json.load(f)
-            manifest_data['version'] = existing['version']
-            if self.args.next_version:
-                manifest_data['version'] += 1
-                manifest_data['abbreviation'] = f'{name}.V{manifest_data["version"]}'
-                logger.info(f'Incrementing version to {manifest_data["version"]}')
-
-        manifest_data['effectiveDate'] = datetime.datetime.now().isoformat()
-        days = int(self.args.expiration)
-        manifest_data['expirationDate'] = (
-            datetime.datetime.now() + datetime.timedelta(days=days)
-        ).isoformat()
-
-        with open(manifest_file, 'w') as f:
-            json.dump(manifest_data, f, indent=2)
-        logger.info(f'Writing {manifest_file}')
+        pack = ContentPack(
+            name,
+            name='Custom Approaches',
+            abbreviation=f'{name}.V1',
+            version=1,
+        )
+        if pack.adopt_version(self.args.next_version):
+            pack.abbreviation = f'{name}.V{pack.version}'
+        pack.write_manifest(self.args.expiration)
+        nav_dir = pack.subdir(ContentPack.NAVDATA)
 
         # Process waypoints and write navdata
         self.process_waypoints()
