@@ -79,7 +79,8 @@ Usage:
       [--verify-report] [--skip-verify] [-v|--verbose]
 
 Examples:
-  # Default: UK + France + Spain + Balearics, 12 NM
+  # Default: all of Europe — Azores to the Black Sea, North Cape to the
+  # Canaries. ~30 s, ~350 MB peak, ~270 kB packed.
   python tools/starlink.py
 
   # Just the British Isles, line only, bumped version
@@ -88,8 +89,8 @@ Examples:
   # A different rule (e.g. a plan with a wider coastal allowance)
   python tools/starlink.py Starlink20NM --distance-nm 20
 
-  # Everything from the Azores to the Black Sea (slow, big file)
-  python tools/starlink.py Starlink12NM -r europe
+  # The old default, if a smaller pack is wanted
+  python tools/starlink.py Starlink12NM -r western-europe
 
   # Build into out/ and also emit a KMZ to eyeball in Google Earth first
   python tools/starlink.py Starlink12NM --out-dir out --kmz out/preview.kmz
@@ -137,9 +138,20 @@ NM_IN_M = 1852.0
 M_PER_DEG_LAT = 111320.0
 
 REGIONS: Dict[str, Tuple[float, float, float, float]] = {
+    # The default, and wide enough that the edges are chosen rather than
+    # inherited. West reaches Flores (-31.3), the last land before
+    # Newfoundland; south clears the Canaries and, because the Gulf of Sirte
+    # only dips to 30.2 N, the whole North African shore with it; east covers
+    # the Black Sea to Batumi (41.6 E); north takes in the North Cape (71.2 N)
+    # and Jan Mayen, while leaving out Svalbard.
+    #
+    # Both shores of every crossing have to be inside the box or the layer goes
+    # quiet exactly when you are committed over water — the old western-europe
+    # default cut Tunisia in half at 35 N and dropped Libya altogether, so a
+    # Sicily -> Tunis leg showed the link dying and never showed it coming back.
     'europe':           (-32.0, 26.0, 45.0, 72.0),
-    # Far enough south for the Balearics (Mallorca is at 39.6 N) so a
-    # UK -> France -> Spain -> Mallorca trip fits in one layer.
+    # The previous default. Far enough south for the Balearics (Mallorca is at
+    # 39.6 N) so a UK -> France -> Spain -> Mallorca trip fits in one layer.
     'western-europe':   (-13.0, 35.0, 20.0, 62.0),
     'uk-ireland':       (-13.0, 47.0,  4.0, 62.0),
     'mediterranean':    ( -7.0, 29.0, 37.0, 47.0),
@@ -743,6 +755,37 @@ def log_verification(stats: dict) -> None:
 # KML output
 # ---------------------------------------------------------------------------
 
+def add_polygon(multi, poly) -> None:
+    """
+    Add a polygon to a MultiGeometry, emitting one <innerBoundaryIs> per hole.
+
+    Not a style preference — simplekml gets this wrong. Its innerboundaryis
+    setter concatenates every hole into a single element (featgeom.py:
+    `self._kml['innerBoundaryIs'] += LinearRing(ring)`), producing one
+    <innerBoundaryIs> wrapping N <LinearRing>s. KML allows one ring per
+    <innerBoundaryIs>, and Google Earth honours only the first, so every hole
+    after the first was silently filled in.
+
+    That mattered here more than it sounds. Along a mainland coast the covered
+    band lies *outside* the beyond-limit polygon and draws correctly, but every
+    island's coverage ring is a hole — so Mallorca, the Azores, Madeira,
+    Iceland and the Faroes were all washed over as if they had no coverage,
+    which is precisely backwards for the features this layer exists to show.
+
+    A trailing underscore is simplekml's own convention for a value emitted
+    verbatim rather than wrapped in <key> (base.py: `if var.endswith("_")`),
+    so the repeated elements go in without post-processing the saved file.
+    """
+    kml_poly = multi.newpolygon(outerboundaryis=list(poly.exterior.coords))
+    if not poly.interiors:
+        return
+    kml_poly._kml['innerBoundaryIs'] = None
+    kml_poly._kml['innerboundaryis_'] = ''.join(
+        f'<innerBoundaryIs>{simplekml.LinearRing(list(ring.coords))}</innerBoundaryIs>'
+        for ring in poly.interiors
+    )
+
+
 def write_limit_kml(dest: Path, lines, distance_nm: float, colour: str) -> None:
     """
     One placemark holding a MultiGeometry of every boundary line.
@@ -777,10 +820,7 @@ def write_beyond_kml(dest: Path, water, distance_nm: float, colour: str) -> None
         'land/Roam coverage.'
     )
     for poly in water:
-        multi.newpolygon(
-            outerboundaryis=list(poly.exterior.coords),
-            innerboundaryis=[list(ring.coords) for ring in poly.interiors],
-        )
+        add_polygon(multi, poly)
     multi.style.polystyle.color = colour
     multi.style.polystyle.outline = 0
     multi.style.linestyle.width = 0
@@ -812,10 +852,7 @@ def write_preview_kmz(dest: Path, lines, water, distance_nm: float,
         water_folder = kml.newfolder(name=f'No coverage (beyond {distance_nm:g} NM)')
         wash = water_folder.newmultigeometry(name='Beyond limit')
         for poly in water:
-            wash.newpolygon(
-                outerboundaryis=list(poly.exterior.coords),
-                innerboundaryis=[list(ring.coords) for ring in poly.interiors],
-            )
+            add_polygon(wash, poly)
         wash.style.polystyle.color = fill_colour
         wash.style.polystyle.outline = 0
         wash.style.linestyle.width = 0
@@ -1070,8 +1107,8 @@ def main():
     )
     parser.add_argument('name', nargs='?', default='Starlink12NM',
                         help='Name of the content pack (default: Starlink12NM)')
-    parser.add_argument('-r', '--region', choices=sorted(REGIONS), default='western-europe',
-                        help='Predefined area to cover (default: western-europe)')
+    parser.add_argument('-r', '--region', choices=sorted(REGIONS), default='europe',
+                        help='Predefined area to cover (default: europe)')
     parser.add_argument('--bbox', help='Explicit area as W,S,E,N in degrees (overrides --region)')
     parser.add_argument('--distance-nm', type=float, default=12.0,
                         help='Coverage distance from the coast in NM (default: 12)')
