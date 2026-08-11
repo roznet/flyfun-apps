@@ -2,8 +2,8 @@
 //  AuthenticationService.swift
 //  FlyFunBrief
 //
-//  Handles Sign in with Apple authentication.
-//  Adapted from FlyFunEuroAIP's AuthenticationService.
+//  Handles authentication via Apple Sign-In and Google OAuth.
+//  Google uses ASWebAuthenticationSession with server-side OAuth flow.
 //
 
 import Foundation
@@ -11,7 +11,7 @@ import AuthenticationServices
 import OSLog
 import Observation
 
-/// Service for handling Sign in with Apple authentication
+/// Service for handling authentication (Apple Sign-In + Google OAuth)
 @MainActor
 @Observable
 final class AuthenticationService: NSObject {
@@ -19,29 +19,37 @@ final class AuthenticationService: NSObject {
     // MARK: - Observable Properties
 
     private(set) var isAuthenticated = false
-    private(set) var currentUser: AppleUser?
+    private(set) var currentUser: AuthUser?
     private(set) var authError: String?
     private(set) var isLoading = false
 
     // MARK: - Configuration
 
+    /// FlyFunBrief API server (briefing endpoints)
     private let backendURL: String
+    /// OAuth server (shared flyfun-common auth, e.g. forms.flyfun.aero)
+    private let authURL: String
     private let logger = Logger(subsystem: "net.ro-z.FlyFunBrief", category: "Auth")
+
+    /// URL scheme for OAuth callback redirect
+    private let callbackScheme = "flyfunbrief"
+
+    /// Retained so the session isn't deallocated before the callback fires
+    private var authSession: ASWebAuthenticationSession?
 
     // Keychain keys
     private let keychainServiceToken = "net.ro-z.FlyFunBrief.authToken"
-    private let keychainServiceUser = "net.ro-z.FlyFunBrief.appleUser"
-
-    // Continuation for async/await
-    private var signInContinuation: CheckedContinuation<AppleUser, Error>?
+    private let keychainServiceUser = "net.ro-z.FlyFunBrief.authUser"
 
     /// Callback when auth state changes (token obtained or cleared)
     var onAuthChanged: ((String?) -> Void)?
 
     // MARK: - Initialization
 
-    init(backendURL: String = SecretsManager.shared.apiBaseURL) {
+    init(backendURL: String = SecretsManager.shared.apiBaseURL,
+         authURL: String = SecretsManager.shared.authBaseURL) {
         self.backendURL = backendURL
+        self.authURL = authURL
         super.init()
 
         // Check for existing session on init
@@ -60,10 +68,10 @@ final class AuthenticationService: NSObject {
         return String(data: data, encoding: .utf8)
     }
 
-    // MARK: - Public Methods
+    // MARK: - Apple Sign-In
 
     /// Handle an authorization from SignInWithAppleButton
-    func handleAuthorization(_ authorization: ASAuthorization) async throws {
+    func handleAppleAuthorization(_ authorization: ASAuthorization) async throws {
         isLoading = true
         authError = nil
 
@@ -91,17 +99,19 @@ final class AuthenticationService: NSObject {
         }
 
         // Create user object — Apple only provides email on first auth
-        var user = AppleUser(userId: userId, email: email, firstName: firstName, lastName: lastName)
+        var user = AuthUser(userId: userId, email: email, firstName: firstName, lastName: lastName, provider: .apple)
 
         // For returning users, restore email from Keychain
         if email == nil,
-           let storedData = loadFromKeychain(service: keychainServiceUser, account: "appleUser"),
-           let storedUser = try? JSONDecoder().decode(AppleUser.self, from: storedData) {
-            user = AppleUser(
+           let storedData = loadFromKeychain(service: keychainServiceUser, account: "authUser"),
+           let storedUser = try? JSONDecoder().decode(AuthUser.self, from: storedData),
+           storedUser.provider == .apple {
+            user = AuthUser(
                 userId: userId,
                 email: storedUser.email,
                 firstName: storedUser.firstName ?? firstName,
-                lastName: storedUser.lastName ?? lastName
+                lastName: storedUser.lastName ?? lastName,
+                provider: .apple
             )
         }
 
@@ -109,13 +119,13 @@ final class AuthenticationService: NSObject {
 
         // Persist user data
         if let userData = try? JSONEncoder().encode(user) {
-            saveToKeychain(service: keychainServiceUser, account: "appleUser", data: userData)
+            saveToKeychain(service: keychainServiceUser, account: "authUser", data: userData)
         }
 
         // Exchange token with backend to get session JWT
         if let code = authorizationCode {
             do {
-                try await exchangeTokenWithBackend(
+                try await exchangeAppleTokenWithBackend(
                     identityToken: identityToken,
                     authorizationCode: code,
                     user: user
@@ -130,12 +140,101 @@ final class AuthenticationService: NSObject {
         onAuthChanged?(sessionToken)
     }
 
+    // MARK: - Google Sign-In
+
+    /// Start Google OAuth flow via ASWebAuthenticationSession.
+    /// Cancellation (user dismisses browser) is silently ignored.
+    /// Other errors are stored in ``authError``.
+    func signInWithGoogle() async {
+        isLoading = true
+        authError = nil
+
+        defer {
+            isLoading = false
+            authSession = nil
+        }
+
+        guard var components = URLComponents(string: "\(authURL)/auth/login/google") else {
+            authError = AuthError.invalidURL.localizedDescription
+            return
+        }
+        components.queryItems = [
+            URLQueryItem(name: "platform", value: "ios"),
+            URLQueryItem(name: "scheme", value: callbackScheme)
+        ]
+
+        guard let loginURL = components.url else {
+            authError = AuthError.invalidURL.localizedDescription
+            return
+        }
+
+        logger.info("Starting Google OAuth flow")
+
+        let callbackURL: URL
+        do {
+            callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                let session = ASWebAuthenticationSession(
+                    url: loginURL,
+                    callback: .customScheme(callbackScheme)
+                ) { url, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let url {
+                        continuation.resume(returning: url)
+                    } else {
+                        continuation.resume(throwing: AuthError.missingToken)
+                    }
+                }
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                self.authSession = session
+                session.start()
+            }
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            // User cancelled the browser — not an error
+            return
+        } catch {
+            authError = error.localizedDescription
+            return
+        }
+
+        guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+              let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
+              !token.isEmpty else {
+            logger.error("No token in callback URL: \(callbackURL)")
+            authError = AuthError.missingToken.localizedDescription
+            return
+        }
+
+        do {
+            // Fetch user info before persisting anything — if this fails,
+            // we don't leave an orphaned token in Keychain
+            let user = try await fetchUserInfo(token: token)
+
+            // Persist token and user together
+            saveToKeychain(service: keychainServiceToken, account: "sessionToken", data: Data(token.utf8))
+            if let userData = try? JSONEncoder().encode(user) {
+                saveToKeychain(service: keychainServiceUser, account: "authUser", data: userData)
+            }
+            logger.info("Google OAuth: signed in successfully")
+
+            currentUser = user
+            isAuthenticated = true
+            onAuthChanged?(sessionToken)
+        } catch {
+            logger.error("Google OAuth failed: \(error.localizedDescription)")
+            authError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Sign Out
+
     /// Sign out and clear stored credentials
     func signOut() {
         logger.info("Signing out user")
 
         deleteFromKeychain(service: keychainServiceToken, account: "sessionToken")
-        deleteFromKeychain(service: keychainServiceUser, account: "appleUser")
+        deleteFromKeychain(service: keychainServiceUser, account: "authUser")
 
         currentUser = nil
         isAuthenticated = false
@@ -145,13 +244,15 @@ final class AuthenticationService: NSObject {
         Task { await notifyBackendSignOut() }
     }
 
+    // MARK: - Credential Validation
+
     /// Check if user's Apple ID credentials are still valid
     func checkCredentialState() async {
-        guard let userId = currentUser?.userId else { return }
+        guard let user = currentUser, user.provider == .apple else { return }
 
         let provider = ASAuthorizationAppleIDProvider()
         do {
-            let state = try await provider.credentialState(forUserID: userId)
+            let state = try await provider.credentialState(forUserID: user.userId)
             switch state {
             case .authorized:
                 logger.debug("Apple ID credential is valid")
@@ -171,25 +272,84 @@ final class AuthenticationService: NSObject {
     // MARK: - Private Methods
 
     private func checkExistingSession() async {
-        if let userData = loadFromKeychain(service: keychainServiceUser, account: "appleUser"),
-           let user = try? JSONDecoder().decode(AppleUser.self, from: userData) {
-            self.currentUser = user
-            self.isAuthenticated = true
-            logger.info("Restored existing session")
+        var userData = loadFromKeychain(service: keychainServiceUser, account: "authUser")
 
-            // Notify so BriefingService gets the token
-            onAuthChanged?(sessionToken)
+        // Migrate from legacy "appleUser" key (no provider field) if needed
+        if userData == nil,
+           let legacyData = loadFromKeychain(service: keychainServiceUser, account: "appleUser"),
+           let legacy = try? JSONDecoder().decode(LegacyAppleUser.self, from: legacyData) {
+            let converted = AuthUser(userId: legacy.userId, email: legacy.email,
+                                     firstName: legacy.firstName, lastName: legacy.lastName, provider: .apple)
+            if let reencoded = try? JSONEncoder().encode(converted) {
+                userData = reencoded
+                saveToKeychain(service: keychainServiceUser, account: "authUser", data: reencoded)
+            }
+            deleteFromKeychain(service: keychainServiceUser, account: "appleUser")
+            logger.info("Migrated legacy Apple session to new format")
+        }
 
+        guard let userData,
+              let user = try? JSONDecoder().decode(AuthUser.self, from: userData) else {
+            return
+        }
+
+        self.currentUser = user
+        self.isAuthenticated = true
+        logger.info("Restored existing session (\(user.provider.rawValue))")
+
+        // Notify so BriefingService gets the token
+        onAuthChanged?(sessionToken)
+
+        if user.provider == .apple {
             await checkCredentialState()
+        } else if user.provider == .google, let token = sessionToken {
+            // Validate Google token is still valid
+            do {
+                _ = try await fetchUserInfo(token: token, provider: .google)
+                logger.debug("Google session token is valid")
+            } catch {
+                logger.warning("Google session token expired, signing out")
+                signOut()
+            }
         }
     }
 
-    private func exchangeTokenWithBackend(
+    /// Fetch user info from /auth/me using a JWT token
+    private func fetchUserInfo(token: String, provider: AuthProvider = .google) async throws -> AuthUser {
+        guard let url = URL(string: "\(authURL)/auth/me") else {
+            throw AuthError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw AuthError.invalidResponse
+        }
+
+        let meResponse = try JSONDecoder().decode(AuthMeResponse.self, from: data)
+
+        guard !meResponse.id.isEmpty else {
+            throw AuthError.invalidResponse
+        }
+
+        // Split name into first/last
+        let nameParts = meResponse.name?.split(separator: " ", maxSplits: 1)
+        let firstName = nameParts?.first.map(String.init)
+        let lastName = nameParts.flatMap { $0.count > 1 ? String($0[1]) : nil }
+
+        return AuthUser(userId: meResponse.id, email: meResponse.email, firstName: firstName, lastName: lastName, provider: provider)
+    }
+
+    private func exchangeAppleTokenWithBackend(
         identityToken: String,
         authorizationCode: String,
-        user: AppleUser
+        user: AuthUser
     ) async throws {
-        guard let url = URL(string: "\(backendURL)/auth/apple/token") else {
+        guard let url = URL(string: "\(authURL)/auth/apple/token") else {
             throw AuthError.invalidURL
         }
 
@@ -230,7 +390,7 @@ final class AuthenticationService: NSObject {
     }
 
     private func notifyBackendSignOut() async {
-        guard let url = URL(string: "\(backendURL)/auth/logout") else { return }
+        guard let url = URL(string: "\(authURL)/auth/logout") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -285,14 +445,35 @@ final class AuthenticationService: NSObject {
     }
 }
 
+// MARK: - ASWebAuthenticationPresentationContextProviding
+
+extension AuthenticationService: ASWebAuthenticationPresentationContextProviding {
+    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        MainActor.assumeIsolated {
+            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = scene.windows.first(where: \.isKeyWindow) else {
+                return ASPresentationAnchor()
+            }
+            return window
+        }
+    }
+}
+
 // MARK: - Supporting Types
 
-/// User data from Apple Sign-In
-struct AppleUser: Codable, Equatable {
+/// Authentication provider
+enum AuthProvider: String, Codable {
+    case apple
+    case google
+}
+
+/// User data from authentication (Apple or Google)
+struct AuthUser: Codable, Equatable {
     let userId: String
     let email: String?
     let firstName: String?
     let lastName: String?
+    let provider: AuthProvider
 
     var displayName: String {
         if let first = firstName, let last = lastName {
@@ -302,9 +483,31 @@ struct AppleUser: Codable, Equatable {
         } else if let email = email {
             return email
         } else {
-            return "Apple User"
+            return provider == .apple ? "Apple User" : "Google User"
         }
     }
+
+    var providerIcon: String {
+        switch provider {
+        case .apple: return "apple.logo"
+        case .google: return "g.circle.fill"
+        }
+    }
+}
+
+/// Legacy Keychain format (pre-Google OAuth, no provider field)
+private struct LegacyAppleUser: Decodable {
+    let userId: String
+    let email: String?
+    let firstName: String?
+    let lastName: String?
+}
+
+/// Response from /auth/me endpoint
+private struct AuthMeResponse: Decodable {
+    let id: String
+    let email: String?
+    let name: String?
 }
 
 /// Authentication errors
@@ -319,7 +522,7 @@ enum AuthError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidCredential:
-            return "Invalid Apple credential"
+            return "Invalid credential"
         case .missingToken:
             return "Missing identity token"
         case .invalidURL:

@@ -66,7 +66,7 @@ final class AppState {
     /// Airport database for coordinate lookups
     let knownAirports: KnownAirports?
 
-    /// Authentication service (Apple Sign-In)
+    /// Authentication service (Apple Sign-In + Google OAuth)
     let auth: AuthenticationService
 
     // MARK: - Pending Import State
