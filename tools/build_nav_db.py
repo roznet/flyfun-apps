@@ -11,7 +11,11 @@ with the rest of the toolchain.
 
 Airport filters:
 - Types: small_airport, medium_airport, large_airport
-- ICAO ident: exactly 4 characters
+- Stored under the current ICAO code: icao_code, then gps_code, then a
+  4-character ident (euro_aip.utils.assign_airport_codes). OurAirports'
+  ident is a placeholder for some aerodromes (Enstone is GB-0007, ICAO
+  EGTN) and a superseded code for others (Logroño LELO, now LERJ); a
+  superseded ident is kept as alt_ident so it still resolves.
 - Has coordinates
 - Continents: configurable (default: EU + NA)
 
@@ -67,7 +71,7 @@ from euro_aip.sources.ourairports_navaids import OurAirportsNavaidSource
 from euro_aip.sources.faa_nasr_fix import FAANasrFixSource
 from euro_aip.sources.eurocontrol_sdo import EurocontrolSDOSource
 from euro_aip.sources.vatspy_fir import VatspyFirSource
-from euro_aip.utils import MilitaryClassifier
+from euro_aip.utils import MilitaryClassifier, assign_airport_codes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -112,16 +116,18 @@ def build_model(airports_df: pd.DataFrame, runways_df: pd.DataFrame) -> EuroAipM
     target_idents = set(airports_df['ident'])
     runways_df = runways_df[runways_df['airport_ident'].isin(target_idents)]
 
-    # Join airports with runways
+    # Join airports with runways. Runways key on the OurAirports ident;
+    # everything is stored under the assigned `code`.
     merged = airports_df.merge(
         runways_df, left_on='ident', right_on='airport_ident', how='left'
     )
 
     airports_to_add = []
-    for icao, group in merged.groupby('ident'):
+    for icao, group in merged.groupby('code'):
         row = group.iloc[0]
         airport = Airport(
             ident=icao,
+            alt_ident=safe_get(row, 'alt_ident'),
             name=safe_get(row, 'name'),
             type=safe_get(row, 'type'),
             latitude_deg=safe_get(row, 'latitude_deg'),
@@ -265,14 +271,24 @@ def main():
     # Apply GA filters
     airports_df = airports_df[
         airports_df['type'].isin(GA_TYPES)
-        & (airports_df['ident'].str.len() == 4)
         & airports_df['latitude_deg'].notna()
         & airports_df['longitude_deg'].notna()
         & airports_df['continent'].isin(continents)
     ]
 
+    # Pick each airport's code (current ICAO code, previous ident as alias);
+    # rows with no usable code are dropped and code collisions logged
+    before = len(airports_df)
+    airports_df = assign_airport_codes(airports_df)
+    logger.info(
+        f"Assigned codes: {len(airports_df)} of {before} airports; "
+        f"{(airports_df['code'] != airports_df['ident']).sum()} stored under a code "
+        f"other than their OurAirports ident, {airports_df['alt_ident'].notna().sum()} "
+        f"keep a previous ident"
+    )
+
     # US: only keep K-prefix airports (public), drop FAA LIDs like 00AA (private strips)
-    us_private = (airports_df['iso_country'] == 'US') & ~airports_df['ident'].str.startswith('K')
+    us_private = (airports_df['iso_country'] == 'US') & ~airports_df['code'].str.startswith('K')
     logger.info(f"Dropping {us_private.sum()} US non-K-prefix airports (private strips)")
     airports_df = airports_df[~us_private]
 
@@ -355,9 +371,15 @@ def main():
         copied = 0
         skipped = 0
         for src_airport in aip_model.airports.with_procedures().all():
-            nav_airport = model.airports.get(src_airport.ident)
+            nav_airport = model.find_airport_by_code(src_airport.ident)
             if nav_airport is None:
                 skipped += 1
+                continue
+            # Matched only by its previous code: if the AIP database also
+            # holds the airport under its current code, that record's
+            # procedures are the ones to copy, so don't double them up.
+            if (nav_airport.ident != src_airport.ident
+                    and aip_model.airports.get(nav_airport.ident) is not None):
                 continue
             for procedure in src_airport.procedures:
                 nav_airport.add_procedure(procedure)
@@ -374,7 +396,9 @@ def main():
         bc_copied = 0
         for entry in aip_model.get_all_border_crossing_points():
             icao = entry.icao_code or entry.matched_airport_icao
-            if icao and model.airports.get(icao) is not None:
+            # add_border_crossing_entry files an entry listed under an
+            # airport's previous code (LELO) under its current one (LERJ)
+            if icao and model.find_airport_by_code(icao) is not None:
                 model.add_border_crossing_entry(entry)
                 bc_copied += 1
         model.update_all_derived_fields()
