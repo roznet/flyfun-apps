@@ -268,6 +268,20 @@ def main():
         logger.info(f"Fixing {misclassified.sum()} L-prefix airports miscoded as AF → EU")
         airports_df.loc[misclassified, 'continent'] = 'EU'
 
+    # Same class of error at the eastern edge of the ICAO "L" region: Cyprus
+    # (LC), Turkey (LT) and Israel (LL) are in European airspace and reachable
+    # on a European GA flight, but OurAirports codes them as AS, so an EU build
+    # drops them entirely. Matched by country and not by ident prefix: plenty of
+    # Asian local codes also begin with L (LA-0005 in Laos, LFQ in China) and
+    # those are genuinely not European.
+    L_REGION_CODED_AS_ASIA = ['CY', 'TR', 'IL']
+    misregioned = (airports_df['iso_country'].isin(L_REGION_CODED_AS_ASIA)
+                   & (airports_df['continent'] == 'AS'))
+    if misregioned.sum() > 0:
+        logger.info(f"Fixing {misregioned.sum()} ICAO L-region airports miscoded as AS → EU "
+                    f"({', '.join(L_REGION_CODED_AS_ASIA)})")
+        airports_df.loc[misregioned, 'continent'] = 'EU'
+
     # Apply GA filters
     airports_df = airports_df[
         airports_df['type'].isin(GA_TYPES)
