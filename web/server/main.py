@@ -34,6 +34,13 @@ import time
 from flyfun_common.auth import create_auth_router, get_jwt_secret, is_dev_mode
 from flyfun_common.db import init_shared_db, ensure_dev_user, get_engine, SessionLocal
 from flyfun_common.db import current_user_id, get_db, UserRow
+try:
+    from flyfun_common.db import find_request_scoped_db
+except ImportError as e:  # flyfun-common < 0.6.12: a stale base image
+    raise ImportError(
+        "flyfun-common >= 0.6.12 required: rebuild the base image "
+        "(docker compose build --no-cache base)"
+    ) from e
 
 from euro_aip.models.euro_aip_model import EuroAipModel
 
@@ -146,6 +153,18 @@ async def lifespan(app: FastAPI):
     
     # Startup
     logger.info("Starting up Euro AIP Airport Explorer...")
+
+    # flyfun-common is installed in the base image (Dockerfile.base), so a
+    # service-only rebuild can run this code against an older library. Its
+    # get_db scope must match ours (flyfun-common >= 0.6.12), or a request
+    # opens two sessions that can lock each other: refuse to start instead.
+    # On a library older than 0.6.12 the import at the top already fails.
+    request_scoped = find_request_scoped_db(app)
+    if request_scoped:
+        raise RuntimeError(
+            "get_db resolved at request scope on " + ", ".join(request_scoped)
+            + ": rebuild the base image (docker compose build --no-cache base)"
+        )
 
     # Initialize shared auth DB (users, api_tokens, chat_usage tables)
     import db.models  # noqa: F401 – register ChatUsageRow on Base.metadata
