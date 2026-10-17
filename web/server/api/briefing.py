@@ -514,7 +514,7 @@ async def fetch_route_notams(
     arrival_time: Optional[str] = Query(None, description="Arrival time (ISO8601)"),
     corridor_nm: float = Query(25.0, description="Route corridor width in NM for near-route airports"),
     user_id: str = Depends(current_user_id),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     """
     Fetch live NOTAMs for a flight route from the Autorouter API.

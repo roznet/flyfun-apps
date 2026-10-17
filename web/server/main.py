@@ -319,7 +319,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Custom /auth/me registered BEFORE common router so it takes priority,
 # returning app-specific fields (chat usage).
 @app.get("/auth/me", tags=["auth"])
-def auth_me(user_id: str = Depends(current_user_id), db=Depends(get_db)):
+def auth_me(user_id: str = Depends(current_user_id), db=Depends(get_db, scope="function")):
     """Return current user info with chat usage."""
     user = db.get(UserRow, user_id)
     if not user:
