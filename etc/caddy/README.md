@@ -1,6 +1,6 @@
 # Caddy Configuration
 
-Caddy reverse proxy configuration for FlyFun services. Designed for a shared Caddy server running on the host (not in Docker).
+Caddy reverse proxy configuration for FlyFun services. Designed for a shared Caddy server outside this compose project. In production that's its own Docker container with host networking, so the `localhost` upstreams reach the ports published on the host.
 
 ## Structure
 
@@ -23,17 +23,11 @@ Uses Docker if Caddy CLI isn't installed locally.
 
 ## Deployment
 
-Copy or symlink to your Caddy server's config directory:
+Production doesn't deploy from here. The live site files are in the private `digitalocean` repo, `flyfun.aero/etc/caddy/sites-enabled/`, so copy any change there, commit and push, then on the droplet:
 
 ```bash
-# Symlink (picks up changes automatically)
-ln -s /path/to/etc/caddy/sites-enabled/*.caddy /etc/caddy/sites-enabled/
-
-# Or import in your main Caddyfile
-import /path/to/etc/caddy/sites-enabled/*.caddy
+cd ~/digitalocean && git pull && shared-infra/caddy/reload.sh
 ```
-
-Then reload: `caddy reload`
 
 ## DNS
 
