@@ -20,6 +20,12 @@ t.*
 secrets.*
 !secrets.*.sample
 *.env
+# .env.secrets (sops-managed secrets) and any other .env.* file; samples stay tracked
+.env.*
+!.env.example
+!.env.sample
+!.env.secrets.example
+*.env.secrets
 
 # Python build artifacts (should NOT be checked in)
 dist/

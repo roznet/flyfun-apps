@@ -100,7 +100,7 @@ class GAFriendlinessSettings(BaseSettings):
 
     model_config = {
         "env_prefix": "GA_FRIENDLINESS_",
-        "env_file": ".env",
+        "env_file": (".env", ".env.secrets"),
         "extra": "ignore",
     }
 
