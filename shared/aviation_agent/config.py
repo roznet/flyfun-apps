@@ -154,7 +154,7 @@ class AviationAgentSettings(BaseSettings):
     └─────────────────────────────────────────────────────────────────────────┘
     """
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+    model_config = SettingsConfigDict(env_file=(".env", ".env.secrets"), extra="ignore", populate_by_name=True)
 
     # Master switch
     enabled: bool = Field(

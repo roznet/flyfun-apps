@@ -29,7 +29,9 @@ Store the resolved path as `VENV_PATH`.
 - If `$PROJECT_ROOT/.env` exists, good — nothing to do
 - If it does NOT exist, check if `$PROJECT_ROOT/../main/.env` exists (worktree case)
   - If found, copy it: `cp ../main/.env $PROJECT_ROOT/.env`
-  - Tell the user it was copied
+  - Also copy the secrets file when main has one:
+    `[ -f ../main/.env.secrets ] && cp ../main/.env.secrets $PROJECT_ROOT/.env.secrets && chmod 600 $PROJECT_ROOT/.env.secrets`
+  - Tell the user what was copied. Never open or print `.env.secrets` (API keys).
 - If neither exists, warn the user that the `.env` file is missing and the server will likely fail to start
 
 ## Step 4 — Check for existing tmux session
@@ -75,7 +77,7 @@ Tell the user:
 
 ## Notes
 
-- The `.env` file is loaded automatically by the app (shared.env_loader), no need to source it manually
+- `.env` and then `.env.secrets` are loaded automatically by the app (shared.env_loader), no need to source them manually
 - `uvicorn --reload` watches for Python file changes automatically
 - Vite dev server provides HMR for TypeScript changes
 - The Vite proxy target is configured via `BACKEND_PORT` env var (defaults to 8010 in vite.config.ts)

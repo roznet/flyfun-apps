@@ -22,6 +22,9 @@ services:
     # Variables in .env are automatically loaded into the container
     env_file:
       - .env
+      # secrets split out of .env (sops-managed on the host); optional until prod has it
+      - path: .env.secrets
+        required: false
     # Container-specific overrides (paths must be container paths, not host paths)
     # These hard-coded paths override any host paths from .env
     # Other variables (API keys, etc.) still come from .env via env_file
@@ -38,17 +41,16 @@ services:
       - VECTOR_DB_PATH=/app/out/rules_vector_db
       - LOG_DIR=/app/logs
       - CONVERSATION_LOG_DIR=/app/logs/conversations
-      # Auth (shared with other flyfun services for SSO)
+      # Auth (shared with other flyfun services for SSO). The secrets (JWT_SECRET,
+      # GOOGLE_CLIENT_SECRET, APPLE_PRIVATE_KEY, DATABASE_URL) come from env_file only:
+      # `X=${X}` here would interpolate from .env alone and blank them once they live
+      # in .env.secrets (environment: wins over env_file:).
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      - JWT_SECRET=${JWT_SECRET:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - APPLE_CLIENT_ID=${APPLE_CLIENT_ID:-}
       - APPLE_TEAM_ID=${APPLE_TEAM_ID:-}
       - APPLE_KEY_ID=${APPLE_KEY_ID:-}
-      - APPLE_PRIVATE_KEY=${APPLE_PRIVATE_KEY:-}
       - APPLE_APP_IDS=${APPLE_APP_IDS:-}
-      - DATABASE_URL=${DATABASE_URL:-}
     volumes:
       # Data files (read-only)
       - ${DATA_DIR:-./data}:/app/data:ro
@@ -88,6 +90,9 @@ services:
     # Load environment variables from .env file
     env_file:
       - .env
+      # secrets split out of .env (sops-managed on the host); optional until prod has it
+      - path: .env.secrets
+        required: false
     # Container-specific overrides (paths must be container paths, not host paths)
     # These hard-coded paths override any host paths from .env
     environment:
