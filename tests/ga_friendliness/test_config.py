@@ -142,13 +142,22 @@ class TestDefaultConfigs:
     def test_default_ontology(self):
         """Test default ontology is valid."""
         ontology = get_default_ontology()
-        assert ontology.version == "1.0"
-        assert "cost" in ontology.aspects
-        assert "staff" in ontology.aspects
-        assert "bureaucracy" in ontology.aspects
-        assert "restaurant" in ontology.aspects
-        assert "accommodation" in ontology.aspects
-        assert "overall_experience" in ontology.aspects
+        # Bump deliberately alongside DEFAULT_ONTOLOGY (1.2: 2db7aed)
+        assert ontology.version == "1.2"
+        for aspect in (
+            "cost", "staff", "bureaucracy", "restaurant", "accommodation",
+            "overall_experience",
+            # added in 1.2
+            "infrastructure", "customs",
+        ):
+            assert aspect in ontology.aspects, aspect
+        # 1.2 made location-based labels available for amenities
+        assert "on_site" in ontology.aspects["restaurant"]
+        assert "on_site" in ontology.aspects["accommodation"]
+        # every aspect has a non-empty, duplicate-free label list
+        for aspect, labels in ontology.aspects.items():
+            assert labels, aspect
+            assert len(labels) == len(set(labels)), aspect
 
     def test_default_personas(self):
         """Test default personas are valid."""
