@@ -180,16 +180,23 @@ curl http://localhost:8000/health
 The `euro_aip` package is installed from GitHub into the **base image** (`Dockerfile.base`). Docker caches this layer, so pushing a new version of rzflight to GitHub is **not** automatically picked up — you must force a rebuild of the base image.
 
 ```bash
-# 1. Rebuild the base image (--no-cache forces re-fetching euro_aip from GitHub)
+# 1. Rebuild the base image (--no-cache forces re-fetching euro_aip from GitHub).
+#    Run it on its own and stop if it fails.
 docker compose build --no-cache base
 
-# 2. Rebuild services that depend on the base image
+# 2. Verify the base was really rebuilt from this checkout and satisfies every
+#    requirement (incl. the flyfun-common version the startup guard enforces).
+#    A failed build leaves the OLD flyfun-base:latest in place; services built on
+#    it crash-loop on that guard.
+./verify-base-image.sh
+
+# 3. Rebuild services that depend on the base image
 docker compose build web-server mcp-server
 
-# 3. Restart with new images
-docker compose up -d web-server mcp-server
+# 4. Restart with new images
+docker compose up -d --no-build web-server mcp-server
 
-# 4. Verify the new version is installed
+# 5. Verify the new version is installed
 docker exec flyfun-web-server pip show euro-aip
 docker compose logs web-server --tail=20
 ```
