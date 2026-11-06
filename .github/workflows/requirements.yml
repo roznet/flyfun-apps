@@ -1,0 +1,24 @@
+name: Requirements resolve
+
+# Every pin in requirements.txt must resolve on the base image's FROM, or the
+# base image build (and so the prod deploy) fails. See verify-base-image.sh.
+on:
+  pull_request:
+    paths:
+      - requirements.txt
+      - Dockerfile.base
+      - .github/workflows/requirements.yml
+  push:
+    branches: [main]
+    paths:
+      - requirements.txt
+      - Dockerfile.base
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    container: python:3.13-slim  # keep in sync with Dockerfile.base FROM
+    steps:
+      - uses: actions/checkout@v4
+      - name: pip install --dry-run
+        run: pip install --no-cache-dir --dry-run -r requirements.txt
