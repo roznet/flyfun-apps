@@ -42,6 +42,13 @@ mcp.flyfun.aero {
 		}
 	}
 
+	# Connector/tool-call logo: Google's favicon service (and browsers) fetch
+	# /favicon.ico for this domain. Redirect to the canonical icon served by
+	# weather.flyfun.aero so the logo is hosted in one place.
+	handle /favicon.ico {
+		redir https://weather.flyfun.aero/favicon.ico 302
+	}
+
 	handle {
 		respond "Not Found" 403
 	}
