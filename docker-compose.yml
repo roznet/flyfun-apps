@@ -16,7 +16,7 @@ services:
     image: flyfun-web-server:latest
     container_name: flyfun-web-server
     ports:
-      - "${WEB_PORT:-8000}:8000"
+      - "127.0.0.1:${WEB_PORT:-8000}:8000"
     # Load environment variables from .env file
     # This is more standard, maintainable, and secure than listing all variables explicitly
     # Variables in .env are automatically loaded into the container
@@ -84,9 +84,9 @@ services:
     image: flyfun-mcp-server:latest
     container_name: flyfun-mcp-server
     ports:
-      # Expose port for shared infrastructure Caddy server
+      # Loopback only: the shared Caddy (host networking) proxies to localhost
       # Host port 8002 maps to container port 8000
-      - "${MCP_PORT:-8002}:8000"
+      - "127.0.0.1:${MCP_PORT:-8002}:8000"
     # Load environment variables from .env file
     env_file:
       - .env
